@@ -13,11 +13,13 @@
 
       <form id="settingsForm">
         <section>
-          <h2>Google Sheet</h2>
-          <div class="form-group">
-            <label for="sheetId">Google Sheet ID</label>
-            <p class="hint">Paste from Sheet URL between /d/ and /edit</p>
-            <input type="text" id="sheetId" placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j" />
+          <h2>Google Sheets</h2>
+          <div class="field-group">
+            <div id="sheetNuggets" class="nugget-container">
+              <!-- Dynamically populated -->
+            </div>
+            <p id="noSheetsMsg" class="hint">No sheets added yet.</p>
+            <button type="button" id="addSheetBtn" class="secondary-btn">+ Add Sheet</button>
           </div>
         </section>
 
@@ -84,8 +86,22 @@
         <button type="submit" id="saveBtn">Save Settings</button>
         <p id="saveStatus"></p>
       </form>
-    </div>
 
-    <script src="options.js"></script>
+      <!-- Add Sheet Modal -->
+      <div id="addSheetModal" class="modal" style="display:none;">
+        <div class="modal-card">
+          <h3>Add Google Sheet</h3>
+          <label>Sheet Name</label>
+          <input type="text" id="newSheetName" placeholder="e.g. My Dropshipping Store">
+          <label>Sheet ID</label>
+          <input type="text" id="newSheetId" placeholder="Paste from URL between /d/ and /edit">
+          <div class="modal-actions">
+            <button type="button" id="cancelSheetBtn" class="secondary-btn">Cancel</button>
+            <button type="button" id="saveSheetBtn" class="primary-btn">Save Sheet</button>
+          </div>
+        </div>
+      </div>
+      <div id="modalOverlay" style="display:none;"></div>
+      <script src="options.js"></script>
   </body>
 </html>
