@@ -59,6 +59,7 @@ body.theme-dark #addBtn.btn-error { background: #c0392b; }
 body.theme-dark .footer { background: #0a0a0a; border-top: 1px solid #1e1e1e; }
 body.theme-dark .footer-icon { color: #555; }
 body.theme-dark .footer-icon:hover { color: #ffffff; }
+@keyframes aliswift-spin { to { transform: rotate(360deg); } }
 
 /* LAYOUT */
 .header {
@@ -179,4 +180,58 @@ label {
   transition: color 0.15s;
 }
 
-.footer-icon .material-icons { font-size: 20px; }
+.sheet-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  position: relative;
+}
+.custom-select { flex: 1; position: relative; }
+.selected-sheet {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -32px;
+  right: -22px;
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 999;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.sheet-option {
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sheet-option.active::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4f00;
+  flex-shrink: 0;
+}
+body.theme-dark .sheet-options { background: #1e1e1e; border: 1px solid #2a2a2a; }
+body.theme-dark .sheet-option { color: #ffffff; }
+body.theme-dark .sheet-option:hover { background: #2a2a2a; }
+body.theme-light .sheet-options { background: #ffffff; border: 1px solid #e8e8e8; }
+body.theme-light .sheet-option { color: #1a1a1a; }
+body.theme-light .sheet-option:hover { background: #f5f5f5; }
+body.theme-dark .sheet-selector { border-bottom: 1px solid #1e1e1e; }
+body.theme-light .sheet-selector { border-bottom: 1px solid #f0f0f0; }
+body.theme-dark .selected-sheet { color: #ffffff; }
+body.theme-light .selected-sheet { color: #1a1a1a; }
+body.theme-dark .dropdown-arrow { color: #555; }
+body.theme-light .dropdown-arrow { color: #999; }
