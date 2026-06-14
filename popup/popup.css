@@ -1,0 +1,182 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  width: 360px;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* LIGHT THEME */
+body.theme-light { background: #ffffff; color: #1a1a1a; }
+body.theme-light .header { border-bottom: 1px solid #f0f0f0; }
+body.theme-light .app-title { color: #1a1a1a; }
+body.theme-light label { color: #1a1a1a; }
+body.theme-light .optional { color: #aaa; }
+body.theme-light .input-field {
+  background: #ffffff;
+  border: 1.5px solid #e8e8e8;
+  color: #1a1a1a;
+}
+body.theme-light .input-field:focus { border-color: #ff4f00; outline: none; }
+body.theme-light .input-wrapper { background: #ffffff; border: 1.5px solid #e8e8e8; }
+body.theme-light .input-wrapper:focus-within { border-color: #ff4f00; }
+body.theme-light .prefix { color: #bbb; }
+body.theme-light .link-field { color: #aaa; }
+body.theme-light #addBtn { background: #ff4f00; }
+body.theme-light #addBtn:hover { background: #e04400; }
+body.theme-light #addBtn.btn-success { background: #2ecc71; }
+body.theme-light #addBtn.btn-error { background: #c0392b; }
+body.theme-light .footer { background: #ffffff; border-top: 1px solid #f0f0f0; }
+body.theme-light .footer-icon { color: #999; }
+body.theme-light .footer-icon:hover { color: #1a1a1a; }
+
+/* DARK THEME */
+body.theme-dark { background: #111111; color: #ffffff; }
+body.theme-dark .header { border-bottom: 1px solid #1e1e1e; }
+body.theme-dark .app-title { color: #ffffff; }
+body.theme-dark label { color: #ffffff; }
+body.theme-dark .optional { color: #555; }
+body.theme-dark .input-field {
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  color: #ffffff;
+}
+body.theme-dark .input-field:focus { border-color: #ff7a17; outline: none; }
+body.theme-dark .input-wrapper { background: #1e1e1e; border: 1px solid #2a2a2a; }
+body.theme-dark .input-wrapper:focus-within { border-color: #ff7a17; }
+body.theme-dark .prefix { color: #444; }
+body.theme-dark .link-field { color: #555; }
+body.theme-dark #addBtn { background: #ff7a17; }
+body.theme-dark #addBtn:hover { background: #e06b10; }
+body.theme-dark #addBtn.btn-success { background: #27ae60; }
+body.theme-dark #addBtn.btn-error { background: #c0392b; }
+body.theme-dark .footer { background: #0a0a0a; border-top: 1px solid #1e1e1e; }
+body.theme-dark .footer-icon { color: #555; }
+body.theme-dark .footer-icon:hover { color: #ffffff; }
+
+/* LAYOUT */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.fields {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.input-field {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: 'Inter', sans-serif;
+  border-radius: 10px;
+  border: none;
+  transition: border-color 0.15s;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  padding: 0 12px;
+  transition: border-color 0.15s;
+}
+
+.input-wrapper .input-field {
+  border: none !important;
+  background: transparent !important;
+  padding: 10px 0;
+  flex: 1;
+}
+
+.prefix {
+  font-size: 14px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.link-field {
+  font-size: 13px;
+  cursor: not-allowed;
+}
+
+#addBtn {
+  margin: 4px 16px 12px;
+  padding: 13px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#status {
+  font-size: 12px;
+  text-align: center;
+  min-height: 16px;
+  padding: 0 16px 8px;
+  color: #888;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 8px 16px;
+  margin-top: auto;
+}
+
+.footer-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.footer-icon .material-icons { font-size: 20px; }

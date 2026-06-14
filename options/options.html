@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>AliSwift Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div id="container">
+      <div id="header">
+        <h1>AliSwift Settings</h1>
+      </div>
+
+      <form id="settingsForm">
+        <section>
+          <h2>Google Sheet</h2>
+          <div class="form-group">
+            <label for="sheetId">Google Sheet ID</label>
+            <p class="hint">Paste from Sheet URL between /d/ and /edit</p>
+            <input type="text" id="sheetId" placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j" />
+          </div>
+        </section>
+
+        <section>
+          <h2>Column Mapping</h2>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="keywordsCol">Keywords Column</label>
+              <input type="text" id="keywordsCol" maxlength="1" placeholder="A" />
+            </div>
+            <div class="form-group">
+              <label for="priceCol">Cost Price Column</label>
+              <input type="text" id="priceCol" maxlength="1" placeholder="B" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="salePriceCol">Sale Price Column</label>
+              <input type="text" id="salePriceCol" maxlength="1" placeholder="C" />
+            </div>
+            <div class="form-group">
+              <label for="linkCol">Link Column</label>
+              <input type="text" id="linkCol" maxlength="1" placeholder="D" />
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Behavior</h2>
+          <div class="form-group">
+            <label for="startRow">Start Row (skips header)</label>
+            <input type="number" id="startRow" min="1" placeholder="2" />
+          </div>
+          <div class="form-group checkbox">
+            <input type="checkbox" id="showPageButton" />
+            <label for="showPageButton">Show "Add to Sheet" button on AliExpress pages</label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Pricing Method</h2>
+          <div class="field-group">
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="pricingMethod" value="formula" id="methodFormula">
+                Multiplier formula
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="pricingMethod" value="margin" id="methodMargin">
+                Profit margin %
+              </label>
+            </div>
+            <div id="formulaInput">
+              <input type="text" id="formulaValue" placeholder="e.g. costPrice * 1.7">
+              <p class="hint">Use 'costPrice' as variable. E.g: costPrice * 1.7 or costPrice + 5</p>
+            </div>
+            <div id="marginInput" style="display:none">
+              <input type="number" id="marginPercent" placeholder="e.g. 25">
+              <p class="hint">Sell price = Cost Price × (1 + Margin / 100). E.g: 25 means 125% of cost.</p>
+            </div>
+          </div>
+        </section>
+
+        <button type="submit" id="saveBtn">Save Settings</button>
+        <p id="saveStatus"></p>
+      </form>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
