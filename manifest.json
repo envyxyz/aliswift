@@ -1,0 +1,31 @@
+{
+    "manifest_version": 3,
+    "name": "AliSwift",
+    "version": "1.0",
+    "description": "1-Click dropshipping scraper. Instantly export AliExpress product data, images, and prices directly to your Google Sheets",
+    "permissions": ["storage", "identity", "tabs", "activeTab"],
+    "host_permissions": [
+  "https://www.aliexpress.com/*",
+  "https://sheets.googleapis.com/*"
+],
+"action": {
+  "default_popup": "popup/popup.html",
+  "default_icon": "icons/icon48.png"
+},
+"background": {
+  "service_worker": "background.js"
+},
+"content_scripts": [
+  {
+    "matches": [
+      "https://www.aliexpress.com/item/*",
+      "https://www.aliexpress.com/*/buyNow*"
+    ],
+    "js": ["content.js"]
+  }
+],
+"oauth2": {
+  "client_id": "YOUR_CLIENT_ID_HERE",
+  "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+}
+}
