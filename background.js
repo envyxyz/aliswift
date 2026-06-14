@@ -38,9 +38,9 @@ async function handleAppend(data) {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        values: [[data.title, data.price, data.link]]
-      })
+body: JSON.stringify({
+  values: [[data.title, data.price, data.salePrice, data.link]]
+})
     });
 
     if (!response.ok) throw new Error(`Sheets API error: ${response.status}`);
