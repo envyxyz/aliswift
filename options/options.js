@@ -33,13 +33,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  document.querySelectorAll('input[name="pricingMethod"]').forEach(radio => {
+  document.querySelectorAll('input[name="pricingMethod"]').forEach((radio) => {
     radio.addEventListener("change", togglePricingInputs);
   });
 
   async function renderNuggets() {
-    const storage = await new Promise(r =>
-      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r)
+    const storage = await new Promise((r) =>
+      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r),
     );
 
     sheetNuggets.innerHTML = "";
@@ -47,12 +47,19 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     storage.sheets.forEach((sheet, idx) => {
       const nugget = document.createElement("div");
-      nugget.className = "nugget" + (sheet.id === storage.activeSheetId ? " active" : "");
+      nugget.className =
+        "nugget" + (sheet.id === storage.activeSheetId ? " active" : "");
       nugget.innerHTML = `${sheet.name}<button type="button" class="delete-nugget" data-idx="${idx}">×</button>`;
 
       nugget.addEventListener("click", (e) => {
         if (!e.target.classList.contains("delete-nugget")) {
           chrome.storage.sync.set({ activeSheetId: sheet.id }, renderNuggets);
+          keywordsColInput.value = sheet.keywordsCol || "B";
+          priceColInput.value = sheet.priceCol || "D";
+          salePriceColInput.value = sheet.salePriceCol || "E";
+          linkColInput.value = sheet.linkCol || "C";
+          document.getElementById("sheetTabInput").value =
+            sheet.sheetTab || "Sheet1";
         }
       });
 
@@ -60,11 +67,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         e.stopPropagation();
         storage.sheets.splice(idx, 1);
         if (sheet.id === storage.activeSheetId) {
-          storage.activeSheetId = storage.sheets.length > 0 ? storage.sheets[0].id : "";
+          storage.activeSheetId =
+            storage.sheets.length > 0 ? storage.sheets[0].id : "";
         }
         chrome.storage.sync.set(
           { sheets: storage.sheets, activeSheetId: storage.activeSheetId },
-          renderNuggets
+          renderNuggets,
         );
       });
 
@@ -94,11 +102,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const storage = await new Promise(r =>
-      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r)
+    const storage = await new Promise((r) =>
+      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r),
     );
 
-    storage.sheets.push({ name, id });
+    storage.sheets.push({
+      name,
+      id,
+      sheetTab: document.getElementById("newSheetTab").value.trim() || "Sheet1",
+      keywordsCol: keywordsColInput.value.trim().toUpperCase() || "B",
+      priceCol: priceColInput.value.trim().toUpperCase() || "D",
+      salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
+      linkCol: linkColInput.value.trim().toUpperCase() || "C",
+    });
+
     if (!storage.activeSheetId) {
       storage.activeSheetId = id;
     }
@@ -111,66 +128,85 @@ document.addEventListener("DOMContentLoaded", async () => {
         newSheetName.value = "";
         newSheetId.value = "";
         renderNuggets();
-      }
+      },
     );
   });
 
-  chrome.storage.sync.get({
-    sheets: [],
-    activeSheetId: "",
-    keywordsCol: "A",
-    priceCol: "B",
-    salePriceCol: "C",
-    linkCol: "D",
-    startRow: "2",
-    showPageButton: true,
-    pricingMethod: "formula",
-    formulaValue: "costPrice * 1.7",
-    marginPercent: 25,
-  }, (settings) => {
-    keywordsColInput.value = settings.keywordsCol;
-    priceColInput.value = settings.priceCol;
-    salePriceColInput.value = settings.salePriceCol;
-    linkColInput.value = settings.linkCol;
-    startRowInput.value = settings.startRow;
-    showPageButtonInput.checked = settings.showPageButton;
+  chrome.storage.sync.get(
+    {
+      sheets: [],
+      activeSheetId: "",
+      keywordsCol: "A",
+      priceCol: "B",
+      salePriceCol: "C",
+      linkCol: "D",
+      startRow: "2",
+      showPageButton: true,
+      pricingMethod: "formula",
+      formulaValue: "costPrice * 1.7",
+      marginPercent: 25,
+    },
+    (settings) => {
+      keywordsColInput.value = settings.keywordsCol;
+      priceColInput.value = settings.priceCol;
+      salePriceColInput.value = settings.salePriceCol;
+      linkColInput.value = settings.linkCol;
+      startRowInput.value = settings.startRow;
+      showPageButtonInput.checked = settings.showPageButton;
 
-    const method = settings.pricingMethod || "formula";
-    document.querySelector(`input[name="pricingMethod"][value="${method}"]`).checked = true;
-    formulaValueInput.value = settings.formulaValue || "costPrice * 1.7";
-    marginPercentInput.value = settings.marginPercent || 25;
+      const method = settings.pricingMethod || "formula";
+      document.querySelector(
+        `input[name="pricingMethod"][value="${method}"]`,
+      ).checked = true;
+      formulaValueInput.value = settings.formulaValue || "costPrice * 1.7";
+      marginPercentInput.value = settings.marginPercent || 25;
 
-    document.getElementById("formulaInput").style.display = method === "formula" ? "block" : "none";
-    document.getElementById("marginInput").style.display = method === "margin" ? "block" : "none";
+      document.getElementById("formulaInput").style.display =
+        method === "formula" ? "block" : "none";
+      document.getElementById("marginInput").style.display =
+        method === "margin" ? "block" : "none";
 
-    togglePricingInputs();
-    renderNuggets();
-  });
+      const activeSheet = settings.sheets.find(s => s.id === settings.activeSheetId);
+      if (activeSheet) {
+        keywordsColInput.value = activeSheet.keywordsCol || "B";
+        priceColInput.value = activeSheet.priceCol || "D";
+        salePriceColInput.value = activeSheet.salePriceCol || "E";
+        linkColInput.value = activeSheet.linkCol || "C";
+        document.getElementById("sheetTabInput").value = activeSheet.sheetTab || "Sheet1";
+      }
+
+      togglePricingInputs();
+      renderNuggets();
+    },
+  );
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-
     chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (current) => {
-      const settings = {
-        sheets: current.sheets,
+      const updatedSheets = current.sheets.map(sheet => {
+        if (sheet.id === current.activeSheetId) {
+          return {
+            ...sheet,
+            keywordsCol: keywordsColInput.value.trim().toUpperCase() || "B",
+            priceCol: priceColInput.value.trim().toUpperCase() || "D",
+            salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
+            linkCol: linkColInput.value.trim().toUpperCase() || "C",
+            sheetTab: document.getElementById("sheetTabInput").value.trim() || "Sheet1",
+          };
+        }
+        return sheet;
+      });
+      chrome.storage.sync.set({
+        sheets: updatedSheets,
         activeSheetId: current.activeSheetId,
-        keywordsCol: keywordsColInput.value.trim().toUpperCase() || "A",
-        priceCol: priceColInput.value.trim().toUpperCase() || "B",
-        salePriceCol: salePriceColInput.value.trim().toUpperCase() || "C",
-        linkCol: linkColInput.value.trim().toUpperCase() || "D",
-        startRow: startRowInput.value.trim() || "2",
         showPageButton: showPageButtonInput.checked,
         pricingMethod: document.querySelector('input[name="pricingMethod"]:checked').value || "formula",
         formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
         marginPercent: parseInt(marginPercentInput.value) || 25,
-      };
-
-      chrome.storage.sync.set(settings, () => {
+      }, () => {
         saveStatus.textContent = "✓ Settings saved";
         saveStatus.style.color = "#2e7d32";
-        setTimeout(() => {
-          saveStatus.textContent = "";
-        }, 2000);
+        setTimeout(() => { saveStatus.textContent = ""; }, 2000);
       });
     });
   });
