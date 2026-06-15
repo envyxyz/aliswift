@@ -108,6 +108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     modalOverlay.style.display = "none";
     newSheetName.value = "";
     newSheetId.value = "";
+    document.getElementById("newSheetTab").value = "";
   });
 
   saveSheetBtn.addEventListener("click", async () => {
@@ -154,6 +155,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         modalOverlay.style.display = "none";
         newSheetName.value = "";
         newSheetId.value = "";
+        document.getElementById("newSheetTab").value = "";
         renderNuggets();
       },
     );
