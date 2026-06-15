@@ -28,37 +28,42 @@ async function handleAppend(data) {
       priceCol: "B",
       salePriceCol: "C",
       linkCol: "D",
-      startRow: "2"
+      startRow: "2",
     });
 
     const sheetId = settings.activeSheetId;
-    if (!sheetId) throw new Error("No sheet configured. Please add a sheet in settings.");
+    if (!sheetId)
+      throw new Error("No sheet configured. Please add a sheet in settings.");
 
     const colMap = {
       [settings.keywordsCol]: data.title,
       [settings.priceCol]: data.price,
       [settings.salePriceCol]: data.salePrice,
-      [settings.linkCol]: data.link
+      [settings.linkCol]: data.link,
     };
 
     const sortedCols = Object.keys(colMap).sort();
-    const values = [sortedCols.map(col => colMap[col])];
-    const range = `Sheet1!${sortedCols[0]}${settings.startRow}`;
-
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
-
+    const values = [sortedCols.map((col) => colMap[col])];
+    const sheetTab = "Inventory";
+    const findRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetTab}!A:A`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const findData = await findRes.json();
+    const nextRow = (findData.values?.length ?? 1) + 1;
+    const range = `${sheetTab}!${sortedCols[0]}${nextRow}:${sortedCols[sortedCols.length - 1]}${nextRow}`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`;
     const response = await fetch(url, {
-      method: "POST",
+      method: "PUT",
       headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ values })
+      body: JSON.stringify({ values }),
     });
 
     if (!response.ok) throw new Error(`Sheets API error: ${response.status}`);
     return { success: true };
-
   } catch (error) {
     return { success: false, error: error.message };
   }
