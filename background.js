@@ -6,17 +6,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function getAuthToken() {
+  const clientId =
+    "969152943077-1qkbqj3sdfoehcuqog2bns9mt5a24l0q.apps.googleusercontent.com";
+  const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
+  const scope = "https://www.googleapis.com/auth/spreadsheets";
+  const authUrl = `https://accounts.google.com/o/oauth2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+
   return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(token);
-      }
-    });
+    chrome.identity.launchWebAuthFlow(
+      { url: authUrl, interactive: true },
+      (redirectUrl) => {
+        if (chrome.runtime.lastError || !redirectUrl) {
+          reject(chrome.runtime.lastError || new Error("Auth failed"));
+          return;
+        }
+        const match = redirectUrl.match(/access_token=([^&]+)/);
+        if (match) {
+          resolve(match[1]);
+        } else {
+          reject(new Error("No token in redirect"));
+        }
+      },
+    );
   });
 }
-
 async function handleAppend(data) {
   try {
     const token = await getAuthToken();
