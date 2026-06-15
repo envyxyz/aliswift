@@ -13,7 +13,7 @@ function safeCalc(formula, costPrice) {
     if (op === "+") nums.push(a + b);
     if (op === "-") nums.push(a - b);
     if (op === "*") nums.push(a * b);
-    if (op === "/") nums.push(a / b);
+    if (op === "/") nums.push(b !== 0 ? a / b : 0); // FIX: guard divide-by-zero
   };
   for (const t of tokens) {
     if (!isNaN(t)) {
@@ -129,77 +129,83 @@ function injectButton() {
       '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:aliswift-spin 0.7s linear infinite;margin-right:6px;vertical-align:middle;"></span>Adding...';
     btn.disabled = true;
 
-    chrome.storage.sync.get(
-      {
-        pricingMethod: "formula",
-        formulaValue: "costPrice * 1.7",
-        marginPercent: 25,
-        titleLength: 8,
-        excludeKeywords: "",
-        includeSalePrice: true,
-        roundToNinetyNine: false,
-        extraCost: 0,
-      },
-      (settings) => {
-        const data = scrapeProduct(
-          settings.titleLength,
-          settings.excludeKeywords,
-        );
-        const rawPrice = parseFloat(data.price.replace(/[^0-9.]/g, ""));
-        const shippingCost = data.shipping || 0;
-        const extraCost = parseFloat(settings.extraCost) || 0;
-        const totalCost = !isNaN(rawPrice)
-          ? rawPrice + shippingCost + extraCost
-          : rawPrice;
-        data.price = !isNaN(totalCost) ? totalCost.toFixed(2) : data.price;
+    // FIX: read behavior settings from the active sheet object, not from
+    // top-level global storage keys, so each profile's settings are respected.
+    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (storage) => {
+      const activeSheet = storage.sheets.find(
+        (s) => s.id === storage.activeSheetId,
+      );
 
-        if (!isNaN(totalCost) && totalCost > 0) {
-          if (settings.includeSalePrice !== false) {
-            let salePrice = 0;
-            if (settings.pricingMethod === "margin") {
-              salePrice = totalCost * (1 + settings.marginPercent / 100);
-            } else {
-              try {
-                salePrice = safeCalc(settings.formulaValue, totalCost) ?? 0;
-              } catch (e) {
-                salePrice = 0;
-              }
-            }
-            if (settings.roundToNinetyNine && salePrice > 0) {
-              salePrice = Math.floor(salePrice) + 0.99;
-            }
-            data.salePrice = salePrice > 0 ? salePrice.toFixed(2) : "";
+      // Merge active-sheet settings over safe defaults.
+      const settings = Object.assign(
+        {
+          pricingMethod: "formula",
+          formulaValue: "costPrice * 1.7",
+          marginPercent: 25,
+          titleLength: 8,
+          excludeKeywords: "",
+          includeSalePrice: true,
+          roundToNinetyNine: false,
+          extraCost: 0,
+        },
+        activeSheet || {},
+      );
+
+      const data = scrapeProduct(settings.titleLength, settings.excludeKeywords);
+      const rawPrice = parseFloat(data.price.replace(/[^0-9.]/g, ""));
+      const shippingCost = data.shipping || 0;
+      const extraCost = parseFloat(settings.extraCost) || 0;
+      const totalCost = !isNaN(rawPrice)
+        ? rawPrice + shippingCost + extraCost
+        : rawPrice;
+      data.price = !isNaN(totalCost) ? totalCost.toFixed(2) : data.price;
+
+      if (!isNaN(totalCost) && totalCost > 0) {
+        if (settings.includeSalePrice !== false) {
+          let salePrice = 0;
+          if (settings.pricingMethod === "margin") {
+            salePrice = totalCost * (1 + settings.marginPercent / 100);
           } else {
-            data.salePrice = "";
-          }
-        }
-
-        chrome.runtime.sendMessage(
-          { action: "appendToSheet", data },
-          (result) => {
-            if (result?.success) {
-              btn.style.background = "#27ae60";
-              btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Added!`;
-            } else {
-              btn.style.background = "#c0392b";
-              btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>Error`;
+            try {
+              salePrice = safeCalc(settings.formulaValue, totalCost) ?? 0;
+            } catch (e) {
+              salePrice = 0;
             }
-            setTimeout(() => {
-              btn.textContent = "Add to Sheet";
-              btn.style.background = "#1db058";
-              btn.disabled = false;
-            }, 2000);
-          },
-        );
-      },
-    );
+          }
+          if (settings.roundToNinetyNine && salePrice > 0) {
+            salePrice = Math.floor(salePrice) + 0.99;
+          }
+          data.salePrice = salePrice > 0 ? salePrice.toFixed(2) : "";
+        } else {
+          data.salePrice = "";
+        }
+      }
+
+      chrome.runtime.sendMessage(
+        { action: "appendToSheet", data },
+        (result) => {
+          if (result?.success) {
+            btn.style.background = "#27ae60";
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Added!`;
+          } else {
+            btn.style.background = "#c0392b";
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>Error`;
+          }
+          setTimeout(() => {
+            btn.textContent = "Add to Sheet";
+            btn.style.background = "#1db058";
+            btn.disabled = false;
+          }, 2000);
+        },
+      );
+    });
   });
 
   wrapper.insertBefore(btn, wrapper.firstChild);
   return true;
 }
 
-// Retry every 500ms for up to 10 seconds
+// Retry every 500ms for up to 10 seconds.
 let attempts = 0;
 const interval = setInterval(() => {
   attempts++;
@@ -208,8 +214,14 @@ const interval = setInterval(() => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "scrape") {
-    chrome.storage.sync.get({ titleLength: 8, excludeKeywords: "" }, (s) => {
-      sendResponse(scrapeProduct(s.titleLength, s.excludeKeywords));
+    // FIX: also read titleLength/excludeKeywords from the active sheet here.
+    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (storage) => {
+      const activeSheet = storage.sheets.find(
+        (s) => s.id === storage.activeSheetId,
+      );
+      const titleLength = activeSheet?.titleLength || 8;
+      const excludeKeywords = activeSheet?.excludeKeywords || "";
+      sendResponse(scrapeProduct(titleLength, excludeKeywords));
     });
     return true;
   }

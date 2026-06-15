@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AliSwift Settings</title>
   <link rel="stylesheet" href="options.css" />
 </head>
@@ -17,127 +18,127 @@
       <section>
         <h2>Google Sheets</h2>
         <div class="field-group">
-          <div id="sheetNuggets" class="nugget-container">
-            <!-- Dynamically populated -->
-          </div>
+          <div id="sheetNuggets" class="nugget-container"></div>
           <p id="noSheetsMsg" class="hint">No sheets added yet.</p>
           <button type="button" id="addSheetBtn" class="secondary-btn">+ Add Sheet</button>
         </div>
       </section>
 
       <section>
-  <h2>Column Mapping</h2>
-  <div class="form-row">
-    <div class="form-group">
-      <label for="keywordsCol">Keywords Column</label>
-      <input type="text" id="keywordsCol" maxlength="1" placeholder="A" />
+        <h2>Column Mapping</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="keywordsCol">Keywords Column</label>
+            <input type="text" id="keywordsCol" maxlength="1" placeholder="B" />
+          </div>
+          <div class="form-group">
+            <label for="priceCol">Cost Price Column</label>
+            <input type="text" id="priceCol" maxlength="1" placeholder="D" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="salePriceCol">Sale Price Column</label>
+            <input type="text" id="salePriceCol" maxlength="1" placeholder="E" />
+          </div>
+          <div class="form-group">
+            <label for="linkCol">Link Column</label>
+            <input type="text" id="linkCol" maxlength="1" placeholder="C" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sheetTabInput">Sheet Tab Name</label>
+            <input type="text" id="sheetTabInput" placeholder="e.g. Inventory" />
+          </div>
+          <div class="form-group">
+            <label for="startRow">Start Row (skips header)</label>
+            <input type="number" id="startRow" min="1" placeholder="2" />
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Behavior</h2>
+        <div class="form-group checkbox">
+          <input type="checkbox" id="showPageButton" />
+          <label for="showPageButton">Show "Add to Sheet" button on AliExpress pages</label>
+        </div>
+        <div class="form-group checkbox">
+          <input type="checkbox" id="includeSalePrice" />
+          <label for="includeSalePrice">Include Sell Price in sheet</label>
+        </div>
+        <div class="form-group checkbox">
+          <input type="checkbox" id="roundToNinetyNine" />
+          <label for="roundToNinetyNine">Round sell price to .99 (e.g. $4.77 → $4.99)</label>
+        </div>
+      </section>
+
+      <section>
+        <h2>Title Settings</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="titleLength">Max Title Words</label>
+            <input type="number" id="titleLength" min="1" max="20" placeholder="8" />
+          </div>
+          <div class="form-group">
+            <label for="extraCost">Extra Cost per Product (USD)</label>
+            <input type="number" id="extraCost" min="0" step="0.01" placeholder="e.g. 2.00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="excludeKeywords">Exclude Keywords from Title (comma separated)</label>
+          <input type="text" id="excludeKeywords" placeholder="e.g. wholesale, lot, vintage, gothic" />
+        </div>
+      </section>
+
+      <section>
+        <h2>Pricing Method</h2>
+        <div class="field-group">
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="pricingMethod" value="formula" id="methodFormula">
+              Multiplier formula
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="pricingMethod" value="margin" id="methodMargin">
+              Profit margin %
+            </label>
+          </div>
+          <div id="formulaInput">
+            <input type="text" id="formulaValue" placeholder="e.g. costPrice * 1.7">
+            <p class="hint">Use 'costPrice' as variable. E.g: costPrice * 1.7 or costPrice + 5</p>
+          </div>
+          <div id="marginInput" style="display:none">
+            <input type="number" id="marginPercent" placeholder="e.g. 25">
+            <p class="hint">Sell price = Cost Price × (1 + Margin / 100). E.g: 25 means 125% of cost.</p>
+          </div>
+        </div>
+      </section>
+
+      <button type="submit" id="saveBtn">Save Settings</button>
+      <p id="saveStatus"></p>
+    </form>
+
+    <!-- Add Sheet Modal -->
+    <div id="addSheetModal" class="modal" style="display:none;">
+      <div class="modal-card">
+        <h3>Add Google Sheet</h3>
+        <label>Sheet Name</label>
+        <input type="text" id="newSheetName" placeholder="e.g. My Dropshipping Store">
+        <label>Sheet ID</label>
+        <input type="text" id="newSheetId" placeholder="Paste from URL between /d/ and /edit">
+        <label>Sheet Tab Name</label>
+        <input type="text" id="newSheetTab" placeholder="e.g. Inventory">
+        <div class="modal-actions">
+          <button type="button" id="cancelSheetBtn" class="secondary-btn">Cancel</button>
+          <button type="button" id="saveSheetBtn" class="primary-btn">Save Sheet</button>
+        </div>
+      </div>
     </div>
-    <div class="form-group">
-      <label for="priceCol">Cost Price Column</label>
-      <input type="text" id="priceCol" maxlength="1" placeholder="B" />
-    </div>
+    <div id="modalOverlay" style="display:none;"></div>
   </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label for="salePriceCol">Sale Price Column</label>
-      <input type="text" id="salePriceCol" maxlength="1" placeholder="C" />
-    </div>
-    <div class="form-group">
-      <label for="linkCol">Link Column</label>
-      <input type="text" id="linkCol" maxlength="1" placeholder="D" />
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label for="sheetTabInput">Sheet Tab Name</label>
-      <input type="text" id="sheetTabInput" placeholder="e.g. Inventory" />
-    </div>
-  </div>
-</section>
 
-  <section>
-    <h2>Behavior</h2>
-    <div class="form-group">
-      <label for="startRow">Start Row (skips header)</label>
-      <input type="number" id="startRow" min="1" placeholder="2" />
-    </div>
-    <div class="form-group checkbox">
-      <input type="checkbox" id="showPageButton" />
-      <label for="showPageButton">Show "Add to Sheet" button on AliExpress pages</label>
-    </div>
-    <div class="form-group checkbox">
-      <input type="checkbox" id="includeSalePrice" />
-      <label for="includeSalePrice">Include Sell Price in sheet</label>
-    </div>
-    <div class="form-group checkbox">
-      <input type="checkbox" id="roundToNinetyNine" />
-      <label for="roundToNinetyNine">Round sell price to .99 (e.g. $4.77 → $4.99)</label>
-    </div>
-  </section>
-
-  <section>
-    <h2>Title Settings</h2>
-    <div class="form-row">
-      <div class="form-group">
-        <label for="titleLength">Max Title Words</label>
-        <input type="number" id="titleLength" min="1" max="20" placeholder="8" />
-      </div>
-      <div class="form-group">
-        <label for="extraCost">Extra Cost per Product (USD)</label>
-        <input type="number" id="extraCost" min="0" step="0.01" placeholder="e.g. 2.00" />
-      </div>
-    </div>
-    <div class="form-group">
-      <label for="excludeKeywords">Exclude Keywords from Title (comma separated)</label>
-      <input type="text" id="excludeKeywords" placeholder="e.g. wholesale, lot, pieces" />
-    </div>
-  </section>
-
-  <section>
-    <h2>Pricing Method</h2>
-    <div class="field-group">
-      <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="pricingMethod" value="formula" id="methodFormula">
-          Multiplier formula
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="pricingMethod" value="margin" id="methodMargin">
-          Profit margin %
-        </label>
-      </div>
-      <div id="formulaInput">
-        <input type="text" id="formulaValue" placeholder="e.g. costPrice * 1.7">
-        <p class="hint">Use 'costPrice' as variable. E.g: costPrice * 1.7 or costPrice + 5</p>
-      </div>
-      <div id="marginInput" style="display:none">
-        <input type="number" id="marginPercent" placeholder="e.g. 25">
-        <p class="hint">Sell price = Cost Price × (1 + Margin / 100). E.g: 25 means 125% of cost.</p>
-      </div>
-    </div>
-  </section>
-
-  <button type="submit" id="saveBtn">Save Settings</button>
-  <p id="saveStatus"></p>
-  </form>
-
-  <!-- Add Sheet Modal -->
-  <div id="addSheetModal" class="modal" style="display:none;">
-    <div class="modal-card">
-      <h3>Add Google Sheet</h3>
-      <label>Sheet Name</label>
-      <input type="text" id="newSheetName" placeholder="e.g. My Dropshipping Store">
-      <label>Sheet ID</label>
-      <input type="text" id="newSheetId" placeholder="Paste from URL between /d/ and /edit">
-      <label>Sheet Tab Name</label>
-      <input type="text" id="newSheetTab" placeholder="e.g. Inventory">
-      <div class="modal-actions">
-        <button type="button" id="cancelSheetBtn" class="secondary-btn">Cancel</button>
-        <button type="button" id="saveSheetBtn" class="primary-btn">Save Sheet</button>
-      </div>
-    </div>
-  </div>
-  <div id="modalOverlay" style="display:none;"></div>
   <script src="options.js"></script>
 </body>
 

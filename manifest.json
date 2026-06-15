@@ -4,7 +4,7 @@
   "version": "1.0",
   "key": "***REMOVED: compromised key, rotated in 0.6.0***",
   "description": "1-Click dropshipping scraper. Instantly export AliExpress product data, images, and prices directly to your Google Sheets",
-  "permissions": ["storage", "identity", "tabs", "activeTab"],
+  "permissions": ["storage", "identity", "activeTab"],
   "host_permissions": [
     "https://www.aliexpress.com/*",
     "https://www.aliexpress.us/*",
@@ -41,7 +41,11 @@
   "web_accessible_resources": [
     {
       "resources": ["icons/*"],
-      "matches": ["https://www.aliexpress.com/*"]
+      "matches": [
+        "https://www.aliexpress.com/*",
+        "https://www.aliexpress.us/*",
+        "https://*.aliexpress.com/*"
+      ]
     }
   ],
   "icons": {
