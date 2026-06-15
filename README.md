@@ -2,8 +2,6 @@
 
 ![banner.png](./screenshots/banner.png)
 
-# AliSwift
-
 [![Version](https://img.shields.io/badge/version-0.5.0-ff4f00?style=flat-square)](https://github.com/envyxyz/aliswift/releases)
 [![License](https://img.shields.io/github/license/envyxyz/aliswift?style=flat-square&color=1d1b20)](LICENSE)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/envyxyz/aliswift/releases)
