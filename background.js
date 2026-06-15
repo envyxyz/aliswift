@@ -36,7 +36,8 @@ async function handleAppend(data) {
       priceCol: activeSheet.priceCol || "D",
       salePriceCol: activeSheet.salePriceCol || "E",
       linkCol: activeSheet.linkCol || "C",
-      sheetTab: activeSheet.sheetTab || "Inventory",
+      sheetTab: activeSheet.sheetTab || "Sheet1",
+      startRow: parseInt(activeSheet.startRow) || 2,
     };
     const sheetId = activeSheet.id;
 
@@ -50,27 +51,26 @@ async function handleAppend(data) {
     const sortedCols = Object.keys(colMap).sort();
     const values = [sortedCols.map((col) => colMap[col])];
     const sheetTab = settings.sheetTab;
+
+    // Use keywordsCol (not hardcoded B) to find the next empty row.
+    const scanCol = settings.keywordsCol;
     const findRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetTab}!B:B`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(sheetTab)}!${scanCol}:${scanCol}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
+    if (!findRes.ok) throw new Error(`Sheets API error: ${findRes.status}`);
     const findData = await findRes.json();
     const rows = findData.values || [];
-    let nextRow = 3;
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (rows[i][0] && rows[i][0].toString().trim() !== "") {
+
+    // Start scanning from startRow - 1 (0-indexed) so we never write above the header.
+    let nextRow = settings.startRow;
+    for (let i = rows.length - 1; i >= settings.startRow - 1; i--) {
+      if (rows[i] && rows[i][0] && rows[i][0].toString().trim() !== "") {
         nextRow = i + 2;
         break;
       }
     }
-    console.log(
-      "nextRow:",
-      nextRow,
-      "sortedCols:",
-      sortedCols,
-      "values:",
-      JSON.stringify(values),
-    );
+
     const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`;
     const response = await fetch(batchUrl, {
       method: "POST",

@@ -13,7 +13,7 @@ function safeCalc(formula, costPrice) {
     if (op === "+") nums.push(a + b);
     if (op === "-") nums.push(a - b);
     if (op === "*") nums.push(a * b);
-    if (op === "/") nums.push(a / b);
+    if (op === "/") nums.push(b !== 0 ? a / b : 0);
   };
   for (const t of tokens) {
     if (!isNaN(t)) {
@@ -39,7 +39,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const githubBtn = document.getElementById("githubBtn");
   const settingsBtn = document.getElementById("settingsBtn");
   const profileBtn = document.getElementById("profileBtn");
-  const profileIcon = document.getElementById("profileIcon");
 
   // SHEET SELECTOR
   function renderSheetDropdown(sheets, activeSheetId) {
@@ -143,10 +142,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   profileBtn.addEventListener("click", () => {
     chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-      if (chrome.runtime.lastError) {
-        console.warn("Auth not ready:", chrome.runtime.lastError.message);
-        return;
-      }
+      if (chrome.runtime.lastError) return;
       try {
         const res = await fetch(
           "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
@@ -158,10 +154,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           img.src = user.picture;
           img.style.cssText =
             "width:22px;height:22px;border-radius:50%;object-fit:cover;";
-          profileIcon.replaceWith(img);
+          profileBtn.innerHTML = "";
+          profileBtn.appendChild(img);
         }
       } catch (e) {
-        console.warn("Profile fetch failed:", e);
+        // silently fail — non-critical UI enhancement
       }
     });
   });
@@ -196,30 +193,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   priceEl.value = response.price || "";
   linkEl.value = response.link || "";
 
-  const settings = await new Promise((r) =>
-    chrome.storage.sync.get(
-      {
-        pricingMethod: "formula",
-        formulaValue: "costPrice * 1.7",
-        marginPercent: 25,
-      },
-      r,
-    ),
+  // FIX: read pricing settings from the active sheet object, not global keys.
+  const storageData = await new Promise((r) =>
+    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r),
+  );
+  const activeSheet = storageData.sheets.find(
+    (s) => s.id === storageData.activeSheetId,
+  );
+  const sheetSettings = Object.assign(
+    {
+      pricingMethod: "formula",
+      formulaValue: "costPrice * 1.7",
+      marginPercent: 25,
+      includeSalePrice: true,
+      roundToNinetyNine: false,
+      extraCost: 0,
+    },
+    activeSheet || {},
   );
 
   const rawPrice = (response.price || "").replace(/[^0-9.]/g, "");
   const costPrice = parseFloat(rawPrice);
-  if (!isNaN(costPrice) && costPrice > 0) {
-    if (settings.pricingMethod === "margin") {
-      salePriceEl.value = (
-        costPrice *
-        (1 + Number(settings.marginPercent) / 100)
-      ).toFixed(2);
+  if (!isNaN(costPrice) && costPrice > 0 && sheetSettings.includeSalePrice !== false) {
+    const extraCost = parseFloat(sheetSettings.extraCost) || 0;
+    const totalCost = costPrice + extraCost;
+    let salePrice = 0;
+    if (sheetSettings.pricingMethod === "margin") {
+      salePrice = totalCost * (1 + Number(sheetSettings.marginPercent) / 100);
     } else {
-      const formula = settings.formulaValue || "costPrice * 1.7";
-      const result = safeCalc(formula, costPrice);
-      if (result !== null) salePriceEl.value = result.toFixed(2);
+      const result = safeCalc(sheetSettings.formulaValue || "costPrice * 1.7", totalCost);
+      if (result !== null) salePrice = result;
     }
+    if (sheetSettings.roundToNinetyNine && salePrice > 0) {
+      salePrice = Math.floor(salePrice) + 0.99;
+    }
+    if (salePrice > 0) salePriceEl.value = salePrice.toFixed(2);
   }
 
   // ADD TO SHEET
