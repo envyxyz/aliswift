@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "AliSwift",
   "version": "1.0",
+  "key": "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCvCW7dhJD2qmv7izyKyoAjVWoqk+HHG5IMRkiHWo2E7M3Vkmrus5eefQr/hSq/LOZedeWCW0FYpqTUNR4IwsSgDf9EAZNDf3nwGCq1y/No7nJ9aeXrnp8puz0jpDydFcnbyAGqQ1kQaKqf1mNTSenVu//MH30eYkDToh4ejwEMiTv8SNtxXT78XRG2lD+YPGoE+3DZrVuNuOkVZ6q3Ol3gi8BQpD41jfrUPoga1acCIzyaVQqSlnkW6IVJEllA8NPVwsVzlPFQGQtS+fiZbMirJX31WfOvCO3mMct0RH6lm/iOVTeXV3wntlHJwF21ffSnV5wWnLY/K7zekhmsdGe3AgMBAAECggEARfY8RPhexOkbXiCqI0OLchQK6lfPj7j6aEOTa96K4E2SfEIY0a4g9S0/vyAoFN/KeIkhIjh9ZwS8r0FH7vKCiwLtO+5xQTJrt8bBE4cglJlyU6SHTOVK8vAvINbdj2ANHfbUi4x9xew//sE/VCQf/dk2Bg20Aff9t1l+NnKsVai/XiCKHFB6PbXnykCif9k2btyVpogKksimPwvTIlsVp38GUeeqLzBVbCRkVK0vVdjCem5sR6kE9rdGcoI+0cD/NkkcdEsS/9i4PPYap0/8GDhxevRKhRWeTHkFuDHEiDlNfg/aEUWeVPk54cGuOC3zUURmNCazVPTcws21vNRs6QKBgQDcsMNr4TpLoFYdubZkFLAzxulqvsN16iDm97CX8l/cdMpfAk7Yh+FVZ7tAGEAY3FCxgyTa3UTIG5jI9N3lNE4Al4wUWz6SvkgCU1SGcoTem5fR3kX+IyIZqFL9NhTd8V/ZvxzVcEuWOvj6K3CyJ14WZkOsmTOiLHOFF1UiCJshPQKBgQDLCr9lcxX6A1FH0VqNQgOEJCSRVoB05qwo29DpNod+q0g3z6XvNpjKol9zChCu8fT6zV/y+psR0tH3l/kPehWFDrHhlYNDV9tBuTC+ATwuggIC4QbKXcg+/V3IUYWSq5jlmHgmaOsptpow0gEOuMMFa/REUBq8BeVNhrGP4FdUAwKBgE2OFO75dJoVG45QsEcVeiKH+YlYxqnOgIeKbdXICGYZ6PBgiELR5Z801/obS5MxAW6Qbsg3UC+eex/L5ZrhubO9ji2tLx00n2upyx+AaS8tsLnBCgnYYOhxXdC8S7L/WzbTUZe0YevGh66qy2zgJtFqWMf0AtAwHNydqX5PVezlAoGAGyrf+zIP8bj56jMf+6CmmcrAPdYmL/4hcQIgjOPn81H1wsn8+OoEPbDGNr1VCCOF1P0f5oITt6nOwGNMRv7d3ETgFkAMJTmfM8cUt4ewxsRMgpgbcX5k6dC6+K+3wK1HMwlYokMNnDI7pWakD5U3OwV71JwnR5s+WEY6gfbRmIMCgYA2+jb5wZgoZ0EREnypWkSB/jISgzHDfUaB7BVrLwqnMmL5iwkr+vVhEoPVqZ3UIhGSpwVCcBvkzWuhIAdStxbb8rTS/89/XCaEqnrDJxSH0siV2bP608TEURSriLijHUmw8ZJNj9koVV14YEz+C8HKbIqSDJslzcazWWwDfKEEdQ==",
   "description": "1-Click dropshipping scraper. Instantly export AliExpress product data, images, and prices directly to your Google Sheets",
   "permissions": ["storage", "identity", "tabs", "activeTab"],
   "host_permissions": [
@@ -12,7 +13,10 @@
   ],
   "action": {
     "default_popup": "popup/popup.html",
-    "default_icon": "icons/icon48.png"
+    "default_icon": {
+      "16": "./icons/icon16.png",
+      "32": "./icons/icon32.png"
+    }
   },
   "options_page": "options/options.html",
   "background": {
