@@ -22,6 +22,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const methodMarginRadio = document.getElementById("methodMargin");
   const formulaValueInput = document.getElementById("formulaValue");
   const marginPercentInput = document.getElementById("marginPercent");
+  const titleLengthInput = document.getElementById("titleLength");
+  const excludeKeywordsInput = document.getElementById("excludeKeywords");
+  const includeSalePriceInput = document.getElementById("includeSalePrice");
+  const roundToNinetyNineInput = document.getElementById("roundToNinetyNine");
+  const extraCostInput = document.getElementById("extraCost");
 
   function togglePricingInputs() {
     if (methodFormulaRadio.checked) {
@@ -60,6 +65,18 @@ document.addEventListener("DOMContentLoaded", async () => {
           linkColInput.value = sheet.linkCol || "C";
           document.getElementById("sheetTabInput").value =
             sheet.sheetTab || "Sheet1";
+          titleLengthInput.value = sheet.titleLength || 8;
+          excludeKeywordsInput.value = sheet.excludeKeywords || "";
+          includeSalePriceInput.checked = sheet.includeSalePrice !== false;
+          roundToNinetyNineInput.checked = sheet.roundToNinetyNine || false;
+          extraCostInput.value = sheet.extraCost || 0;
+          const method = sheet.pricingMethod || "formula";
+          document.querySelector(
+            `input[name="pricingMethod"][value="${method}"]`,
+          ).checked = true;
+          formulaValueInput.value = sheet.formulaValue || "costPrice * 1.7";
+          marginPercentInput.value = sheet.marginPercent || 25;
+          togglePricingInputs();
         }
       });
 
@@ -114,6 +131,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       priceCol: priceColInput.value.trim().toUpperCase() || "D",
       salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
       linkCol: linkColInput.value.trim().toUpperCase() || "C",
+      titleLength: parseInt(titleLengthInput.value) || 8,
+      excludeKeywords: excludeKeywordsInput.value.trim(),
+      includeSalePrice: includeSalePriceInput.checked,
+      roundToNinetyNine: roundToNinetyNineInput.checked,
+      extraCost: parseFloat(extraCostInput.value) || 0,
+      pricingMethod:
+        document.querySelector('input[name="pricingMethod"]:checked').value ||
+        "formula",
+      formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
+      marginPercent: parseInt(marginPercentInput.value) || 25,
     });
 
     if (!storage.activeSheetId) {
@@ -145,6 +172,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       pricingMethod: "formula",
       formulaValue: "costPrice * 1.7",
       marginPercent: 25,
+      titleLength: 8,
+      excludeKeywords: "",
+      includeSalePrice: true,
+      roundToNinetyNine: false,
+      extraCost: 0,
     },
     (settings) => {
       keywordsColInput.value = settings.keywordsCol;
@@ -153,6 +185,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       linkColInput.value = settings.linkCol;
       startRowInput.value = settings.startRow;
       showPageButtonInput.checked = settings.showPageButton;
+      titleLengthInput.value = settings.titleLength || 8;
+      excludeKeywordsInput.value = settings.excludeKeywords || "";
+      includeSalePriceInput.checked = settings.includeSalePrice !== false;
+      roundToNinetyNineInput.checked = settings.roundToNinetyNine || false;
+      extraCostInput.value = settings.extraCost || 0;
 
       const method = settings.pricingMethod || "formula";
       document.querySelector(
@@ -166,13 +203,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.getElementById("marginInput").style.display =
         method === "margin" ? "block" : "none";
 
-      const activeSheet = settings.sheets.find(s => s.id === settings.activeSheetId);
+      const activeSheet = settings.sheets.find(
+        (s) => s.id === settings.activeSheetId,
+      );
       if (activeSheet) {
         keywordsColInput.value = activeSheet.keywordsCol || "B";
         priceColInput.value = activeSheet.priceCol || "D";
         salePriceColInput.value = activeSheet.salePriceCol || "E";
         linkColInput.value = activeSheet.linkCol || "C";
-        document.getElementById("sheetTabInput").value = activeSheet.sheetTab || "Sheet1";
+        document.getElementById("sheetTabInput").value =
+          activeSheet.sheetTab || "Sheet1";
+        titleLengthInput.value = activeSheet.titleLength || 8;
+        excludeKeywordsInput.value = activeSheet.excludeKeywords || "";
+        includeSalePriceInput.checked = activeSheet.includeSalePrice !== false;
+        roundToNinetyNineInput.checked = activeSheet.roundToNinetyNine || false;
+        extraCostInput.value = activeSheet.extraCost || 0;
+        const method = activeSheet.pricingMethod || "formula";
+        document.querySelector(
+          `input[name="pricingMethod"][value="${method}"]`,
+        ).checked = true;
+        formulaValueInput.value = activeSheet.formulaValue || "costPrice * 1.7";
+        marginPercentInput.value = activeSheet.marginPercent || 25;
+        togglePricingInputs();
       }
 
       togglePricingInputs();
@@ -183,7 +235,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (current) => {
-      const updatedSheets = current.sheets.map(sheet => {
+      const updatedSheets = current.sheets.map((sheet) => {
         if (sheet.id === current.activeSheetId) {
           return {
             ...sheet,
@@ -191,23 +243,41 @@ document.addEventListener("DOMContentLoaded", async () => {
             priceCol: priceColInput.value.trim().toUpperCase() || "D",
             salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
             linkCol: linkColInput.value.trim().toUpperCase() || "C",
-            sheetTab: document.getElementById("sheetTabInput").value.trim() || "Sheet1",
+            sheetTab:
+              document.getElementById("sheetTabInput").value.trim() || "Sheet1",
           };
         }
         return sheet;
       });
-      chrome.storage.sync.set({
-        sheets: updatedSheets,
-        activeSheetId: current.activeSheetId,
-        showPageButton: showPageButtonInput.checked,
-        pricingMethod: document.querySelector('input[name="pricingMethod"]:checked').value || "formula",
-        formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
-        marginPercent: parseInt(marginPercentInput.value) || 25,
-      }, () => {
-        saveStatus.textContent = "✓ Settings saved";
-        saveStatus.style.color = "#2e7d32";
-        setTimeout(() => { saveStatus.textContent = ""; }, 2000);
-      });
+      chrome.storage.sync.set(
+        {
+          sheets: updatedSheets,
+          activeSheetId: current.activeSheetId,
+          showPageButton: showPageButtonInput.checked,
+          pricingMethod:
+            document.querySelector('input[name="pricingMethod"]:checked')
+              .value || "formula",
+          formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
+          marginPercent: parseInt(marginPercentInput.value) || 25,
+          titleLength: parseInt(titleLengthInput.value) || 8,
+          excludeKeywords: excludeKeywordsInput.value.trim(),
+          includeSalePrice: includeSalePriceInput.checked,
+          roundToNinetyNine: roundToNinetyNineInput.checked,
+          extraCost: parseFloat(extraCostInput.value) || 0,
+          pricingMethod:
+            document.querySelector('input[name="pricingMethod"]:checked')
+              .value || "formula",
+          formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
+          marginPercent: parseInt(marginPercentInput.value) || 25,
+        },
+        () => {
+          saveStatus.textContent = "✓ Settings saved";
+          saveStatus.style.color = "#2e7d32";
+          setTimeout(() => {
+            saveStatus.textContent = "";
+          }, 2000);
+        },
+      );
     });
   });
 });

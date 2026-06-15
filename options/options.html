@@ -65,6 +65,32 @@
       <input type="checkbox" id="showPageButton" />
       <label for="showPageButton">Show "Add to Sheet" button on AliExpress pages</label>
     </div>
+    <div class="form-group checkbox">
+      <input type="checkbox" id="includeSalePrice" />
+      <label for="includeSalePrice">Include Sell Price in sheet</label>
+    </div>
+    <div class="form-group checkbox">
+      <input type="checkbox" id="roundToNinetyNine" />
+      <label for="roundToNinetyNine">Round sell price to .99 (e.g. $4.77 → $4.99)</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Title Settings</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="titleLength">Max Title Words</label>
+        <input type="number" id="titleLength" min="1" max="20" placeholder="8" />
+      </div>
+      <div class="form-group">
+        <label for="extraCost">Extra Cost per Product (USD)</label>
+        <input type="number" id="extraCost" min="0" step="0.01" placeholder="e.g. 2.00" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="excludeKeywords">Exclude Keywords from Title (comma separated)</label>
+      <input type="text" id="excludeKeywords" placeholder="e.g. wholesale, lot, pieces" />
+    </div>
   </section>
 
   <section>

@@ -27,13 +27,20 @@ function safeCalc(formula, costPrice) {
   return nums[0] ?? null;
 }
 
-function getTitle() {
+function getTitle(titleLength, excludeKeywords) {
   const titleEl = document.querySelector('h1[data-pl="product-title"]');
   const fullTitle = titleEl?.textContent?.trim() ?? "";
+  const excludeList = excludeKeywords
+    ? excludeKeywords
+        .split(",")
+        .map((k) => k.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
   const words = fullTitle
     .split(" ")
     .filter((w) => w.length > 0)
-    .slice(0, 8);
+    .filter((w) => !excludeList.includes(w.toLowerCase()))
+    .slice(0, titleLength || 8);
   return words.join(" ");
 }
 
@@ -59,11 +66,29 @@ function getLink() {
   return match ? match[1] : fullUrl;
 }
 
-function scrapeProduct() {
+function getShipping() {
+  const selectors = [
+    '[class*="shipping-cost"]',
+    '[class*="shippingCost"]',
+    '[class*="logistics-cost"]',
+    '[class*="dynamic-shipping"]',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.textContent.trim()) {
+      const match = el.textContent.trim().match(/[\d]+\.?\d*/);
+      if (match) return parseFloat(match[0]);
+    }
+  }
+  return 0;
+}
+
+function scrapeProduct(titleLength, excludeKeywords) {
   return {
-    title: getTitle(),
+    title: getTitle(titleLength, excludeKeywords),
     price: getPrice(),
     link: getLink(),
+    shipping: getShipping(),
   };
 }
 
@@ -100,8 +125,6 @@ function injectButton() {
 `;
 
   btn.addEventListener("click", () => {
-    const data = scrapeProduct();
-
     btn.innerHTML =
       '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:aliswift-spin 0.7s linear infinite;margin-right:6px;vertical-align:middle;"></span>Adding...';
     btn.disabled = true;
@@ -111,23 +134,43 @@ function injectButton() {
         pricingMethod: "formula",
         formulaValue: "costPrice * 1.7",
         marginPercent: 25,
+        titleLength: 8,
+        excludeKeywords: "",
+        includeSalePrice: true,
+        roundToNinetyNine: false,
+        extraCost: 0,
       },
       (settings) => {
-        const costPrice = parseFloat(data.price.replace(/[^0-9.]/g, ""));
-        if (!isNaN(costPrice) && costPrice > 0) {
-          if (settings.pricingMethod === "margin") {
-            data.salePrice = (
-              costPrice *
-              (1 + settings.marginPercent / 100)
-            ).toFixed(2);
-          } else {
-            try {
-              data.salePrice = String(
-                safeCalc(settings.formulaValue, costPrice)?.toFixed(2) ?? "",
-              );
-            } catch (e) {
-              data.salePrice = "";
+        const data = scrapeProduct(
+          settings.titleLength,
+          settings.excludeKeywords,
+        );
+        const rawPrice = parseFloat(data.price.replace(/[^0-9.]/g, ""));
+        const shippingCost = data.shipping || 0;
+        const extraCost = parseFloat(settings.extraCost) || 0;
+        const totalCost = !isNaN(rawPrice)
+          ? rawPrice + shippingCost + extraCost
+          : rawPrice;
+        data.price = !isNaN(totalCost) ? totalCost.toFixed(2) : data.price;
+
+        if (!isNaN(totalCost) && totalCost > 0) {
+          if (settings.includeSalePrice !== false) {
+            let salePrice = 0;
+            if (settings.pricingMethod === "margin") {
+              salePrice = totalCost * (1 + settings.marginPercent / 100);
+            } else {
+              try {
+                salePrice = safeCalc(settings.formulaValue, totalCost) ?? 0;
+              } catch (e) {
+                salePrice = 0;
+              }
             }
+            if (settings.roundToNinetyNine && salePrice > 0) {
+              salePrice = Math.floor(salePrice) + 0.99;
+            }
+            data.salePrice = salePrice > 0 ? salePrice.toFixed(2) : "";
+          } else {
+            data.salePrice = "";
           }
         }
 
@@ -165,6 +208,9 @@ const interval = setInterval(() => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "scrape") {
-    sendResponse(scrapeProduct());
+    chrome.storage.sync.get({ titleLength: 8, excludeKeywords: "" }, (s) => {
+      sendResponse(scrapeProduct(s.titleLength, s.excludeKeywords));
+    });
+    return true;
   }
 });
