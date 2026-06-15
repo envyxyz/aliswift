@@ -21,19 +21,24 @@ async function handleAppend(data) {
   try {
     const token = await getAuthToken();
 
-    const settings = await chrome.storage.sync.get({
+    const storage = await chrome.storage.sync.get({
       sheets: [],
       activeSheetId: "",
-      keywordsCol: "A",
-      priceCol: "B",
-      salePriceCol: "C",
-      linkCol: "D",
-      startRow: "2",
     });
-
-    const sheetId = settings.activeSheetId;
-    if (!sheetId)
+    const activeSheet = storage.sheets.find(
+      (s) => s.id === storage.activeSheetId,
+    );
+    if (!activeSheet)
       throw new Error("No sheet configured. Please add a sheet in settings.");
+
+    const settings = {
+      keywordsCol: activeSheet.keywordsCol || "B",
+      priceCol: activeSheet.priceCol || "D",
+      salePriceCol: activeSheet.salePriceCol || "E",
+      linkCol: activeSheet.linkCol || "C",
+      sheetTab: activeSheet.sheetTab || "Inventory",
+    };
+    const sheetId = activeSheet.id;
 
     const colMap = {
       [settings.keywordsCol]: data.title,
@@ -44,22 +49,42 @@ async function handleAppend(data) {
 
     const sortedCols = Object.keys(colMap).sort();
     const values = [sortedCols.map((col) => colMap[col])];
-    const sheetTab = "Inventory";
+    const sheetTab = settings.sheetTab;
     const findRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetTab}!A:A`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetTab}!B:B`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const findData = await findRes.json();
-    const nextRow = (findData.values?.length ?? 1) + 1;
-    const range = `${sheetTab}!${sortedCols[0]}${nextRow}:${sortedCols[sortedCols.length - 1]}${nextRow}`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`;
-    const response = await fetch(url, {
-      method: "PUT",
+    const rows = findData.values || [];
+    let nextRow = 3;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i][0] && rows[i][0].toString().trim() !== "") {
+        nextRow = i + 2;
+        break;
+      }
+    }
+    console.log(
+      "nextRow:",
+      nextRow,
+      "sortedCols:",
+      sortedCols,
+      "values:",
+      JSON.stringify(values),
+    );
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`;
+    const response = await fetch(batchUrl, {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ values }),
+      body: JSON.stringify({
+        valueInputOption: "USER_ENTERED",
+        data: sortedCols.map((col, i) => ({
+          range: `${sheetTab}!${col}${nextRow}`,
+          values: [[values[0][i]]],
+        })),
+      }),
     });
 
     if (!response.ok) throw new Error(`Sheets API error: ${response.status}`);
