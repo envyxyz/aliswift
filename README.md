@@ -8,7 +8,7 @@
 [![Sheets](https://img.shields.io/badge/Google%20Sheets-API%20v4-34A853?style=flat-square&logo=googlesheets&logoColor=white)](https://developers.google.com/sheets)
 [![Stars](https://img.shields.io/github/stars/envyxyz/aliswift?style=flat-square&color=ff4f00)](https://github.com/envyxyz/aliswift/stargazers)
 
-**1-click AliExpress product scraper. Title, cost, sell price, and supplier link | straight into your Google Sheet.**
+**Automate your AliExpress research by scraping product data directly into Google Sheets**
 
 ![Demo](./screenshots/popup.gif)
 
@@ -136,6 +136,7 @@ graph LR
 
     style B fill:#FF9500,stroke:#333,stroke-width:2px,color:#fff
     style C fill:#fff,stroke:#333,stroke-dasharray: 5 5
+```
 
 ## Versions
 
