@@ -122,6 +122,21 @@ To switch sheets, open Settings and click a different sheet preset. All settings
 - Image URL scraping
 - Firefox support
 
+## System Architecture
+
+AliSwift is built as a Chrome Extension (Manifest V3) designed to bridge the gap between dynamic e-commerce web interfaces and structured data storage. The system follows a decoupled architecture, separating the UI-driven scraping logic from the background orchestration of API requests.
+
+### Data Flow Overview
+
+```mermaid
+graph LR
+    A[AliExpress Page] -->|Content Script Scrapes| B(AliSwift Extension)
+    B -->|OAuth 2.0 Token| C{Google Sheets API}
+    B -->|POST/PUT Request| D[Google Sheets]
+
+    style B fill:#FF9500,stroke:#333,stroke-width:2px,color:#fff
+    style C fill:#fff,stroke:#333,stroke-dasharray: 5 5
+
 ## Versions
 
 | Version | Notes                                                                                   |
@@ -151,3 +166,4 @@ If AliSwift saves you time, consider leaving a star.
 [![Star](https://img.shields.io/github/stars/envyxyz/aliswift?style=social)](https://github.com/envyxyz/aliswift/stargazers)
 
 </div>
+```
