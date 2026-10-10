@@ -154,6 +154,25 @@ test("the fee strip, fee columns and image column are hidden", () => {
   ]);
 });
 
+test("with the same currency on both sides the repeated home-currency rows and columns are hidden", () => {
+  const hiddenOf = (extra) =>
+    setup(extra)
+      .filter((r) => r.updateDimensionProperties?.properties.hiddenByUser)
+      .map(({ updateDimensionProperties: { range: r } }) => [r.sheetId, r.dimension, r.startIndex, r.endIndex]);
+  assert.deepEqual(hiddenOf({ homeCurrency: "GBP" }), [
+    [10, "ROWS", 0, 4],
+    [10, "ROWS", 10, 11], // Total Revenue (home)
+    [10, "ROWS", 12, 13], // Total Profit (home)
+    [20, "ROWS", 0, 1],
+    [20, "COLUMNS", 6, 9],
+    [20, "COLUMNS", 14, 15],
+    [20, "COLUMNS", 10, 11], // Net Profit (home)
+    [30, "COLUMNS", 8, 9], // Profit (home)
+  ]);
+  // The next sheet, with different currencies, is unaffected.
+  assert.equal(hiddenOf({}).length, 4);
+});
+
 test("only the sheet ids Google returned are used, and rows are frozen as in the template", () => {
   const reqs = setup();
   const used = new Set(JSON.stringify(reqs).match(/"sheetId":\d+/g));

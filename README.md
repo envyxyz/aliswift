@@ -70,7 +70,7 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 
 ## Set up
 
-**Auto (easiest).** Open AliSwift settings (gear icon in the popup), click **Add sheet** and keep **Auto** selected. Give the sheet a name, pick eBay UK or eBay US, and type the currency you spend in (for example PKR). Click **Create sheet**. AliSwift creates a Google Sheet in your Drive with Dashboard, Inventory and Orders tabs and adds it for you. There are no columns to set. Then open the **Pricing** tab and pick formula or margin pricing. The fee rates sit in a hidden first row of the Inventory tab (unhide row 1 to edit them); the international fee and tax rates are defaults, so check them against a real order's fee breakdown.
+**Auto (easiest).** Open AliSwift settings (gear icon in the popup), click **Add sheet** and keep **Auto** selected. Give the sheet a name, pick eBay UK or eBay US, and type the currency you spend in (for example PKR). Click **Create sheet**. AliSwift creates a Google Sheet in your Drive with Dashboard, Inventory and Orders tabs and adds it for you. There are no columns to set. Then open the **Pricing** tab and pick formula or margin pricing. The fee rates sit in the Inventory tab's hidden row 1 (unhide row 1 and columns G to I to edit them); the international fee and tax rates are defaults, so check them against a real order's fee breakdown. The exchange rate cell is on the Dashboard tab (unhide rows 1 to 4).
 
 **Manual (a sheet you already have).**
 
