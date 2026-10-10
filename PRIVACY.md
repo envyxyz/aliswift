@@ -10,9 +10,13 @@ The title, price, shipping cost and URL of the AliExpress product page you are o
 
 Straight from your browser to the Google Sheets API, into the sheet you chose, using your own Google account. Google's privacy policy covers what happens after that.
 
+If you choose **Auto** when adding a sheet, AliSwift also creates a new spreadsheet in your Google Drive and fills it with tabs, formulas and fee settings. That is the only time AliSwift creates a file. It does not delete or empty rows or cells.
+
 ## What it stores
 
-Your sheet names, sheet IDs, column letters and pricing settings, in Chrome's extension storage (`chrome.storage.sync`). If Chrome sync is on, Chrome syncs these settings through your Google account like any other extension setting.
+Your sheet names, sheet IDs, column letters, SKU prefix, marketplace, Orders tab name, pricing settings and the currency you last used, in Chrome's extension storage (`chrome.storage.sync`). If Chrome sync is on, Chrome syncs these settings through your Google account like any other extension setting.
+
+You can export these settings to a file on your computer and import them again. The file is made in your browser and goes nowhere else. It holds no Google token and no product data.
 
 AliSwift does not store product data. It does not store your Google token either: Chrome manages the token.
 
@@ -23,7 +27,7 @@ AliSwift does not store product data. It does not store your Google token either
 | `storage` | Save your settings |
 | `identity` | Sign in to Google so AliSwift can write to your sheet |
 | `*.aliexpress.com`, `*.aliexpress.us` | Read product pages and show the page button |
-| `sheets.googleapis.com` | Write rows to your sheet |
+| `sheets.googleapis.com` | Write rows to your sheet, and create a new sheet when you choose Auto |
 
 The Google permission is `https://www.googleapis.com/auth/spreadsheets`. It lets AliSwift read and edit your Google Sheets. AliSwift only touches the sheets you add in settings.
 

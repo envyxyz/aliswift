@@ -14,6 +14,8 @@
   --ok: #177a3c;
   --danger: #c4281c;
   --danger-solid: #c4281c;
+  --tone-red-fg: #991b1b;
+  --tone-red-bg: #fee2e2;
   --hover: color-mix(in srgb, var(--text) 8%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--bg));
   --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));
@@ -25,7 +27,6 @@
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
-  --sp-5: 24px;
   --sp-6: 32px;
   --sp-7: 48px;
   --fs-xs: 12px;
@@ -37,7 +38,6 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 120ms;
   --dur: 200ms;
-  --dur-slow: 280ms;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -51,6 +51,8 @@
     --text: #f4f4f5;
     --muted: #a1a1aa;
     --danger: #ff7b72;
+    --tone-red-fg: #fca5a5;
+    --tone-red-bg: #3b1618;
     --shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }
@@ -161,15 +163,17 @@ a.btn {
   flex: none;
 }
 
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled, [aria-disabled="true"]) {
   filter: brightness(0.92);
 }
 
-.btn:active:not(:disabled) {
+.btn:active:not(:disabled, [aria-disabled="true"]) {
   transform: scale(0.98);
 }
 
-.btn:disabled {
+/* aria-disabled keeps a control focusable, for a button that must keep focus while it works. */
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.6;
   cursor: default;
 }
@@ -206,7 +210,7 @@ a.btn {
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
 }
 
-.btn-danger:hover:not(:disabled) {
+.btn-danger:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--danger-soft);
   filter: none;
 }
@@ -217,7 +221,7 @@ a.btn {
   border-color: transparent;
 }
 
-.btn-danger[data-confirm]:hover:not(:disabled) {
+.btn-danger[data-confirm]:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--danger-solid);
   filter: brightness(0.92);
 }
@@ -258,16 +262,113 @@ a.btn {
   color: var(--danger);
 }
 
+/* notice: an inline banner with an icon. data-tone="error" tints it. */
 .notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 10px 12px;
   font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
-.notice:empty {
-  display: none;
+.notice > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.notice > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice p + p {
+  margin-top: 2px;
+}
+
+.notice a {
+  color: inherit;
+}
+
+.notice[data-tone="error"] {
+  color: var(--tone-red-fg);
+  background: var(--tone-red-bg);
+  border-color: color-mix(in srgb, var(--tone-red-fg) 25%, transparent);
+}
+
+.notice[data-tone] > svg {
+  color: currentColor;
 }
 
 .field-narrow {
   max-width: 160px;
+}
+
+/* One column on a phone, three in a 440px dialog (viewport 472px and up). */
+.fields-row {
+  display: grid;
+  align-items: end; /* inputs line up even when a label wraps */
+  gap: var(--sp-3);
+}
+
+@media (min-width: 472px) {
+  .fields-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* disclosure: a native <details> with a CSS chevron */
+details.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 36px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  list-style: none;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+details.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.disclosure > summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+details.disclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+details.disclosure > summary:hover {
+  background: var(--hover);
+}
+
+details.disclosure > summary .muted {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: var(--fs-sm);
+}
+
+details.disclosure > :not(summary) {
+  margin-top: var(--sp-2);
 }
 
 /* Tabs */
@@ -329,6 +430,15 @@ a.btn {
   gap: var(--sp-1);
 }
 
+/* A label with an info icon lines up with plain labels. */
+.title-row > label {
+  margin: 0;
+}
+
+.title-row:has(> label) {
+  margin-bottom: 6px;
+}
+
 .info {
   display: inline-grid;
   place-items: center;
@@ -366,6 +476,7 @@ a.btn {
   background: var(--text);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  scroll-margin: 8px;
   opacity: 0;
   visibility: hidden;
   transform: translateY(-2px);
@@ -408,6 +519,11 @@ a.btn {
 .title-row[data-align="end"] .tip {
   left: auto;
   right: 0;
+}
+
+/* Inside a dialog the tip must fit the dialog body (24px padding each side), also at 320px. */
+.dialog-body .tip {
+  max-width: min(270px, calc(100vw - 80px));
 }
 
 /* Segmented control: real radios, so arrow keys and form values work as usual. */
@@ -477,7 +593,7 @@ a.btn {
   opacity: 0.5;
 }
 
-/* Dialog. Needs Chrome 117 for @starting-style and allow-discrete. */
+/* Dialog. Needs Chrome 117 for @starting-style and allow-discrete; :user-invalid needs 119. */
 
 dialog {
   width: min(var(--dialog-w, 420px), calc(100vw - 32px));
@@ -678,6 +794,9 @@ dialog form {
   [role="tabpanel"]:not([hidden]) {
     animation: none;
   }
+  details.disclosure > summary::before {
+    transition: none;
+  }
   dialog,
   .toast,
   .tip {
@@ -690,6 +809,10 @@ dialog form {
 }
 
 @media (forced-colors: active) {
+  .notice,
+  .tip {
+    border: 1px solid CanvasText;
+  }
   [role="tab"][aria-selected="true"] {
     border-bottom-color: Highlight;
   }
