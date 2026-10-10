@@ -3,7 +3,7 @@
   "name": "AliSwift",
   "version": "0.5.0",
   "minimum_chrome_version": "119",
-  "key": "***REMOVED: compromised key, rotated in 0.6.0***",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqhAugC9Y2g7NUkcp/SD+Ya8LJTAtsvhPHqL/4GFEYJRL6CfUbdU23QvhwuFmLtpDa8FLMc1bxdjNIe2tEQTGYZq1yfTNNEkOZAe4y3wi8eRxAWf3GPIkAwOPcH8Ikiyt/6F/m8KpfljFASULqy/6ZfjNO0SBkZqlTgYq4uHLcW6tQDTRtdaxYaw1HtQvlyegSdaKbOc/G/XhNZihtR6Pz190yDSFI5oDpWn2rhYiWu35viyyaQLyMC/7EB+kfC5jBSOInu1Zzbg/oSwn035EL0CtJX73XKFrSL2itfHstam5VM26aypA6m5U3hB06lP2zd/GzVyrxj/a2k48rq7c6wIDAQAB",
   "description": "Save AliExpress products to Google Sheets in one click. Scrapes title, price and shipping, then adds your sell price.",
   "homepage_url": "https://github.com/envyxyz/aliswift",
   "permissions": ["storage", "identity"],
@@ -39,7 +39,7 @@
     }
   ],
   "oauth2": {
-    "client_id": "969152943077-1qkbqj3sdfoehcuqog2bns9mt5a24l0q.apps.googleusercontent.com",
+    "client_id": "969152943077-gu45dvs7m8focodjipogbr3hmpfs52vu.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
   },
   "icons": {

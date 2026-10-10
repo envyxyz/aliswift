@@ -50,9 +50,17 @@ The manifest ships with the maintainer's OAuth client and a fixed extension key.
 
    The first command prints the value for `"key"` in `manifest.json`. It is the public key and starts with `MIIBIj`. Never put the private key (`key.pem`) in the manifest or the repo. The second command prints your extension ID.
 
+   No `openssl`? Node prints both (public key first, then the ID) from the same `key.pem`:
+
+   ```
+   node -e "const c=require('node:crypto');const d=c.createPublicKey(require('node:fs').readFileSync('key.pem')).export({type:'spki',format:'der'});console.log(d.toString('base64'));console.log(c.createHash('sha256').update(d).digest('hex').slice(0,32).replace(/[0-9a-f]/g,x=>'abcdefghijklmnop'[parseInt(x,16)]))"
+   ```
+
 3. In [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Google Sheets API**, and set up the OAuth consent screen.
 4. Create an OAuth client ID of type **Chrome extension** and enter your extension ID as the item ID.
 5. Put the public key in `"key"` and the client ID in `oauth2.client_id` in `manifest.json`.
+
+Changing `"key"` changes the extension ID. Chrome then treats the build as a new extension with empty settings, so export your settings first (**Settings, General, Export settings**) and import them after reloading. Your sheets are not affected. `npm test` checks that `"key"` is a public key and that the repo holds no private key.
 
 ## Pull requests
 
