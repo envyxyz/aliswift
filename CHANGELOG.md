@@ -33,7 +33,7 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 - Removing a sheet asks for confirmation.
 - Popup shows what to do when you are not on a product page, when no sheet exists, and when a page cannot be read.
 - Dropped the `activeTab` permission and the unused `web_accessible_resources`. The manifest version now matches the release.
-- Removed the profile button. It never showed an avatar because the Google scope for it was never granted.
+- The old profile button never showed an avatar because the Google scope for it was never granted. It is replaced by a Google account button that shows whether you are signed in and offers Sign out. A save never opens a Google window by itself.
 
 ### Fixed
 

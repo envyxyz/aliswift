@@ -61,7 +61,7 @@ async function scrapeRow() {
   const { n: price, text } = firstNumber(PRICE_SELECTORS);
   if (price > 0) {
     const shipping = firstNumber(SHIPPING_SELECTORS, /free/i).n || 0;
-    const from = detectCurrency(document.cookie, text);
+    const from = detectCurrency(document.cookie, text, document.documentElement.lang);
     const to = REGIONS[sheet.region]?.currency ?? "";
     row.kind = currencyKind(from, to);
     let rate = 1;

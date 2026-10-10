@@ -38,8 +38,10 @@ function appendRow(data) {
 }
 
 // Silent unless `interactive`, which only signIn() passes: a sign-in window never opens on its own.
-// A silent failure means "sign in first" and carries code "signin". While authOff is set (the user signed
-// out here) a silent call does not even ask Chrome, because Chrome would still hand back the old grant.
+// A silent failure means "sign in first" and carries code "signin", unless Chrome's message says it only
+// couldn't reach Google (code "offline"): then nothing is known about the sign-in, and it is never reported
+// as signed out. While authOff is set (the user signed out here) a silent call does not even ask Chrome,
+// because Chrome would still hand back the old grant.
 async function getToken(interactive = false) {
   if (!interactive && (await chrome.storage.local.get({ authOff: false })).authOff) throw signinError();
   return new Promise((resolve, reject) => {
@@ -49,7 +51,9 @@ async function getToken(interactive = false) {
         reject(
           interactive
             ? new Error(/not supported/i.test(message) ? "Google sign-in isn't available in this browser." : message || "Google sign-in failed.")
-            : signinError(),
+            : OFFLINE.test(message)
+              ? Object.assign(new Error("Couldn't reach Google. Check your connection."), { code: "offline" })
+              : signinError(),
         );
       } else {
         resolve(token);
@@ -58,10 +62,13 @@ async function getToken(interactive = false) {
   });
 }
 
+// ponytail: matched on Chrome's error text (network failures, "Service unavailable"); any other wording reads as signed out.
+const OFFLINE = /network|connection|unavailable|offline|timed? ?out/i;
 const signinError = () => Object.assign(new Error("Sign in to Google to use sheets."), { code: "signin" });
 
+// signedIn is null when the probe could not tell (offline): a page must not read that as signed out.
 async function authState() {
-  return { success: true, signedIn: await getToken().then(() => true, () => false) };
+  return { success: true, signedIn: await getToken().then(() => true, (e) => (e.code === "signin" ? false : null)) };
 }
 
 // Clears authOff only once Google has given a token, so a closed window leaves the state as it was.
@@ -84,9 +91,15 @@ async function signOut() {
 const RATE_TTL = 12 * 60 * 60 * 1000;
 const CURRENCY = /^[A-Z]{3}$/;
 
-async function saveRate(key, rate) {
-  const { rates } = await chrome.storage.local.get({ rates: {} });
-  await chrome.storage.local.set({ rates: { ...rates, [key]: { rate, at: Date.now() } } });
+// One write at a time: it reads the whole map and writes it back, so two at once would drop one entry.
+let rateLine = Promise.resolve();
+function saveRate(key, rate) {
+  const run = rateLine.then(async () => {
+    const { rates } = await chrome.storage.local.get({ rates: {} });
+    await chrome.storage.local.set({ rates: { ...rates, [key]: { rate, at: Date.now() } } });
+  });
+  rateLine = run.catch(() => {});
+  return run;
 }
 
 // The rate for converting `from` prices into the sheet's `to`: cache, then the sheet's own exchange-rate
@@ -116,7 +129,7 @@ async function getRate({ sheetId, from, to } = {}) {
 
 async function setRate({ from, to, rate } = {}) {
   if (!CURRENCY.test(from) || !CURRENCY.test(to) || from === to) throw new Error("Choose two different currencies.");
-  if (!(Number(rate) >= 1e-6 && Number(rate) <= 1e7)) throw new Error("Enter a rate above 0.");
+  if (!validRate(rate)) throw new Error(RATE_MESSAGE);
   await saveRate(`${to}:${from}:typed`, Number(rate));
   return { success: true };
 }

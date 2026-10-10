@@ -625,10 +625,16 @@ window.addEventListener("beforeunload", (e) => {
 const locked = () => !$("lockSheets").hidden;
 $("addSheetBtn").addEventListener("click", () => locked() || openAdd());
 $("emptyAddBtn").addEventListener("click", () => locked() || openAdd());
-// Unknown counts as signed in, so the buttons never flicker locked on load.
+// Unknown (null, or no event yet) counts as signed in, so the buttons never flicker locked on load.
+// The buttons point at the hint only while it shows: a hidden element would still be read out as their description.
 document.addEventListener("authchange", (e) => {
-  $("lockSheets").hidden = e.detail.signedIn;
-  for (const id of ["addSheetBtn", "emptyAddBtn"]) $(id).setAttribute("aria-disabled", String(!e.detail.signedIn));
+  const lock = e.detail.signedIn === false;
+  $("lockSheets").hidden = !lock;
+  for (const id of ["addSheetBtn", "emptyAddBtn"]) {
+    $(id).setAttribute("aria-disabled", String(lock));
+    if (lock) $(id).setAttribute("aria-describedby", "lockSheets");
+    else $(id).removeAttribute("aria-describedby");
+  }
 });
 $("cancelBtn").addEventListener("click", () => {
   if (!adding) $("addDialog").close();

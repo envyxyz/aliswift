@@ -84,7 +84,7 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 
 **Updating from an older build.** The sign-in key was rotated, so the extension ID changed and Chrome treats the new build as a new extension with empty settings. Export your settings before updating, then import them and sign in again. Your sheets are not affected.
 
-The first time you add a product, Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
+Before the first save, click the account button in the popup or settings page and sign in with Google. Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
 
 ## Usage
 
