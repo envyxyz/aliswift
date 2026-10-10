@@ -15,6 +15,7 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ### Changed
 
+- **Sign-in key rotated.** The extension signing key was replaced and `manifest.json` now holds only the public key, with a new OAuth client. The extension ID changed, so Chrome treats the update as a new extension: export your settings before updating, then import them. Your sheets are not affected. A test now checks that the repo holds no private key.
 - Settings are split into tabs: Sheets, Pricing, Title and General. Explanations moved out from under the inputs into "i" icons that show a tooltip on hover and keyboard focus.
 - Each sheet has a pencil that opens an Edit sheet dialog (name, tab, first data row, columns). The "x" is gone. Delete sheet lives in that dialog and asks for confirmation there instead of in a browser popup.
 - Pricing and Title edit the highlighted sheet, shown in a "Settings for" bar. Failed saves show a message with a Retry button.

@@ -82,6 +82,8 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 
 **Moving to another computer.** On the **General** tab, **Export settings** saves your sheets and settings to `aliswift-settings.json`. **Import settings** loads that file. Your sheets themselves live in Google Sheets and are not part of the file.
 
+**Updating from an older build.** The sign-in key was rotated, so the extension ID changed and Chrome treats the new build as a new extension with empty settings. Export your settings before updating, then import them and sign in again. Your sheets are not affected.
+
 The first time you add a product, Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
 
 ## Usage

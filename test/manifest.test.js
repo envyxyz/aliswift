@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const crypto = require("node:crypto");
 
 const root = path.join(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
@@ -103,4 +104,21 @@ test("every key in an options form list has an input in that form, and the lists
   const edited = new Set([...lists.PRICING_KEYS, ...lists.TITLE_KEYS, ...lists.EDIT_KEYS, "oCols"]);
   edited.delete("name"); // the name belongs to the sheet, not to SHEET_DEFAULTS
   assert.deepEqual([...edited].sort(), Object.keys(SHEET_DEFAULTS).sort());
+});
+
+test("manifest key is the rotated public key, and no private key is in the repo", () => {
+  const der = Buffer.from(manifest.key, "base64");
+  crypto.createPublicKey({ key: der, format: "der", type: "spki" }); // throws on a private key
+  assert.throws(() => crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" }));
+  const id = crypto.createHash("sha256").update(der).digest("hex").slice(0, 32)
+    .replace(/[0-9a-f]/g, (c) => "abcdefghijklmnop"[parseInt(c, 16)]);
+  assert.equal(id, "oeomcphpdaicmkpdpdnfmnkjidnbghaa");
+
+  const marker = "PRIVATE" + " KEY"; // split so this file does not match itself
+  const skip = new Set([".git", "node_modules", ".claude"]); // .claude is local notes, never committed
+  for (const rel of fs.readdirSync(root, { recursive: true })) {
+    const full = path.join(root, rel);
+    if (skip.has(rel.split(path.sep)[0]) || !fs.statSync(full).isFile()) continue;
+    assert.ok(!fs.readFileSync(full).includes(marker), `${rel} contains a private key`);
+  }
 });
