@@ -189,7 +189,31 @@ footer a {
 }
 
 #editDialog {
-  --dialog-w: 480px;
+  --dialog-w: 520px;
+}
+
+#addDialog {
+  --dialog-w: 440px;
+}
+
+/* A fieldset used only to group or lock its children. */
+fieldset.bare {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.code {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.backup-actions {
+  justify-content: flex-start;
 }
 
 .input-row {
@@ -236,6 +260,61 @@ footer a {
 .col-row input {
   width: 56px;
   font-weight: 600;
+}
+
+.col-row input.prefix {
+  width: 96px;
+  text-align: left;
+}
+
+.cols-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.orders-tab {
+  margin-top: var(--sp-2);
+}
+
+.col-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: var(--sp-3);
+}
+
+.col-grid label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.col-grid input {
+  text-align: center;
+  font-weight: 600;
+}
+
+.col-grid input.col {
+  text-transform: uppercase;
+}
+
+/* The template preset fades the fields it changed. */
+input[data-flash] {
+  animation: flash 600ms var(--ease);
+}
+
+@keyframes flash {
+  from {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input[data-flash] {
+    animation: none;
+  }
 }
 
 .confirm {

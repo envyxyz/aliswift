@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AliSwift",
   "version": "0.5.0",
-  "minimum_chrome_version": "117",
+  "minimum_chrome_version": "119",
   "key": "***REMOVED: compromised key, rotated in 0.6.0***",
   "description": "Save AliExpress products to Google Sheets in one click. Scrapes title, price and shipping, then adds your sell price.",
   "homepage_url": "https://github.com/envyxyz/aliswift",

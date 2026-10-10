@@ -145,6 +145,24 @@
           </div>
           <label class="inline"><input id="showPageButton" type="checkbox" /> Show the Add to Sheet button on AliExpress pages</label>
         </div>
+        <div class="group" role="group" aria-labelledby="h-backup">
+          <div class="title-row">
+            <h2 id="h-backup">Settings backup</h2>
+            <button type="button" class="info" aria-label="About settings backup" aria-describedby="tip-backup">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+            <span id="tip-backup" role="tooltip" class="tip">Export saves your sheets and settings to a file. Import loads that file here, for example on a new computer. Your Gemini key and saved product data are not included.</span>
+          </div>
+          <div class="actions backup-actions">
+            <button type="button" class="btn btn-quiet" id="exportBtn">Export settings</button>
+            <button type="button" class="btn btn-quiet" id="importBtn">Import settings</button>
+            <input type="file" id="importFile" accept=".json,application/json" hidden />
+          </div>
+          <div id="importNotice" class="notice" data-tone="error" role="alert" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
+            <div></div>
+          </div>
+        </div>
       </div>
 
       <footer class="muted">
@@ -158,7 +176,10 @@
       <form id="editForm">
         <div class="dialog-head"><h2 id="editTitle">Edit sheet</h2></div>
         <div class="dialog-body">
-          <p id="editNotice" class="notice error" role="alert"></p>
+          <div id="editNotice" class="notice" data-tone="error" role="alert" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
+            <div></div>
+          </div>
           <div>
             <label for="editName">Name</label>
             <input id="editName" name="name" maxlength="40" required autofocus autocomplete="off" />
@@ -183,15 +204,59 @@
               <input id="editRow" name="startRow" type="number" min="1" step="1" required />
             </div>
           </div>
-          <div role="group" aria-labelledby="h-cols">
+          <div>
             <div class="title-row">
-              <h3 id="h-cols">Columns</h3>
-              <button type="button" class="info" aria-label="About columns" aria-describedby="tip-cols">
+              <label for="editRegion">Marketplace</label>
+              <button type="button" class="info" aria-label="About marketplace" aria-describedby="tip-region">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-              <span id="tip-cols" role="tooltip" class="tip">Type the column letter where each field goes. Each product is added on a new row, just below the last row that has keywords, and never above the first data row.</span>
+              <span id="tip-region" role="tooltip" class="tip">Sets the currency shown for this sheet and which eBay site opens when you list.</span>
             </div>
-            <div id="colList" class="col-list"></div>
+            <select id="editRegion" name="region"></select>
+          </div>
+          <div role="group" aria-labelledby="h-cols">
+            <div class="cols-head">
+              <div class="title-row">
+                <h3 id="h-cols">Columns</h3>
+                <button type="button" class="info" aria-label="About columns" aria-describedby="tip-cols">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+                <span id="tip-cols" role="tooltip" class="tip">Type the column letter where each field goes. Each product is added on a new row, just below the last row that has keywords, and never above the first data row. Optional columns switch on SKUs, status, images and profit.</span>
+              </div>
+              <button id="presetBtn" class="btn btn-quiet btn-sm" type="button" title="Fills every field to match AliSwift's own sheet layout. Nothing is saved until you press Save.">Use AliSwift template layout</button>
+            </div>
+            <div id="colList" class="col-list" data-scope="inventory"></div>
+            <details id="moreCols" class="disclosure">
+              <summary>More columns <span id="moreCount" class="muted"></span></summary>
+              <div id="moreList" class="col-list" data-scope="inventory">
+                <div id="prefixRow" class="col-row">
+                  <label for="edit-skuPrefix">SKU prefix</label>
+                  <input id="edit-skuPrefix" name="skuPrefix" class="prefix" maxlength="8" placeholder="SKU-" autocomplete="off" />
+                </div>
+              </div>
+            </details>
+          </div>
+          <div role="group" aria-labelledby="h-orders">
+            <div class="title-row">
+              <h3 id="h-orders">Orders</h3>
+              <button type="button" class="info" aria-label="About orders" aria-describedby="tip-orders">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-orders" role="tooltip" class="tip">AliSwift can read and add orders on this sheet's Orders tab. Leave the tab name empty to turn orders off for this sheet.</span>
+            </div>
+            <div class="orders-tab">
+              <label for="editOTab">Orders tab <span class="muted">(optional)</span></label>
+              <input id="editOTab" name="oTab" placeholder="Orders" autocomplete="off" />
+            </div>
+            <details id="orderCols" class="disclosure">
+              <summary>Order columns <span class="muted">Advanced</span></summary>
+              <div id="orderGrid" class="col-grid" data-scope="orders">
+                <div>
+                  <label for="edit-oRow">First row</label>
+                  <input id="edit-oRow" name="oRow" type="number" min="1" step="1" />
+                </div>
+              </div>
+            </details>
           </div>
         </div>
         <div class="dialog-foot">
@@ -213,27 +278,87 @@
     </dialog>
 
     <dialog id="addDialog" aria-labelledby="addTitle">
-      <form id="addForm">
+      <form id="addForm" autocomplete="off">
         <div class="dialog-head"><h2 id="addTitle">Add sheet</h2></div>
         <div class="dialog-body">
-          <div>
-            <label for="sheetName">Name</label>
-            <input id="sheetName" maxlength="40" placeholder="My store" required autofocus autocomplete="off" />
-          </div>
-          <div>
-            <label for="sheetRef">Sheet link or ID</label>
-            <input id="sheetRef" placeholder="https://docs.google.com/spreadsheets/d/..." required autocomplete="off" />
-          </div>
-          <div>
-            <label for="newSheetTab">Sheet tab</label>
-            <input id="newSheetTab" placeholder="Sheet1" autocomplete="off" />
-          </div>
-          <p id="addError" class="notice error" role="alert"></p>
+          <fieldset id="addInputs" class="bare">
+            <div class="segmented" data-stretch role="radiogroup" aria-label="How to add a sheet">
+              <label><input type="radio" name="addMode" value="auto" checked /><span>Auto</span></label>
+              <label><input type="radio" name="addMode" value="manual" /><span>Manual</span></label>
+            </div>
+            <p id="modeCaption" class="muted">AliSwift creates a ready-made Google Sheet for you.</p>
+            <div id="addNotice" class="notice" data-tone="error" role="alert" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
+              <div></div>
+            </div>
+            <div>
+              <label for="sheetName">Name</label>
+              <input id="sheetName" maxlength="40" placeholder="My store" required autofocus autocomplete="off" />
+            </div>
+
+            <fieldset id="autoFields" class="bare">
+              <div class="fields-row">
+                <div>
+                  <label for="region">Marketplace</label>
+                  <select id="region"></select>
+                </div>
+                <div>
+                  <div class="title-row" data-align="end">
+                    <label for="homeCur">Your currency</label>
+                    <button type="button" class="info" aria-label="About your currency" aria-describedby="tip-cur">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+                    <span id="tip-cur" role="tooltip" class="tip">The currency you actually spend. AliSwift shows profit in this currency too, using the exchange rate.</span>
+                  </div>
+                  <input id="homeCur" class="code" maxlength="3" pattern="[A-Za-z]{3}" placeholder="PKR" required autocomplete="off" />
+                </div>
+                <div>
+                  <div class="title-row" data-align="end">
+                    <label for="rate">Backup rate <span class="muted">(optional)</span></label>
+                    <button type="button" class="info" aria-label="About the backup rate" aria-describedby="tip-rate">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+                    <span id="tip-rate" role="tooltip" class="tip">The sheet looks up the live exchange rate itself. This number is only used if the lookup ever fails.</span>
+                  </div>
+                  <input id="rate" type="number" min="0" max="10000000" step="any" inputmode="decimal" placeholder="e.g. 374.37" autocomplete="off" />
+                </div>
+              </div>
+              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs.</p>
+            </fieldset>
+
+            <fieldset id="manualFields" class="bare" hidden disabled>
+              <div>
+                <label for="sheetRef">Sheet link or ID</label>
+                <input id="sheetRef" placeholder="https://docs.google.com/spreadsheets/d/..." required autocomplete="off" />
+              </div>
+              <div>
+                <label for="newSheetTab">Sheet tab</label>
+                <input id="newSheetTab" placeholder="Sheet1" autocomplete="off" />
+              </div>
+            </fieldset>
+          </fieldset>
+          <p id="addStatus" class="muted" role="status" hidden></p>
         </div>
         <div class="dialog-foot">
           <div class="actions">
             <button id="cancelBtn" class="btn btn-quiet" type="button">Cancel</button>
-            <button class="btn" type="submit">Add</button>
+            <button id="addSubmit" class="btn" type="submit">Create sheet</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="importDialog" aria-labelledby="impTitle">
+      <form method="dialog">
+        <div class="dialog-head"><h2 id="impTitle">Import settings</h2></div>
+        <div class="dialog-body">
+          <p><strong id="impQ"></strong></p>
+          <p id="impWhy" class="muted">Other settings in the file replace yours too. Your Gemini key isn't affected.</p>
+        </div>
+        <div class="dialog-foot">
+          <div class="actions">
+            <button id="impKeep" class="btn btn-quiet" type="button" aria-describedby="impWhy" autofocus>Keep my settings</button>
+            <button id="impGo" class="btn btn-danger" type="button" data-confirm></button>
           </div>
         </div>
       </form>

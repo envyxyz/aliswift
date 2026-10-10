@@ -4,6 +4,15 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **Auto sheets.** Add sheet now has an Auto / Manual switch. Auto asks for a name, a marketplace (eBay UK or eBay US) and your own currency, then creates a ready-made Google Sheet in your Drive with Dashboard, Inventory and Orders tabs. There are no columns or IDs to type. Manual is the old flow. After it is added, an Auto sheet is edited and used exactly like a Manual one.
+- The new sheet has a fee settings strip (hidden), per-product fee, net profit and margin formulas, a live exchange rate with an optional backup rate, status drop-downs, a QTY column on Orders and a Dashboard with totals. Cancelled orders are left out of the totals. Every fee line is rounded to the penny, as eBay invoices it. The international fee and tax on fees are defaults to check against a real order: they are editable cells with a note.
+- **SKUs.** A sheet with a SKU column gets the SKU the template would show for the new row ("Added as SKU-31" on the button and in the popup). If that SKU is taken, the highest number plus one is used.
+- Edit sheet gains Marketplace, optional SKU, Status, Image, Profit and Margin columns with a SKU prefix, an Orders tab with its column map, and a "Use AliSwift template layout" button that fills all of them for a sheet you made by hand.
+- **Settings backup.** Export settings saves your sheets and settings to a file; Import settings replaces them from a file, after a confirmation that shows the counts. Nothing from local storage (no keys, no cached data) is included.
+- If the setup of a new sheet fails, the dialog offers "Retry setup" on the same file instead of leaving half a sheet behind.
+
 ### Changed
 
 - Settings are split into tabs: Sheets, Pricing, Title and General. Explanations moved out from under the inputs into "i" icons that show a tooltip on hover and keyboard focus.
@@ -12,7 +21,10 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 - "Tab name" is now called "Sheet tab".
 - The page button follows "Show the Add to Sheet button on AliExpress pages" straight away, without reloading the product page.
 - Shared styles (`lib/ui.css`) now cover tabs, dialogs, tooltips, toasts and empty states, and `lib/ui.js` adds toasts. The popup and page button pick up the same error red.
-- Requires Chrome 117 or newer.
+- Requires Chrome 119 or newer.
+- The page button and the popup show "Added as SKU-31" for three seconds (was two), so the SKU can be read.
+- The next row is found from the SKU and keywords columns in one request.
+- The service worker answers messages through one table of handlers, and only AliSwift's own pages can ask it to create a sheet.
 - Popup and settings page redesigned. They use system fonts (no Google Fonts request), follow your system light or dark theme, and the popup picks sheets with a native dropdown.
 - Settings now save as you change them. There is no Save button, and switching sheets no longer drops edits.
 - Adding a sheet accepts the full Google Sheets link as well as the ID. New sheets start from default settings.
@@ -23,6 +35,12 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 - Removed the profile button. It never showed an avatar because the Google scope for it was never granted.
 
 ### Fixed
+
+- Saving the "Show the Add to Sheet button" setting now reports a failure ("Not saved" and a Retry button) and puts the checkbox back.
+- A sheet name made only of spaces is rejected in Add and Edit.
+- Delete is disabled in the Edit dialog once the sheet was deleted in another window, and Enter no longer saves while the delete question is showing.
+- Keyboard focus no longer falls to the page after choosing a sheet chip or after closing the Edit dialog on a deleted sheet.
+- Tooltips inside dialogs stay inside the dialog down to 320px wide, can be scrolled into view in a short window, and have an outline in forced-colors mode.
 
 - "First data row" was saved in one place and read from another, so it was ignored.
 - "Show button on AliExpress pages" was saved but never read.

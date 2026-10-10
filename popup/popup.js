@@ -95,13 +95,13 @@ $("form").addEventListener("submit", async (e) => {
     .catch((err) => ({ error: err.message }));
 
   if (result?.success) {
-    setButton("success", "Added");
+    setButton("success", result.sku ? `Added as ${result.sku}` : "Added");
   } else {
     setButton("", "Add to Sheet");
     setStatus(result?.error ?? "Something went wrong.", true);
     return;
   }
-  resetTimer = setTimeout(() => setButton("", "Add to Sheet"), 2000);
+  resetTimer = setTimeout(() => setButton("", "Add to Sheet"), 3000); // long enough to read the SKU
 });
 
 init();

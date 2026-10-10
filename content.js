@@ -79,11 +79,11 @@ async function addToSheet(btn) {
     result = { error: e.message };
   }
   if (result?.success) {
-    setState(btn, "success", "Added");
+    setState(btn, "success", result.sku ? `Added as ${result.sku}` : "Added");
   } else {
     setState(btn, "error", result?.error ?? "Something went wrong");
   }
-  resetTimer = setTimeout(() => setState(btn, "", LABEL), result?.success ? 2000 : 4000);
+  resetTimer = setTimeout(() => setState(btn, "", LABEL), result?.success ? 3000 : 4000); // long enough to read the SKU
 }
 
 function injectButton() {

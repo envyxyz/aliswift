@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
@@ -49,4 +50,40 @@ test("options.html aria and label references point at real ids", () => {
 
 test("description fits the Chrome Web Store limit", () => {
   assert.ok(manifest.description.length <= 132);
+});
+
+test("every key in an options form list has an input in that form, and the lists cover every sheet setting", () => {
+  const html = fs.readFileSync(path.join(root, "options/options.html"), "utf8");
+  const js = fs.readFileSync(path.join(root, "options/options.js"), "utf8");
+  // Run just the list declarations from options.js, not the page.
+  const decls = js.match(/^const (?:PRICING_KEYS|TITLE_KEYS|COLUMNS|ORDER_COLS|EDIT_KEYS) = [\s\S]*?;$/gm);
+  assert.equal(decls.length, 5);
+  const lists = JSON.parse(
+    vm.runInNewContext(
+      `(() => { ${decls.join("\n")}
+        return JSON.stringify({ PRICING_KEYS, TITLE_KEYS, COLUMNS, ORDER_COLS, EDIT_KEYS }); })()`,
+    ),
+  );
+  const { SHEET_DEFAULTS } = require("../lib/shared.js");
+
+  // The column rows are built by options.js from COLUMNS, so those keys have no static input.
+  const built = new Set(lists.COLUMNS.map((c) => c.key));
+  const forms = [
+    ["pricingForm", lists.PRICING_KEYS],
+    ["titleForm", lists.TITLE_KEYS],
+    ["editForm", lists.EDIT_KEYS],
+  ];
+  for (const [id, keys] of forms) {
+    const form = html.match(new RegExp(`<form id="${id}"[\\s\\S]*?</form>`))?.[0];
+    assert.ok(form, `${id} is missing from options.html`);
+    for (const key of keys) {
+      assert.ok(built.has(key) || form.includes(`name="${key}"`), `${id} has no input named ${key}`);
+    }
+  }
+
+  // oCols is edited through one input per Orders column.
+  assert.deepEqual(lists.ORDER_COLS.map((c) => c.key), Object.keys(SHEET_DEFAULTS.oCols));
+  const edited = new Set([...lists.PRICING_KEYS, ...lists.TITLE_KEYS, ...lists.EDIT_KEYS, "oCols"]);
+  edited.delete("name"); // the name belongs to the sheet, not to SHEET_DEFAULTS
+  assert.deepEqual([...edited].sort(), Object.keys(SHEET_DEFAULTS).sort());
 });

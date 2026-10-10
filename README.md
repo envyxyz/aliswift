@@ -26,7 +26,10 @@ You can keep several sheets, each with its own column layout and pricing rules. 
 ## Features
 
 - **One click** from the green button on the product page, or from the toolbar popup
+- **Auto sheets**: AliSwift creates a Google Sheet for you, set up for eBay UK or eBay US with fee, profit and margin formulas, status lists and an Orders tab
 - **Multiple sheets**, each with its own columns, tab name and pricing
+- **SKUs** added with each product, matching the numbering of the sheet it creates
+- **Settings backup**: export and import your sheets and settings as a file
 - **Formula or margin pricing**, for example `costPrice * 1.7` or `(costPrice + 2) * 1.5`
 - **Landed cost**: item price, plus shipping when the page shows it, plus an extra cost you set
 - **.99 rounding** for sell prices (4.77 becomes 4.99)
@@ -67,11 +70,17 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 
 ## Set up
 
+**Auto (easiest).** Open AliSwift settings (gear icon in the popup), click **Add sheet** and keep **Auto** selected. Give the sheet a name, pick eBay UK or eBay US, and type the currency you spend in (for example PKR). Click **Create sheet**. AliSwift creates a Google Sheet in your Drive with Dashboard, Inventory and Orders tabs and adds it for you. There are no columns to set. Then open the **Pricing** tab and pick formula or margin pricing. The fee rates sit in a hidden first row of the Inventory tab (unhide row 1 to edit them); the international fee and tax rates are defaults, so check them against a real order's fee breakdown.
+
+**Manual (a sheet you already have).**
+
 1. Create a Google Sheet. It has to be a native Google Sheet, not an uploaded `.xlsx` file.
-2. Open AliSwift settings (gear icon in the popup) and click **Add sheet**.
+2. Open AliSwift settings, click **Add sheet**, and switch to **Manual**.
 3. Paste the sheet's link, give it a name, and type the sheet tab (for example `Inventory`).
-4. Click the pencil next to the sheet and check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E.
+4. Click the pencil next to the sheet and check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E. **Use AliSwift template layout** fills every field for a sheet shaped like the Auto one.
 5. Open the **Pricing** tab and pick formula or margin pricing. Settings save as you change them.
+
+**Moving to another computer.** On the **General** tab, **Export settings** saves your sheets and settings to `aliswift-settings.json`. **Import settings** loads that file. Your sheets themselves live in Google Sheets and are not part of the file.
 
 The first time you add a product, Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
 
@@ -79,7 +88,9 @@ The first time you add a product, Google asks you to let AliSwift edit your spre
 
 1. Open an AliExpress product page.
 2. Click the green **Add to Sheet** button on the page, or click the AliSwift icon, check the values, and press **Add to Sheet**.
-3. The row is written below the last filled keyword in your sheet.
+3. The row is written below the last filled keyword in your sheet. If the sheet has a SKU column, the button shows the SKU it was given, for example "Added as SKU-31".
+
+AliSwift only ever writes into the next free row. It never deletes rows or clears cells.
 
 To switch sheets, use the dropdown in the popup or click another sheet on the Sheets tab. Prices are recalculated with that sheet's rules.
 
