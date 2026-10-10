@@ -10,8 +10,8 @@ const read = (file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8")
 
 // Runs background.js against a fake chrome + fetch. `replies` are fetch responses in order.
 // `local` seeds chrome.storage.local; `tokens` is what getAuthToken hands out in turn (null = it fails, as it
-// does when a prompt would be needed); the last one repeats.
-function setup(sheet, replies, { local = {}, tokens = ["token"] } = {}) {
+// does when a prompt would be needed); the last one repeats. `failure` is Chrome's message for a null token.
+function setup(sheet, replies, { local = {}, tokens = ["token"], failure = "OAuth2 not granted or revoked." } = {}) {
   const calls = [];
   const removed = [];
   const tokenCalls = [];
@@ -27,7 +27,7 @@ function setup(sheet, replies, { local = {}, tokens = ["token"] } = {}) {
         tokenCalls.push(opts);
         const token = tokens.length > 1 ? tokens.shift() : tokens[0];
         if (token) return cb(token);
-        chrome.runtime.lastError = { message: "OAuth2 not granted or revoked." };
+        chrome.runtime.lastError = { message: failure };
         cb();
         chrome.runtime.lastError = undefined;
       },
@@ -387,6 +387,18 @@ test("authState answers from a silent probe and never hands out the token", asyn
   assert.equal(off.tokenCalls.length, 0);
 });
 
+test("a silent token that failed only because Google can't be reached is unknown, never signed out", async () => {
+  const net = { tokens: [null], failure: "OAuth2 request failed: Service responded with network error code -106" };
+  assert.deepEqual(await ask(setup(sheet, [], net).listener, { action: "authState" }, page), { success: true, signedIn: null });
+  const save = setup(sheet, [], net);
+  assert.deepEqual(await save.appendRow(product), { success: false, code: "offline", error: "Couldn't reach Google. Check your connection." });
+  assert.equal(save.calls.length, 0);
+  // Chrome's wording for needing a sign-in still reads as signed out.
+  for (const failure of ["The user is not signed in.", "OAuth2 not granted or revoked."]) {
+    assert.deepEqual(await ask(setup(sheet, [], { tokens: [null], failure }).listener, { action: "authState" }, page), { success: true, signedIn: false }, failure);
+  }
+});
+
 test("signIn is the only interactive call, from AliSwift's pages, and clears the signed-out flag once Google answers", async () => {
   const { listener, tokenCalls, store } = setup(sheet, [], { local: { authOff: true } });
   assert.deepEqual(await ask(listener, { action: "signIn" }, page), { success: false, error: "Not allowed." });
@@ -473,9 +485,17 @@ test("the rate lookup refuses a bad pair; setRate is for AliSwift's pages and ke
   assert.deepEqual(await ask(listener, set, options), { success: true });
   assert.equal(store.rates["GBP:PKR:typed"].rate, 374.37);
   assert.equal(store.rates["GBP:PKR"], undefined);
-  for (const rate of [0, -1, "x", 1e9]) {
+  for (const rate of [0, -1, "x", 1e-7, 1e9]) {
     assert.equal((await ask(listener, { ...set, data: { ...set.data, rate } }, options)).success, false, String(rate));
   }
+});
+
+test("rates saved at the same moment all survive", async () => {
+  const { listener, store } = setup(sheet, []);
+  const save = (from, rate) => ask(listener, { action: "setRate", data: { from, to: "GBP", rate } }, options);
+  const results = await Promise.all([save("PKR", 374), save("USD", 1.25), save("EUR", 1.15)]);
+  assert.ok(results.every((r) => r.success));
+  assert.deepEqual(Object.keys(store.rates).sort(), ["GBP:EUR:typed", "GBP:PKR:typed", "GBP:USD:typed"]);
 });
 
 /* Your data stays yours */

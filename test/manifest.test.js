@@ -49,6 +49,14 @@ test("options.html aria and label references point at real ids", () => {
   for (const [, id] of refs) assert.ok(ids.has(id), `options.html refers to #${id}, which does not exist`);
 });
 
+test("the Add sheet buttons point at the sign-in hint only while it shows", () => {
+  const html = fs.readFileSync(path.join(root, "options/options.html"), "utf8");
+  const js = fs.readFileSync(path.join(root, "options/options.js"), "utf8");
+  assert.doesNotMatch(html, /aria-describedby="lockSheets"/); // a hidden description is still read out
+  assert.match(js, /setAttribute\("aria-describedby", "lockSheets"\)/);
+  assert.match(js, /removeAttribute\("aria-describedby"\)/);
+});
+
 test("sign-in asks for no extra permission: no email, one scope", () => {
   assert.deepEqual(manifest.permissions, ["storage", "identity"]); // not identity.email, which warns "Know your email address"
   assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/spreadsheets"]);

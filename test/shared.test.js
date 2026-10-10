@@ -15,6 +15,8 @@ const {
   detectCurrency,
   currencyKind,
   rateFromCell,
+  validRate,
+  RATE_MESSAGE,
 } = require("../lib/shared.js");
 
 test("parsePrice handles currency text and both decimal styles", () => {
@@ -80,10 +82,30 @@ test("detectCurrency reads a code or an unambiguous symbol from the price text",
   const cases = {
     "PKR 1,491.00": "PKR", "PKR1,491.00": "PKR", "usd 4.77": "USD", "Rs.1,491": "PKR", "Rs 1,491": "PKR", "₨ 1491": "PKR",
     "£8.97": "GBP", "4,77 €": "EUR", "US $4.77": "USD", "US$4.77": "USD", "C$12.50": "CAD", "A$9.00": "AUD",
+    "AU$9.00": "AUD", "AU $9.00": "AUD", "NZ$9.50": "NZD", "HK$30.00": "HKD", "R$ 25,90": "BRL", "₽ 450": "RUB", "450 ₽": "RUB",
+    "JP¥1,200": "JPY", "CN¥45.00": "CNY",
   };
   for (const [text, code] of Object.entries(cases)) assert.equal(detectCurrency("", text), code, text);
   // Words that only look like a marker are not one.
-  for (const text of ["Rsx 5", "price 5", "TRYING 5", ""]) assert.equal(detectCurrency("", text), "", text);
+  for (const text of ["Rsx 5", "price 5", "TRYING 5", "", "BAU$ 5", "XR$ 5"]) assert.equal(detectCurrency("", text), "", text);
+});
+
+test("detectCurrency: a bare ¥ is the yen or the yuan, settled by the cookie, else the page language, else unknown", () => {
+  const jar = (c) => `aep_usuc_f=site=glo&c_tp=${c}&region=PK`;
+  assert.equal(detectCurrency(jar("JPY"), "¥1,200"), "JPY");
+  assert.equal(detectCurrency(jar("CNY"), "￥45"), "CNY");
+  assert.equal(detectCurrency(jar("CNY"), "¥45", "ja"), "CNY"); // the cookie is the chosen currency, the language is only a hint
+  assert.equal(detectCurrency("", "¥1,200", "ja"), "JPY");
+  assert.equal(detectCurrency("", "¥45", "zh-CN"), "CNY");
+  // Neither says: never a guess, and a cookie for some other currency does not make a ¥ price that currency.
+  for (const [cookie, lang] of [["", ""], ["", "en"], [jar("USD"), "en"], [jar("PKR"), ""]]) assert.equal(detectCurrency(cookie, "¥45", lang), "", `${cookie} ${lang}`);
+  assert.equal(detectCurrency(jar("USD"), "$4.77", "ja"), "USD"); // the language only matters for a ¥
+});
+
+test("validRate accepts what setRate accepts and nothing else", () => {
+  for (const rate of [1e-6, 0.5, 374.37, "374.37", 1e7]) assert.equal(validRate(rate), true, String(rate));
+  for (const rate of [0, 1e-7, -1, 1e7 + 1, 1e9, NaN, "x", "", null, undefined]) assert.equal(validRate(rate), false, String(rate));
+  assert.match(RATE_MESSAGE, /0\.000001.*10,000,000/);
 });
 
 test("detectCurrency falls back to the cookie only when the text does not say", () => {

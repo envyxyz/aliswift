@@ -8,6 +8,7 @@ let row; // the product the page button would save: see scrapeRow in content.js
 let sheet; // the active sheet's settings, to price a rate typed here
 let editing = false; // the rate box is open
 let typed = false; // the rate was typed here and is saved when the product is added
+let rateBad = false; // what was typed is not a rate AliSwift accepts (see validRate)
 
 function show(view, message = "") {
   $("signin").hidden = view !== "signin";
@@ -61,7 +62,9 @@ function renderCurrency() {
   const { kind, fx } = row;
   const rated = kind === "convert" && !noRate();
   const warn = noRate()
-    ? `No ${fx.from} to ${fx.to} rate found. Enter one to continue.`
+    ? rateBad
+      ? RATE_MESSAGE
+      : `No ${fx.from} to ${fx.to} rate found. Enter one to continue.`
     : kind === "unset"
       ? "This sheet's marketplace isn't set, so prices are saved as shown."
       : kind === "unknown"
@@ -87,6 +90,7 @@ function renderCurrency() {
   }
 
   $("rateRow").hidden = kind !== "convert" || !(editing || noRate());
+  $("rate").setAttribute("aria-invalid", String(rateBad));
   $("rateTo").textContent = fx?.to ?? "";
   $("rateUnit").textContent = fx?.from ?? "";
 }
@@ -99,7 +103,7 @@ async function loadProduct() {
   if (!found) return show("notice", "Couldn't read this page. Refresh it and try again.");
   row = found;
   sheet = (await getActiveSheet()) ?? SHEET_DEFAULTS;
-  editing = typed = false;
+  editing = typed = rateBad = false;
   $("rate").value = "";
   $("title").value = row.title;
   $("link").value = row.link;
@@ -140,13 +144,15 @@ $("sheet").addEventListener("change", async () => {
   await loadProduct();
 });
 
-// A rate typed here prices the product again, in the sheet's currency, as the page button would.
+// A rate typed here prices the product again, in the sheet's currency, as the page button would. A rate the
+// service worker would refuse (validRate) counts as no rate, with the reason shown, so nothing is saved on it.
 $("rate").addEventListener("input", () => {
   const text = $("rate").value.trim();
   const rate = /^\d+([.,]\d+)?$/.test(text) ? Number(text.replace(",", ".")) : 0;
   const { fx } = row;
   editing = typed = true;
-  fx.rate = rate > 0 ? rate : null;
+  rateBad = text !== "" && !validRate(rate);
+  fx.rate = validRate(rate) ? rate : null;
   fx.source = "typed";
   fx.at = Date.now();
   if (fx.rate) {
@@ -185,7 +191,8 @@ $("form").addEventListener("submit", async (e) => {
   } else {
     setButton("", LABEL);
     // ponytail: signed out shows the sign-in section until P3's library gives the popup somewhere to save.
-    if (result?.code === "signin") return show("signin");
+    // setAuth(false) tells the account button too, so signing in again fires authchange and the form returns.
+    if (result?.code === "signin") return setAuth(false);
     setStatus(result?.error ?? "Something went wrong.", true);
     return;
   }
@@ -193,5 +200,6 @@ $("form").addEventListener("submit", async (e) => {
 });
 
 // The account button reports the sign-in state once it knows it, and again whenever it changes.
-profileButton($("profile"));
-document.addEventListener("authchange", (e) => (e.detail.signedIn ? init() : show("signin")));
+// null means it couldn't tell (offline): carry on, a save will say if sign-in is needed.
+const setAuth = profileButton($("profile"));
+document.addEventListener("authchange", (e) => (e.detail.signedIn === false ? show("signin") : init()));
