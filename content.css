@@ -32,7 +32,7 @@
 }
 
 .aliswift-btn[data-state="error"] {
-  background: #b3261e;
+  background: #c4281c;
 }
 
 .aliswift-btn[data-state="loading"]::before {

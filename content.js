@@ -102,13 +102,23 @@ function injectButton() {
   return true;
 }
 
-chrome.storage.sync.get({ showPageButton: true }, ({ showPageButton }) => {
-  if (!showPageButton) return;
+let injectTimer;
+
+function showButton(show) {
+  clearInterval(injectTimer);
+  if (!show) return document.getElementById("aliswift-page-btn")?.remove();
   // The page renders late: retry every 500ms for up to 10 seconds.
   let attempts = 0;
-  const timer = setInterval(() => {
-    if (injectButton() || ++attempts >= 20) clearInterval(timer);
+  injectTimer = setInterval(() => {
+    if (injectButton() || ++attempts >= 20) clearInterval(injectTimer);
   }, 500);
+}
+
+chrome.storage.sync.get({ showPageButton: true }, ({ showPageButton }) => showButton(showPageButton));
+
+// The settings page toggles the button without a page reload.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.showPageButton) showButton(changes.showPageButton.newValue ?? true);
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

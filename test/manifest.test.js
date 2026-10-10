@@ -30,6 +30,23 @@ test("pages only load local scripts and styles", () => {
   }
 });
 
+test("options.js only uses ids that exist in options.html", () => {
+  const html = fs.readFileSync(path.join(root, "options/options.html"), "utf8");
+  const js = fs.readFileSync(path.join(root, "options/options.js"), "utf8");
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+  const used = [...js.matchAll(/(?:\$|getElementById)\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(used.length > 20, "the id scan found almost nothing");
+  for (const id of used) assert.ok(ids.has(id), `options.js uses #${id}, missing from options.html`);
+});
+
+test("options.html aria and label references point at real ids", () => {
+  const html = fs.readFileSync(path.join(root, "options/options.html"), "utf8");
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+  const refs = [...html.matchAll(/\b(?:aria-describedby|aria-labelledby|aria-controls|for)="([^"]+)"/g)];
+  assert.ok(refs.length > 20, "the reference scan found almost nothing");
+  for (const [, id] of refs) assert.ok(ids.has(id), `options.html refers to #${id}, which does not exist`);
+});
+
 test("description fits the Chrome Web Store limit", () => {
   assert.ok(manifest.description.length <= 132);
 });
