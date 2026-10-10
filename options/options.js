@@ -1,276 +1,173 @@
-document.addEventListener("DOMContentLoaded", async () => {
-  const form = document.getElementById("settingsForm");
-  const saveBtn = document.getElementById("saveBtn");
-  const saveStatus = document.getElementById("saveStatus");
-  const addSheetBtn = document.getElementById("addSheetBtn");
-  const addSheetModal = document.getElementById("addSheetModal");
-  const modalOverlay = document.getElementById("modalOverlay");
-  const cancelSheetBtn = document.getElementById("cancelSheetBtn");
-  const saveSheetBtn = document.getElementById("saveSheetBtn");
-  const newSheetName = document.getElementById("newSheetName");
-  const newSheetId = document.getElementById("newSheetId");
-  const newSheetTab = document.getElementById("newSheetTab");
-  const sheetNuggets = document.getElementById("sheetNuggets");
-  const noSheetsMsg = document.getElementById("noSheetsMsg");
+const $ = (id) => document.getElementById(id);
+const form = $("settings");
+const KEYS = Object.keys(SHEET_DEFAULTS);
+const COLS = ["keywordsCol", "linkCol", "priceCol", "salePriceCol"];
 
-  const keywordsColInput = document.getElementById("keywordsCol");
-  const priceColInput = document.getElementById("priceCol");
-  const salePriceColInput = document.getElementById("salePriceCol");
-  const linkColInput = document.getElementById("linkCol");
-  const sheetTabInput = document.getElementById("sheetTabInput");
-  const startRowInput = document.getElementById("startRow");
-  const showPageButtonInput = document.getElementById("showPageButton");
-  const methodFormulaRadio = document.getElementById("methodFormula");
-  const methodMarginRadio = document.getElementById("methodMargin");
-  const formulaValueInput = document.getElementById("formulaValue");
-  const marginPercentInput = document.getElementById("marginPercent");
-  const titleLengthInput = document.getElementById("titleLength");
-  const excludeKeywordsInput = document.getElementById("excludeKeywords");
-  const includeSalePriceInput = document.getElementById("includeSalePrice");
-  const roundToNinetyNineInput = document.getElementById("roundToNinetyNine");
-  const extraCostInput = document.getElementById("extraCost");
+let sheets = [];
+let activeId = "";
+let statusTimer;
 
-  function togglePricingInputs() {
-    if (methodFormulaRadio.checked) {
-      document.getElementById("formulaInput").style.display = "block";
-      document.getElementById("marginInput").style.display = "none";
-    } else {
-      document.getElementById("formulaInput").style.display = "none";
-      document.getElementById("marginInput").style.display = "block";
-    }
+function flash(text, isError = false) {
+  clearTimeout(statusTimer);
+  $("saveStatus").textContent = text;
+  $("saveStatus").classList.toggle("error", isError);
+  if (!isError) statusTimer = setTimeout(() => ($("saveStatus").textContent = ""), 1500);
+}
+
+async function persist() {
+  try {
+    await chrome.storage.sync.set({ sheets, activeSheetId: activeId });
+    flash("Saved");
+  } catch (e) {
+    flash(`Couldn't save: ${e.message}`, true);
   }
+}
 
-  document.querySelectorAll('input[name="pricingMethod"]').forEach((radio) => {
-    radio.addEventListener("change", togglePricingInputs);
+function fill(sheet) {
+  for (const k of KEYS) {
+    const el = form.elements[k];
+    if (el.type === "checkbox") el.checked = sheet[k];
+    else el.value = sheet[k];
+  }
+  togglePricing();
+}
+
+function read() {
+  const out = {};
+  for (const k of KEYS) {
+    const el = form.elements[k];
+    if (el.type === "checkbox") out[k] = el.checked;
+    else if (el.type === "number") out[k] = el.value === "" ? SHEET_DEFAULTS[k] : Number(el.value);
+    else out[k] = el.value.trim();
+    if (k.endsWith("Col")) out[k] = out[k].toUpperCase();
+  }
+  return out;
+}
+
+function togglePricing() {
+  const isFormula = form.elements.pricingMethod.value === "formula";
+  $("formulaField").hidden = !isFormula;
+  $("marginField").hidden = isFormula;
+  form.elements.formulaValue.required = isFormula;
+  form.elements.marginPercent.required = !isFormula;
+}
+
+function validate() {
+  const cols = COLS.map((k) => form.elements[k]);
+  for (const el of cols) {
+    const taken = cols.some((o) => o !== el && o.value.toUpperCase() === el.value.toUpperCase());
+    el.setCustomValidity(taken ? "Each field needs its own column." : "");
+  }
+  const { formulaValue, pricingMethod } = form.elements;
+  const badFormula = pricingMethod.value === "formula" && evalFormula(formulaValue.value, 1) === null;
+  formulaValue.setCustomValidity(badFormula ? "Use costPrice with + - * / and parentheses." : "");
+}
+
+function chip(sheet) {
+  const el = document.createElement("div");
+  el.className = "chip";
+  el.toggleAttribute("data-active", sheet.id === activeId);
+
+  const select = document.createElement("button");
+  select.type = "button";
+  select.className = "select";
+  select.textContent = sheet.name;
+  select.setAttribute("aria-pressed", String(sheet.id === activeId));
+  select.addEventListener("click", () => {
+    activeId = sheet.id;
+    persist();
+    render();
   });
 
-  // Loads per-sheet fields (column mapping + sheet tab) from a sheet object.
-  function loadSheetColumnSettings(sheet) {
-    keywordsColInput.value = sheet.keywordsCol || "B";
-    priceColInput.value = sheet.priceCol || "D";
-    salePriceColInput.value = sheet.salePriceCol || "E";
-    linkColInput.value = sheet.linkCol || "C";
-    sheetTabInput.value = sheet.sheetTab || "Sheet1";
-  }
-
-  // Loads per-sheet behavior + pricing fields from a sheet object.
-  function loadSheetBehaviorSettings(sheet) {
-    titleLengthInput.value = sheet.titleLength || 8;
-    excludeKeywordsInput.value = sheet.excludeKeywords || "";
-    includeSalePriceInput.checked = sheet.includeSalePrice !== false;
-    roundToNinetyNineInput.checked = sheet.roundToNinetyNine || false;
-    extraCostInput.value = sheet.extraCost || 0;
-    const method = sheet.pricingMethod || "formula";
-    document.querySelector(
-      `input[name="pricingMethod"][value="${method}"]`,
-    ).checked = true;
-    formulaValueInput.value = sheet.formulaValue || "costPrice * 1.7";
-    marginPercentInput.value = sheet.marginPercent || 25;
-    togglePricingInputs();
-  }
-
-  function openModal() {
-    // FIX: explicitly clear all three modal fields every time the modal opens.
-    newSheetName.value = "";
-    newSheetId.value = "";
-    newSheetTab.value = "";
-    addSheetModal.style.display = "block";
-    modalOverlay.style.display = "block";
-  }
-
-  function closeModal() {
-    addSheetModal.style.display = "none";
-    modalOverlay.style.display = "none";
-    newSheetName.value = "";
-    newSheetId.value = "";
-    newSheetTab.value = "";
-  }
-
-  async function renderNuggets() {
-    const storage = await new Promise((r) =>
-      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r),
-    );
-
-    sheetNuggets.innerHTML = "";
-    noSheetsMsg.style.display = storage.sheets.length === 0 ? "block" : "none";
-
-    storage.sheets.forEach((sheet, idx) => {
-      const nugget = document.createElement("div");
-      nugget.className =
-        "nugget" + (sheet.id === storage.activeSheetId ? " active" : "");
-      nugget.innerHTML = `${sheet.name}<button type="button" class="delete-nugget" data-idx="${idx}">×</button>`;
-
-      nugget.addEventListener("click", (e) => {
-        if (!e.target.classList.contains("delete-nugget")) {
-          chrome.storage.sync.set({ activeSheetId: sheet.id }, renderNuggets);
-          loadSheetColumnSettings(sheet);
-          loadSheetBehaviorSettings(sheet);
-        }
-      });
-
-      nugget.querySelector(".delete-nugget").addEventListener("click", (e) => {
-        e.stopPropagation();
-        storage.sheets.splice(idx, 1);
-        if (sheet.id === storage.activeSheetId) {
-          storage.activeSheetId =
-            storage.sheets.length > 0 ? storage.sheets[0].id : "";
-        }
-        chrome.storage.sync.set(
-          { sheets: storage.sheets, activeSheetId: storage.activeSheetId },
-          renderNuggets,
-        );
-      });
-
-      sheetNuggets.appendChild(nugget);
-    });
-  }
-
-  addSheetBtn.addEventListener("click", openModal);
-
-  // Close on overlay click.
-  modalOverlay.addEventListener("click", closeModal);
-
-  cancelSheetBtn.addEventListener("click", closeModal);
-
-  saveSheetBtn.addEventListener("click", async () => {
-    const name = newSheetName.value.trim();
-    const id = newSheetId.value.trim();
-
-    if (!name || !id) {
-      alert("Please fill in both Sheet Name and Sheet ID.");
-      return;
-    }
-
-    const storage = await new Promise((r) =>
-      chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, r),
-    );
-
-    // Guard against duplicate sheet IDs.
-    if (storage.sheets.some((s) => s.id === id)) {
-      alert("A sheet with this ID already exists.");
-      return;
-    }
-
-    storage.sheets.push({
-      name,
-      id,
-      sheetTab: newSheetTab.value.trim() || "Sheet1",
-      keywordsCol: keywordsColInput.value.trim().toUpperCase() || "B",
-      priceCol: priceColInput.value.trim().toUpperCase() || "D",
-      salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
-      linkCol: linkColInput.value.trim().toUpperCase() || "C",
-      titleLength: parseInt(titleLengthInput.value) || 8,
-      excludeKeywords: excludeKeywordsInput.value.trim(),
-      includeSalePrice: includeSalePriceInput.checked,
-      roundToNinetyNine: roundToNinetyNineInput.checked,
-      extraCost: parseFloat(extraCostInput.value) || 0,
-      pricingMethod:
-        document.querySelector('input[name="pricingMethod"]:checked').value ||
-        "formula",
-      formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
-      marginPercent: parseInt(marginPercentInput.value) || 25,
-    });
-
-    if (!storage.activeSheetId) {
-      storage.activeSheetId = id;
-    }
-
-    chrome.storage.sync.set(
-      { sheets: storage.sheets, activeSheetId: storage.activeSheetId },
-      () => {
-        closeModal();
-        renderNuggets();
-      },
-    );
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "remove";
+  remove.textContent = "×";
+  remove.setAttribute("aria-label", `Remove ${sheet.name}`);
+  remove.addEventListener("click", () => {
+    if (!confirm(`Remove "${sheet.name}"? Its settings are deleted. The Google Sheet itself is untouched.`)) return;
+    sheets = sheets.filter((s) => s.id !== sheet.id);
+    render();
+    persist();
   });
 
-  // Initial load: populate UI from storage.
-  chrome.storage.sync.get(
-    {
-      sheets: [],
-      activeSheetId: "",
-      // Fallback globals (only used when there is no active sheet).
-      startRow: "2",
-      showPageButton: true,
-    },
-    (settings) => {
-      startRowInput.value = settings.startRow;
-      showPageButtonInput.checked = settings.showPageButton;
+  el.append(select, remove);
+  return el;
+}
 
-      const activeSheet = settings.sheets.find(
-        (s) => s.id === settings.activeSheetId,
-      );
+function render() {
+  const active = sheets.find((s) => s.id === activeId) ?? sheets[0];
+  activeId = active?.id ?? "";
+  $("chips").replaceChildren(...sheets.map(chip));
+  $("empty").hidden = sheets.length > 0;
+  form.hidden = !active;
+  if (active) fill({ ...SHEET_DEFAULTS, ...active });
+}
 
-      if (activeSheet) {
-        loadSheetColumnSettings(activeSheet);
-        loadSheetBehaviorSettings(activeSheet);
-      } else {
-        // No active sheet: show safe defaults.
-        keywordsColInput.value = "B";
-        priceColInput.value = "D";
-        salePriceColInput.value = "E";
-        linkColInput.value = "C";
-        sheetTabInput.value = "";
-        titleLengthInput.value = 8;
-        excludeKeywordsInput.value = "";
-        includeSalePriceInput.checked = true;
-        roundToNinetyNineInput.checked = false;
-        extraCostInput.value = 0;
-        methodFormulaRadio.checked = true;
-        formulaValueInput.value = "costPrice * 1.7";
-        marginPercentInput.value = 25;
-        togglePricingInputs();
-      }
-
-      renderNuggets();
-    },
-  );
-
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (current) => {
-      const updatedSheets = current.sheets.map((sheet) => {
-        if (sheet.id === current.activeSheetId) {
-          return {
-            ...sheet,
-            // Per-sheet column + tab settings.
-            keywordsCol: keywordsColInput.value.trim().toUpperCase() || "B",
-            priceCol: priceColInput.value.trim().toUpperCase() || "D",
-            salePriceCol: salePriceColInput.value.trim().toUpperCase() || "E",
-            linkCol: linkColInput.value.trim().toUpperCase() || "C",
-            sheetTab: sheetTabInput.value.trim() || "Sheet1",
-            // Per-sheet behavior + pricing settings.
-            titleLength: parseInt(titleLengthInput.value) || 8,
-            excludeKeywords: excludeKeywordsInput.value.trim(),
-            includeSalePrice: includeSalePriceInput.checked,
-            roundToNinetyNine: roundToNinetyNineInput.checked,
-            extraCost: parseFloat(extraCostInput.value) || 0,
-            pricingMethod:
-              document.querySelector('input[name="pricingMethod"]:checked')
-                .value || "formula",
-            formulaValue: formulaValueInput.value.trim() || "costPrice * 1.7",
-            marginPercent: parseInt(marginPercentInput.value) || 25,
-          };
-        }
-        return sheet;
-      });
-
-      // Only truly global settings that apply regardless of sheet.
-      chrome.storage.sync.set(
-        {
-          sheets: updatedSheets,
-          activeSheetId: current.activeSheetId,
-          showPageButton: showPageButtonInput.checked,
-          startRow: startRowInput.value,
-        },
-        () => {
-          saveStatus.textContent = "✓ Settings saved";
-          saveStatus.style.color = "#2e7d32";
-          setTimeout(() => {
-            saveStatus.textContent = "";
-          }, 2000);
-        },
-      );
-    });
-  });
+form.addEventListener("change", () => {
+  togglePricing();
+  validate();
+  if (!form.reportValidity()) return;
+  const patch = read();
+  sheets = sheets.map((s) => (s.id === activeId ? { ...s, ...patch } : s));
+  persist();
 });
+
+$("showPageButton").addEventListener("change", (e) =>
+  chrome.storage.sync.set({ showPageButton: e.target.checked }),
+);
+
+$("addSheetBtn").addEventListener("click", () => {
+  $("addForm").reset();
+  $("addError").textContent = "";
+  $("addDialog").showModal();
+});
+
+$("cancelBtn").addEventListener("click", () => $("addDialog").close());
+
+$("addForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const ref = $("sheetRef").value.trim();
+  const id = ref.match(/\/d\/([\w-]+)/)?.[1] ?? ref;
+  if (!/^[\w-]{10,}$/.test(id)) {
+    $("addError").textContent = "That doesn't look like a Google Sheets link or ID.";
+    return;
+  }
+  if (sheets.some((s) => s.id === id)) {
+    $("addError").textContent = "That sheet is already added.";
+    return;
+  }
+  sheets.push({
+    name: $("sheetName").value.trim(),
+    id,
+    sheetTab: $("newSheetTab").value.trim() || SHEET_DEFAULTS.sheetTab,
+  });
+  activeId = id;
+  render();
+  persist();
+  $("addDialog").close();
+});
+
+// The popup can change the selected sheet while this page is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  const next = changes.sheets?.newValue ?? sheets;
+  const nextId = changes.activeSheetId?.newValue ?? activeId;
+  if (JSON.stringify([next, nextId]) === JSON.stringify([sheets, activeId])) return;
+  sheets = next;
+  activeId = nextId;
+  render();
+});
+
+(async () => {
+  $("version").textContent = `v${chrome.runtime.getManifest().version}`;
+  const stored = await chrome.storage.sync.get({
+    sheets: [],
+    activeSheetId: "",
+    showPageButton: true,
+  });
+  sheets = stored.sheets;
+  activeId = stored.activeSheetId;
+  $("showPageButton").checked = stored.showPageButton;
+  render();
+})();

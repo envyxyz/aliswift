@@ -1,0 +1,11 @@
+name: Feature request
+description: Suggest something AliSwift should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem first. A solution is welcome but optional.
+    validations:
+      required: true

@@ -1,0 +1,58 @@
+/* The page button. `all: initial` keeps AliExpress styles from leaking in. */
+.aliswift-btn {
+  all: initial;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  background: #177a3c;
+  color: #fff;
+  font: 700 14px/1.2 "TT Norms Pro", system-ui, sans-serif;
+  letter-spacing: 0.3px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.aliswift-btn:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.aliswift-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.aliswift-btn:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.aliswift-btn[data-state="error"] {
+  background: #b3261e;
+}
+
+.aliswift-btn[data-state="loading"]::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: aliswift-spin 0.7s linear infinite;
+}
+
+@keyframes aliswift-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aliswift-btn[data-state="loading"]::before {
+    animation: none;
+  }
+}

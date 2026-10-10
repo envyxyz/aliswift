@@ -1,15 +1,24 @@
+importScripts("lib/shared.js");
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "appendToSheet") {
-    handleAppend(request.data).then(sendResponse);
-    return true;
-  }
+  if (request.action !== "appendToSheet") return;
+  appendRow(request.data).then(sendResponse);
+  return true;
 });
 
-async function getAuthToken() {
+// One add at a time: two adds racing would pick the same next row.
+let queue = Promise.resolve();
+function appendRow(data) {
+  const run = queue.then(() => writeRow(data));
+  queue = run;
+  return run;
+}
+
+function getToken() {
   return new Promise((resolve, reject) => {
     chrome.identity.getAuthToken({ interactive: true }, (token) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
+      if (chrome.runtime.lastError || !token) {
+        reject(chrome.runtime.lastError ?? new Error("Google sign-in failed."));
       } else {
         resolve(token);
       }
@@ -17,77 +26,65 @@ async function getAuthToken() {
   });
 }
 
-async function handleAppend(data) {
-  try {
-    const token = await getAuthToken();
-
-    const storage = await chrome.storage.sync.get({
-      sheets: [],
-      activeSheetId: "",
+// Calls the Sheets API. A 401 means the cached token is stale or revoked:
+// drop it and retry once with a fresh one.
+async function sheetsFetch(path, init = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const token = await getToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
     });
-    const activeSheet = storage.sheets.find(
-      (s) => s.id === storage.activeSheetId,
-    );
-    if (!activeSheet)
-      throw new Error("No sheet configured. Please add a sheet in settings.");
-
-    const settings = {
-      keywordsCol: activeSheet.keywordsCol || "B",
-      priceCol: activeSheet.priceCol || "D",
-      salePriceCol: activeSheet.salePriceCol || "E",
-      linkCol: activeSheet.linkCol || "C",
-      sheetTab: activeSheet.sheetTab || "Sheet1",
-      startRow: parseInt(activeSheet.startRow) || 2,
-    };
-    const sheetId = activeSheet.id;
-
-    const colMap = {
-      [settings.keywordsCol]: data.title,
-      [settings.priceCol]: data.price,
-      [settings.salePriceCol]: data.salePrice,
-      [settings.linkCol]: data.link,
-    };
-
-    const sortedCols = Object.keys(colMap).sort();
-    const values = [sortedCols.map((col) => colMap[col])];
-    const sheetTab = settings.sheetTab;
-
-    // Use keywordsCol (not hardcoded B) to find the next empty row.
-    const scanCol = settings.keywordsCol;
-    const findRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(sheetTab)}!${scanCol}:${scanCol}`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!findRes.ok) throw new Error(`Sheets API error: ${findRes.status}`);
-    const findData = await findRes.json();
-    const rows = findData.values || [];
-
-    // Start scanning from startRow - 1 (0-indexed) so we never write above the header.
-    let nextRow = settings.startRow;
-    for (let i = rows.length - 1; i >= settings.startRow - 1; i--) {
-      if (rows[i] && rows[i][0] && rows[i][0].toString().trim() !== "") {
-        nextRow = i + 2;
-        break;
-      }
+    if (res.status === 401 && attempt === 0) {
+      await new Promise((r) => chrome.identity.removeCachedAuthToken({ token }, r));
+      continue;
     }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error?.message ?? `Google Sheets error ${res.status}`);
+    }
+    return res.json();
+  }
+}
 
-    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`;
-    const response = await fetch(batchUrl, {
+const toNumber = (v) => {
+  const n = parsePrice(v);
+  return Number.isNaN(n) ? "" : n;
+};
+
+async function writeRow(data) {
+  try {
+    const { title, price, salePrice, link } = data;
+    const sheet = await getActiveSheet();
+    if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+
+    const tab = `'${sheet.sheetTab.replace(/'/g, "''")}'`;
+    // Empty values are skipped so we never blank out a cell the user filled in.
+    const cells = [
+      [sheet.keywordsCol, title],
+      [sheet.priceCol, toNumber(price)],
+      [sheet.salePriceCol, toNumber(salePrice)],
+      [sheet.linkCol, link],
+    ].filter(([, value]) => value !== "");
+
+    // Next row = one below the last non-empty keyword, but never above startRow.
+    const range = encodeURIComponent(`${tab}!${sheet.keywordsCol}:${sheet.keywordsCol}`);
+    const { values = [] } = await sheetsFetch(`${sheet.id}/values/${range}`);
+    const last = values.findLastIndex((r) => String(r[0] ?? "").trim());
+    const row = Math.max(last + 2, sheet.startRow);
+
+    // RAW: text is stored as text, so a title like "=IMPORTDATA(...)" can't run as a formula.
+    await sheetsFetch(`${sheet.id}/values:batchUpdate`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        valueInputOption: "USER_ENTERED",
-        data: sortedCols.map((col, i) => ({
-          range: `${sheetTab}!${col}${nextRow}`,
-          values: [[values[0][i]]],
+        valueInputOption: "RAW",
+        data: cells.map(([col, value]) => ({
+          range: `${tab}!${col}${row}`,
+          values: [[value]],
         })),
       }),
     });
-
-    if (!response.ok) throw new Error(`Sheets API error: ${response.status}`);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
