@@ -1,228 +1,118 @@
-function safeCalc(formula, costPrice) {
-  const expr = formula.replace(/costPrice/g, costPrice);
-  if (!/^[\d\s\+\-\*\/\.\(\)]+$/.test(expr)) return null;
-  const tokens = expr.match(/[\d\.]+|[\+\-\*\/\(\)]/g);
-  if (!tokens) return null;
-  const nums = [],
-    ops = [];
-  const prec = { "+": 1, "-": 1, "*": 2, "/": 2 };
-  const apply = () => {
-    const b = nums.pop(),
-      a = nums.pop(),
-      op = ops.pop();
-    if (op === "+") nums.push(a + b);
-    if (op === "-") nums.push(a - b);
-    if (op === "*") nums.push(a * b);
-    if (op === "/") nums.push(b !== 0 ? a / b : 0); // FIX: guard divide-by-zero
-  };
-  for (const t of tokens) {
-    if (!isNaN(t)) {
-      nums.push(parseFloat(t));
-    } else if ("+-*/".includes(t)) {
-      while (ops.length && prec[ops[ops.length - 1]] >= prec[t]) apply();
-      ops.push(t);
-    }
-  }
-  while (ops.length) apply();
-  return nums[0] ?? null;
-}
+// Runs on AliExpress product pages. Depends on lib/shared.js (loaded first by the manifest).
 
-function getTitle(titleLength, excludeKeywords) {
-  const titleEl = document.querySelector('h1[data-pl="product-title"]');
-  const fullTitle = titleEl?.textContent?.trim() ?? "";
-  const excludeList = excludeKeywords
-    ? excludeKeywords
-        .split(",")
-        .map((k) => k.trim().toLowerCase())
-        .filter(Boolean)
-    : [];
-  const words = fullTitle
-    .split(" ")
-    .filter((w) => w.length > 0)
-    .filter((w) => !excludeList.includes(w.toLowerCase()))
-    .slice(0, titleLength || 8);
-  return words.join(" ");
-}
+const PRICE_SELECTORS = [
+  '[class*="price-default--current"]',
+  '[class*="price--current"]',
+  ".uniform-banner-box-price",
+];
+const SHIPPING_SELECTORS = [
+  '[class*="shipping-cost"]',
+  '[class*="shippingCost"]',
+  '[class*="logistics-cost"]',
+  '[class*="dynamic-shipping"]',
+];
+const LABEL = "Add to Sheet";
+let resetTimer;
 
-function getPrice() {
-  const selectors = [
-    '[class*="price-default--current"]',
-    '[class*="price--current"]',
-    ".uniform-banner-box-price",
-  ];
+// First number found in the first matching element. Text matching `ignore`
+// (e.g. "Free shipping over $10") counts as 0 instead of being read as a price.
+function firstNumber(selectors, ignore) {
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el && el.textContent.trim()) {
-      const match = el.textContent.trim().match(/[\d,]+\.?\d*/);
-      return match ? match[0] : "";
-    }
+    const text = document.querySelector(sel)?.textContent ?? "";
+    if (ignore?.test(text)) return 0;
+    const n = parsePrice(text);
+    if (!Number.isNaN(n)) return n;
   }
-  return "";
+  return NaN;
+}
+
+function getTitle(maxWords, excludeKeywords) {
+  const title = document.querySelector('h1[data-pl="product-title"]')?.textContent ?? "";
+  const excluded = excludeKeywords
+    .split(",")
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
+  return title
+    .split(/\s+/)
+    .filter((w) => w && !excluded.includes(w.toLowerCase()))
+    .slice(0, maxWords)
+    .join(" ");
 }
 
 function getLink() {
-  const fullUrl = window.location.href;
-  const match = fullUrl.match(/^(https:\/\/.+?\.html)/);
-  return match ? match[1] : fullUrl;
+  const url = location.href;
+  return url.match(/^(https:\/\/.+?\.html)/)?.[1] ?? url;
 }
 
-function getShipping() {
-  const selectors = [
-    '[class*="shipping-cost"]',
-    '[class*="shippingCost"]',
-    '[class*="logistics-cost"]',
-    '[class*="dynamic-shipping"]',
-  ];
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el && el.textContent.trim()) {
-      const match = el.textContent.trim().match(/[\d]+\.?\d*/);
-      if (match) return parseFloat(match[0]);
-    }
-  }
-  return 0;
-}
-
-function scrapeProduct(titleLength, excludeKeywords) {
-  return {
-    title: getTitle(titleLength, excludeKeywords),
-    price: getPrice(),
+async function scrapeRow() {
+  const sheet = (await getActiveSheet()) ?? SHEET_DEFAULTS;
+  const row = {
+    title: getTitle(sheet.titleLength, sheet.excludeKeywords),
     link: getLink(),
-    shipping: getShipping(),
+    price: "",
+    salePrice: "",
   };
+  const price = firstNumber(PRICE_SELECTORS);
+  if (price > 0) {
+    Object.assign(row, priceProduct(price, firstNumber(SHIPPING_SELECTORS, /free/i) || 0, sheet));
+  }
+  return row;
+}
+
+function setState(btn, state, text) {
+  btn.dataset.state = state;
+  btn.textContent = text;
+  btn.disabled = state === "loading";
+}
+
+async function addToSheet(btn) {
+  clearTimeout(resetTimer);
+  setState(btn, "loading", "Adding...");
+  let result;
+  try {
+    const row = await scrapeRow();
+    result =
+      row.title && row.price
+        ? await chrome.runtime.sendMessage({ action: "appendToSheet", data: row })
+        : { error: "Couldn't read this product. Reload the page." };
+  } catch (e) {
+    result = { error: e.message };
+  }
+  if (result?.success) {
+    setState(btn, "success", "Added");
+  } else {
+    setState(btn, "error", result?.error ?? "Something went wrong");
+  }
+  resetTimer = setTimeout(() => setState(btn, "", LABEL), result?.success ? 2000 : 4000);
 }
 
 function injectButton() {
-  if (document.getElementById("aliswift-page-btn")) return;
+  if (document.getElementById("aliswift-page-btn")) return true;
   const wrapper = document.querySelector('[class*="action--stickyWrap"]');
   if (!wrapper) return false;
 
-  if (!document.getElementById("aliswift-styles")) {
-    const style = document.createElement("style");
-    style.id = "aliswift-styles";
-    style.textContent =
-      "@keyframes aliswift-spin { to { transform: rotate(360deg); } }";
-    document.head.appendChild(style);
-  }
-
   const btn = document.createElement("button");
   btn.id = "aliswift-page-btn";
-  btn.textContent = "Add to Sheet";
-  btn.style.cssText = `
-  display: block;
-  width: 100%;
-  padding: 12px;
-  margin: 8px 0 0 0;
-  background: #1db058;
-  color: white;
-  border: none;
-  border-radius: 0px;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: TT Norms Pro, -apple-system, sans-serif;
-  letter-spacing: 0.3px;
-`;
-
-  btn.addEventListener("click", () => {
-    btn.innerHTML =
-      '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:aliswift-spin 0.7s linear infinite;margin-right:6px;vertical-align:middle;"></span>Adding...';
-    btn.disabled = true;
-
-    // FIX: read behavior settings from the active sheet object, not from
-    // top-level global storage keys, so each profile's settings are respected.
-    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (storage) => {
-      const activeSheet = storage.sheets.find(
-        (s) => s.id === storage.activeSheetId,
-      );
-
-      // Merge active-sheet settings over safe defaults.
-      const settings = Object.assign(
-        {
-          pricingMethod: "formula",
-          formulaValue: "costPrice * 1.7",
-          marginPercent: 25,
-          titleLength: 8,
-          excludeKeywords: "",
-          includeSalePrice: true,
-          roundToNinetyNine: false,
-          extraCost: 0,
-        },
-        activeSheet || {},
-      );
-
-      const data = scrapeProduct(settings.titleLength, settings.excludeKeywords);
-      const rawPrice = parseFloat(data.price.replace(/[^0-9.]/g, ""));
-      const shippingCost = data.shipping || 0;
-      const extraCost = parseFloat(settings.extraCost) || 0;
-      const totalCost = !isNaN(rawPrice)
-        ? rawPrice + shippingCost + extraCost
-        : rawPrice;
-      data.price = !isNaN(totalCost) ? totalCost.toFixed(2) : data.price;
-
-      if (!isNaN(totalCost) && totalCost > 0) {
-        if (settings.includeSalePrice !== false) {
-          let salePrice = 0;
-          if (settings.pricingMethod === "margin") {
-            salePrice = totalCost * (1 + settings.marginPercent / 100);
-          } else {
-            try {
-              salePrice = safeCalc(settings.formulaValue, totalCost) ?? 0;
-            } catch (e) {
-              salePrice = 0;
-            }
-          }
-          if (settings.roundToNinetyNine && salePrice > 0) {
-            salePrice = Math.floor(salePrice) + 0.99;
-          }
-          data.salePrice = salePrice > 0 ? salePrice.toFixed(2) : "";
-        } else {
-          data.salePrice = "";
-        }
-      }
-
-      chrome.runtime.sendMessage(
-        { action: "appendToSheet", data },
-        (result) => {
-          if (result?.success) {
-            btn.style.background = "#27ae60";
-            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Added!`;
-          } else {
-            btn.style.background = "#c0392b";
-            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white" style="vertical-align:middle;margin-right:6px;display:inline-block;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>Error`;
-          }
-          setTimeout(() => {
-            btn.textContent = "Add to Sheet";
-            btn.style.background = "#1db058";
-            btn.disabled = false;
-          }, 2000);
-        },
-      );
-    });
-  });
-
-  wrapper.insertBefore(btn, wrapper.firstChild);
+  btn.className = "aliswift-btn";
+  btn.type = "button";
+  btn.setAttribute("aria-live", "polite");
+  btn.textContent = LABEL;
+  btn.addEventListener("click", () => addToSheet(btn));
+  wrapper.prepend(btn);
   return true;
 }
 
-// Retry every 500ms for up to 10 seconds.
-let attempts = 0;
-const interval = setInterval(() => {
-  attempts++;
-  if (injectButton() || attempts >= 20) clearInterval(interval);
-}, 500);
+chrome.storage.sync.get({ showPageButton: true }, ({ showPageButton }) => {
+  if (!showPageButton) return;
+  // The page renders late: retry every 500ms for up to 10 seconds.
+  let attempts = 0;
+  const timer = setInterval(() => {
+    if (injectButton() || ++attempts >= 20) clearInterval(timer);
+  }, 500);
+});
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "scrape") {
-    // FIX: also read titleLength/excludeKeywords from the active sheet here.
-    chrome.storage.sync.get({ sheets: [], activeSheetId: "" }, (storage) => {
-      const activeSheet = storage.sheets.find(
-        (s) => s.id === storage.activeSheetId,
-      );
-      const titleLength = activeSheet?.titleLength || 8;
-      const excludeKeywords = activeSheet?.excludeKeywords || "";
-      sendResponse(scrapeProduct(titleLength, excludeKeywords));
-    });
-    return true;
-  }
+  if (request.action !== "scrape") return;
+  scrapeRow().then(sendResponse);
+  return true;
 });

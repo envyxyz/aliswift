@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  # Pushing a tag like v0.6.0 builds the zip and publishes a GitHub release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match manifest version
+        run: test "v$(jq -r .version manifest.json)" = "$GITHUB_REF_NAME"
+      - name: Build zip
+        run: git archive --format=zip --prefix=aliswift/ -o "aliswift-$GITHUB_REF_NAME.zip" HEAD
+      - name: Publish release
+        run: gh release create "$GITHUB_REF_NAME" "aliswift-$GITHUB_REF_NAME.zip" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

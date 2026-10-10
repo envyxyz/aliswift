@@ -1,0 +1,171 @@
+/* Design tokens and base controls shared by the popup and the settings page. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f4f4f5;
+  --border: #e0e0e4;
+  --text: #18181b;
+  --muted: #62626b;
+  --accent: #d63f00;
+  --on-accent: #ffffff;
+  --ok: #177a3c;
+  --danger: #c4281c;
+  --radius: 8px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151517;
+    --surface: #202024;
+    --border: #34343a;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --danger: #ff7b72;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+input:not([type="checkbox"], [type="radio"]),
+select {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+input[readonly] {
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+input:user-invalid {
+  border-color: var(--danger);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn[data-state="success"] {
+  background: var(--ok);
+}
+
+.btn[data-state="loading"]::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.btn-sm {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.btn-quiet {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+  .btn[data-state="loading"]::before {
+    animation: none;
+  }
+}

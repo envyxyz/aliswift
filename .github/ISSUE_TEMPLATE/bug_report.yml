@@ -1,0 +1,28 @@
+name: Bug report
+description: Something is wrong, or AliExpress changed and a field stopped scraping.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: AliExpress product URL
+      description: Only if the problem is about scraping (wrong or missing title, price, shipping).
+  - type: input
+    id: version
+    attributes:
+      label: AliSwift and Chrome versions
+      description: AliSwift version is at the bottom of the settings page. Chrome is at chrome://version.
+      placeholder: "AliSwift 0.5.0, Chrome 130"
+  - type: textarea
+    id: console
+    attributes:
+      label: Errors
+      description: Any error shown in the popup, or from chrome://extensions > AliSwift > Inspect views > service worker.
+      render: shell

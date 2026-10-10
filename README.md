@@ -2,13 +2,14 @@
 
 ![banner.png](./screenshots/banner.png)
 
-[![Version](https://img.shields.io/badge/version-0.5.0-ff4f00?style=flat-square)](https://github.com/envyxyz/aliswift/releases)
+[![Release](https://img.shields.io/github/v/release/envyxyz/aliswift?style=flat-square&color=ff4f00)](https://github.com/envyxyz/aliswift/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/envyxyz/aliswift/ci.yml?style=flat-square&label=tests)](https://github.com/envyxyz/aliswift/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/envyxyz/aliswift?style=flat-square&color=1d1b20)](LICENSE)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/envyxyz/aliswift/releases)
 [![Sheets](https://img.shields.io/badge/Google%20Sheets-API%20v4-34A853?style=flat-square&logo=googlesheets&logoColor=white)](https://developers.google.com/sheets)
 [![Stars](https://img.shields.io/github/stars/envyxyz/aliswift?style=flat-square&color=ff4f00)](https://github.com/envyxyz/aliswift/stargazers)
 
-**Automate your AliExpress research by scraping product data directly into Google Sheets**
+**Save AliExpress products to Google Sheets in one click**
 
 ![Demo](./screenshots/popup.gif)
 
@@ -18,135 +19,110 @@
 
 ## Overview
 
-AliSwift is a Chrome extension built for eBay and Shopify dropshippers who source from AliExpress. Instead of copying product titles, prices, and links by hand, you click one button and the data lands exactly where you need it in Google Sheets -- formatted, priced, and ready.
+AliSwift is a Chrome extension for eBay and Shopify dropshippers who source from AliExpress. Instead of copying a product's title, price and link by hand, you click one button and the row lands in your Google Sheet, already priced.
 
-It supports multiple sheet presets with independent settings, formula and margin-based pricing, sell price rounding, keyword filtering, and automatic shipping cost detection. Built with vanilla JS and Chrome MV3. No subscriptions, no external services, no nonsense.
-<br/>
+You can keep several sheets, each with its own column layout and pricing rules. It is plain JavaScript on Chrome Manifest V3, with no build step, no dependencies, no servers and no account to create.
 
 ## Features
 
-- **1-click scraping** -- title, cost price, sell price, and supplier link in one shot
-- **On-page button** -- injected directly into the AliExpress product page
-- **Multi-sheet presets** -- switch between sheets, each with its own column mapping, tab name, and pricing settings
-- **Formula and margin pricing** -- use a multiplier formula like `costPrice * 2.7` or a profit margin percentage
-- **Sell price rounding** -- round to `.99` automatically (e.g. $4.77 becomes $4.99)
-- **Title controls** -- set max word count and filter out noise words like "wholesale", "lot", "pieces"
-- **Extra cost per product** -- add a fixed amount to every cost price before the formula runs
-- **Dark and light mode** -- popup follows your system theme
+- **One click** from the green button on the product page, or from the toolbar popup
+- **Multiple sheets**, each with its own columns, tab name and pricing
+- **Formula or margin pricing**, for example `costPrice * 1.7` or `(costPrice + 2) * 1.5`
+- **Landed cost**: item price, plus shipping when the page shows it, plus an extra cost you set
+- **.99 rounding** for sell prices (4.77 becomes 4.99)
+- **Title cleanup**: cap the word count and drop noise words like "wholesale" or "lot"
+- **Safe writes**: titles go into the sheet as plain text, so a seller cannot sneak a spreadsheet formula into your sheet
+- **Light and dark** theme that follows your system
+- **Private**: no tracking, no analytics, nothing leaves your browser except the write to your own sheet ([details](PRIVACY.md))
 
 ## Screenshots
-
-<!-- REPLACE WITH: popup.png -- the popup UI with fields filled in (dark mode preferred) -->
-<!-- Dimensions: show the full popup, crop tight, 400px wide -->
 
 **Popup**
 ![popup.png](./screenshots/popup.png)
 
-<!-- REPLACE WITH: settings.png -- the options page showing two sheet nuggets and all settings filled -->
-<!-- Dimensions: full options page screenshot, 800px wide -->
-
 **Settings**
 ![settings.png](./screenshots/settings.png)
-
-<!-- REPLACE WITH: sheet.png -- Google Sheets with a freshly appended row highlighted -->
-<!-- Dimensions: crop to show columns A-E and a few rows, 1000px wide -->
 
 **Result in Google Sheets**
 ![sheet.png](./screenshots/sheet.png)
 
-## Installation
+## Install
 
-AliSwift is not on the Chrome Web Store yet. Install it manually in under a minute.
+AliSwift is not on the Chrome Web Store yet. Installing by hand takes about a minute.
 
-**1. Download the latest release**
+**From a release (recommended)**
 
-Go to [Releases](https://github.com/envyxyz/aliswift/releases) and download the latest release.
+1. Download the latest zip from [Releases](https://github.com/envyxyz/aliswift/releases) and unzip it. You get a folder named `aliswift`.
+2. Open `chrome://extensions` and turn on **Developer mode** (top right).
+3. Click **Load unpacked** and pick the `aliswift` folder.
+4. Pin AliSwift from the puzzle-piece menu so the icon is always visible.
 
-**2. Extract the zip**
-
-Unzip the file. You will get a folder named `aliswift`.
-
-**3. Load into Chrome**
-
-```
-chrome://extensions
-```
-
-- Enable **Developer Mode** using the toggle in the top right corner
-- Click **Load unpacked**
-- Select the extracted `aliswift` folder
-
-**4. Pin the extension**
-
-Click the puzzle icon in your Chrome toolbar and pin AliSwift for quick access.
-
-## Setup
-
-### Google Sheet
-
-1. Create a new Google Sheet (must be a native Google Sheet, not an uploaded `.xlsx` file)
-2. Set up your column headers however you like
-3. Copy the Sheet ID from the URL -- it is the long string between `/d/` and `/edit`
+**From source**
 
 ```
-https://docs.google.com/spreadsheets/d/[THIS-IS-YOUR-SHEET-ID]/edit
+git clone https://github.com/envyxyz/aliswift.git
 ```
 
-### Extension Settings
+Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build.
 
-1. Click the AliSwift icon and open **Settings** (gear icon)
-2. Click **+ Add Sheet**, enter your sheet name, Sheet ID, and the tab name (e.g. `Inventory`)
-3. Set your column mapping to match your sheet headers
-4. Choose your pricing method and configure title settings
-5. Click **Save Settings**
+## Set up
+
+1. Create a Google Sheet. It has to be a native Google Sheet, not an uploaded `.xlsx` file.
+2. Open AliSwift settings (gear icon in the popup) and click **Add sheet**.
+3. Paste the sheet's link, give it a name, and type the tab name (for example `Inventory`).
+4. Check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E.
+5. Pick formula or margin pricing. Settings save as you change them.
+
+The first time you add a product, Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
 
 ## Usage
 
-1. Open any AliExpress product page
-2. Click the green **Add to Sheet** button injected below the Buy Now button, or use the popup
-3. The product data is scraped, priced, and written to your active sheet instantly
+1. Open an AliExpress product page.
+2. Click the green **Add to Sheet** button on the page, or click the AliSwift icon, check the values, and press **Add to Sheet**.
+3. The row is written below the last filled keyword in your sheet.
 
-To switch sheets, open Settings and click a different sheet preset. All settings update automatically.
+To switch sheets, use the dropdown in the popup or click another sheet in settings. Prices are recalculated with that sheet's rules.
 
-## Known Issues
+## How prices are calculated
 
-- **Shipping detection is limited** -- AliSwift can only detect shipping costs that are explicitly displayed on the product page. If AliExpress shows "Free shipping above $X" or hides the cost until checkout, no shipping cost is added. Use the **Extra Cost** setting as a manual fallback.
-- **Native Google Sheets only** -- the Sheets API does not support `.xlsx` files uploaded to Drive. Convert your file via File > Save as Google Sheets before use.
-- **Chrome profile required for auth** -- the OAuth flow uses `chrome.identity` which requires you to be signed into a Google account in your Chrome profile. This is a Chrome extension platform limitation.
-- **AliExpress layout changes** -- AliExpress occasionally updates their page structure. If the price or title stops scraping correctly, open an issue and it will be patched.
+```
+cost price = item price + shipping (if the page shows it) + extra cost
+sell price = formula(cost price)   or   cost price x (1 + margin / 100)
+```
 
-## Planned
+AliSwift copies the number AliExpress shows and does no currency conversion. Set your AliExpress currency to the one your sheet uses.
+
+## Known issues
+
+- **Shipping detection is limited.** Only shipping costs written on the page are picked up. If AliExpress says "free shipping over $X" or hides the cost until checkout, nothing is added. Use **Extra cost** as a manual fallback.
+- **Native Google Sheets only.** The Sheets API cannot write to `.xlsx` files stored in Drive. Use File > Save as Google Sheets first.
+- **Needs a signed-in Chrome profile.** Sign-in uses `chrome.identity`, which works with the Google account your Chrome profile is signed into.
+- **AliExpress changes its pages.** If the title or price stops scraping, [open an issue](https://github.com/envyxyz/aliswift/issues/new/choose) with the product URL. The selectors are the constants at the top of `content.js`.
+
+## Roadmap
 
 - Chrome Web Store release
-- Bulk scrape from AliExpress search/category pages
+- Bulk scrape from search and category pages
 - Image URL scraping
 - Firefox support
 
-## System Architecture
+## Contributing
 
-AliSwift is built as a Chrome Extension (Manifest V3) designed to bridge the gap between dynamic e-commerce web interfaces and structured data storage. The system follows a decoupled architecture, separating the UI-driven scraping logic from the background orchestration of API requests.
+Bug reports, scraping fixes and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers running it locally, the tests, and how releases are cut. Changes are listed in [CHANGELOG.md](CHANGELOG.md). Report security problems privately, see [SECURITY.md](SECURITY.md).
 
-### Data Flow Overview
+## How it works
+
+A content script reads the product page and calculates the prices. The service worker holds the Google token and talks to the Sheets API. The popup and settings page are plain HTML.
 
 ```mermaid
 graph LR
-    A[AliExpress Page] -->|Content Script Scrapes| B(AliSwift Extension)
-    B -->|OAuth 2.0 Token| C{Google Sheets API}
-    B -->|POST/PUT Request| D[Google Sheets]
+    A[AliExpress page] -->|content script reads title, price, shipping| B(AliSwift)
+    B -->|OAuth 2.0 token| C{Google Sheets API}
+    C -->|values:batchUpdate| D[Your Google Sheet]
 
-    style B fill:#FF9500,stroke:#333,stroke-width:2px,color:#fff
+    style B fill:#d63f00,stroke:#333,stroke-width:2px,color:#fff
     style C fill:#fff,stroke:#333,stroke-dasharray: 5 5
 ```
-
-## Versions
-
-| Version | Notes                                                                                   |
-| ------- | --------------------------------------------------------------------------------------- |
-| `0.5.0` | Per-sheet behavior settings, title controls, .99 rounding, extra cost, shipping scraper |
-| `0.4.0` | Title length, keyword filter, sale price toggle, extra cost field                       |
-| `0.3.0` | Per-sheet column mapping, batchUpdate writes, smart row detection                       |
-| `0.2.0` | Multi-sheet presets, formula pricing, on-page button, spinner feedback                  |
-| `0.1.0` | Initial release                                                                         |
 
 ## Author
 
@@ -167,4 +143,3 @@ If AliSwift saves you time, consider leaving a star.
 [![Star](https://img.shields.io/github/stars/envyxyz/aliswift?style=social)](https://github.com/envyxyz/aliswift/stargazers)
 
 </div>
-```
