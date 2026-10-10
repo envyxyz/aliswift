@@ -3,109 +3,149 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AliSwift Settings</title>
+    <title>AliSwift settings</title>
     <link rel="stylesheet" href="../lib/ui.css" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
-      <header>
-        <h1>AliSwift</h1>
-        <p class="muted">Send AliExpress products to Google Sheets.</p>
+      <header class="page-head">
+        <div>
+          <h1>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            AliSwift
+          </h1>
+          <p class="muted">Send AliExpress products to Google Sheets.</p>
+        </div>
+        <p id="saveStatus" role="status"></p>
       </header>
 
-      <section>
-        <h2>Sheets</h2>
-        <p class="hint">AliSwift writes to the selected sheet. Each sheet keeps its own settings.</p>
-        <div class="chips">
-          <span id="chips"></span>
-          <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">Add sheet</button>
+      <div id="tabs" class="tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" role="tab" id="tab-sheets" aria-controls="panel-sheets" aria-selected="true" tabindex="0">Sheets</button>
+        <button type="button" role="tab" id="tab-pricing" aria-controls="panel-pricing" aria-selected="false" tabindex="-1">Pricing</button>
+        <button type="button" role="tab" id="tab-title" aria-controls="panel-title" aria-selected="false" tabindex="-1">Title</button>
+        <button type="button" role="tab" id="tab-general" aria-controls="panel-general" aria-selected="false" tabindex="-1">General</button>
+      </div>
+
+      <div id="scope" class="scope" hidden>
+        <label for="scopeSheet">Settings for</label>
+        <select id="scopeSheet"></select>
+      </div>
+
+      <div role="tabpanel" id="panel-sheets" aria-labelledby="tab-sheets" class="panel">
+        <div class="group">
+          <div class="group-head">
+            <div class="title-row">
+              <h2>Your sheets</h2>
+              <button type="button" class="info" aria-label="About your sheets" aria-describedby="tip-sheets">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-sheets" role="tooltip" class="tip">AliSwift saves each product to the highlighted sheet. Every sheet has its own columns, pricing and title rules. Use the pencil to edit one.</span>
+            </div>
+            <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
+              Add sheet
+            </button>
+          </div>
+          <div id="chips" class="chips" role="group" aria-label="Your sheets"></div>
+          <div id="empty" class="empty" hidden>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
+            <h3>No sheets yet</h3>
+            <p>Create a Google Sheet (not an uploaded .xlsx file), then paste its link here. The first time you save a product, Google asks you to allow access.</p>
+            <button id="emptyAddBtn" class="btn" type="button">Add a sheet</button>
+          </div>
         </div>
-        <div id="empty" class="hint" hidden>
-          Create a Google Sheet (a native one, not an uploaded .xlsx), then add its link here.
-          The first time you save a product, Google asks you to allow access.
+      </div>
+
+      <div role="tabpanel" id="panel-pricing" aria-labelledby="tab-pricing" class="panel" hidden>
+        <div id="pricingEmpty" class="empty" hidden>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
+          <h3>No sheet to set up yet</h3>
+          <p>Add a Google Sheet first, then set your pricing here.</p>
+          <button class="btn btn-quiet" type="button" data-goto="sheets">Go to Sheets</button>
         </div>
-      </section>
+        <form id="pricingForm" hidden>
+          <div class="group">
+            <div class="title-row">
+              <h2>Cost price</h2>
+              <button type="button" class="info" aria-label="About cost price" aria-describedby="tip-cost">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-cost" role="tooltip" class="tip">Cost price is what one item costs you: item price, plus shipping when AliExpress shows it, plus the extra cost below. Your sell price is calculated from this total.</span>
+            </div>
+            <div class="field-narrow">
+              <label for="extraCost">Extra cost per product</label>
+              <input id="extraCost" name="extraCost" type="number" min="0" step="0.01" required />
+            </div>
+          </div>
 
-      <form id="settings" hidden>
-        <section>
-          <h2>Columns</h2>
-          <div class="grid-4">
-            <div>
-              <label for="keywordsCol">Keywords</label>
-              <input id="keywordsCol" name="keywordsCol" class="col" maxlength="1" pattern="[A-Za-z]" required />
+          <div class="group">
+            <div class="title-row">
+              <h2 id="h-sell">Sell price</h2>
+              <button type="button" class="info" aria-label="About sell price" aria-describedby="tip-sell">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-sell" role="tooltip" class="tip">Formula: type how to get your sell price from costPrice, for example (costPrice + 2) * 1.5. Use + - * / and brackets. Margin %: adds a percentage on top, so 25 makes the sell price 125% of your cost.</span>
             </div>
-            <div>
-              <label for="linkCol">Link</label>
-              <input id="linkCol" name="linkCol" class="col" maxlength="1" pattern="[A-Za-z]" required />
+            <div class="segmented" role="radiogroup" aria-labelledby="h-sell">
+              <label><input type="radio" name="pricingMethod" value="formula" /><span>Formula</span></label>
+              <label><input type="radio" name="pricingMethod" value="margin" /><span>Margin %</span></label>
             </div>
-            <div>
-              <label for="priceCol">Cost price</label>
-              <input id="priceCol" name="priceCol" class="col" maxlength="1" pattern="[A-Za-z]" required />
+            <div id="formulaField">
+              <input id="formulaValue" name="formulaValue" aria-label="Formula" placeholder="costPrice * 1.7" />
             </div>
-            <div>
-              <label for="salePriceCol">Sell price</label>
-              <input id="salePriceCol" name="salePriceCol" class="col" maxlength="1" pattern="[A-Za-z]" required />
+            <div id="marginField" class="field-narrow" hidden>
+              <label for="marginPercent">Margin (%)</label>
+              <input id="marginPercent" name="marginPercent" type="number" min="0" step="any" />
             </div>
+            <label class="inline"><input type="checkbox" name="includeSalePrice" /> Add the sell price to the sheet</label>
+            <label class="inline"><input type="checkbox" name="roundToNinetyNine" /> Round sell price to .99 (4.77 becomes 4.99)</label>
           </div>
-          <div class="grid-2">
-            <div>
-              <label for="sheetTab">Tab name</label>
-              <input id="sheetTab" name="sheetTab" required />
-            </div>
-            <div>
-              <label for="startRow">First data row</label>
-              <input id="startRow" name="startRow" type="number" min="1" step="1" required />
-            </div>
-          </div>
-          <p class="hint">Rows are added below the last filled keyword cell, never above the first data row.</p>
-        </section>
+        </form>
+      </div>
 
-        <section>
-          <h2>Pricing</h2>
-          <div class="radios" role="radiogroup" aria-label="Pricing method">
-            <label class="inline"><input type="radio" name="pricingMethod" value="formula" /> Formula</label>
-            <label class="inline"><input type="radio" name="pricingMethod" value="margin" /> Margin %</label>
+      <div role="tabpanel" id="panel-title" aria-labelledby="tab-title" class="panel" hidden>
+        <div id="titleEmpty" class="empty" hidden>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
+          <h3>No sheet to set up yet</h3>
+          <p>Add a Google Sheet first, then choose how titles are shortened here.</p>
+          <button class="btn btn-quiet" type="button" data-goto="sheets">Go to Sheets</button>
+        </div>
+        <form id="titleForm" hidden>
+          <div class="group">
+            <div class="title-row">
+              <h2>Product title</h2>
+              <button type="button" class="info" aria-label="About product title" aria-describedby="tip-title">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-title" role="tooltip" class="tip">AliSwift turns the AliExpress product name into the keywords it saves. It removes the words you list, then keeps the first few.</span>
+            </div>
+            <div class="field-narrow">
+              <label for="titleLength">Max words</label>
+              <input id="titleLength" name="titleLength" type="number" min="1" max="20" step="1" required />
+            </div>
+            <div>
+              <label for="excludeKeywords">Words to leave out <span class="muted">(separate with commas)</span></label>
+              <input id="excludeKeywords" name="excludeKeywords" placeholder="wholesale, lot, vintage" />
+            </div>
           </div>
-          <div id="formulaField">
-            <input id="formulaValue" name="formulaValue" aria-label="Formula" placeholder="costPrice * 1.7" />
-            <p class="hint">Use costPrice with + - * / and parentheses, e.g. (costPrice + 2) * 1.5</p>
-          </div>
-          <div id="marginField" hidden>
-            <input id="marginPercent" name="marginPercent" type="number" min="0" step="any" aria-label="Margin percent" />
-            <p class="hint">Sell price = cost price x (1 + margin / 100). A margin of 25 gives 125% of cost.</p>
-          </div>
-          <div>
-            <label for="extraCost">Extra cost per product</label>
-            <input id="extraCost" name="extraCost" type="number" min="0" step="0.01" required />
-            <p class="hint">
-              Cost price = item price + shipping (when the page shows it) + extra cost. Pricing starts from that total.
-            </p>
-          </div>
-          <label class="inline"><input type="checkbox" name="includeSalePrice" /> Add the sell price to the sheet</label>
-          <label class="inline"><input type="checkbox" name="roundToNinetyNine" /> Round sell price to .99 (4.77 becomes 4.99)</label>
-        </section>
+        </form>
+      </div>
 
-        <section>
-          <h2>Title</h2>
-          <div>
-            <label for="titleLength">Max words</label>
-            <input id="titleLength" name="titleLength" type="number" min="1" max="20" step="1" required />
+      <div role="tabpanel" id="panel-general" aria-labelledby="tab-general" class="panel" hidden>
+        <div class="group">
+          <div class="title-row">
+            <h2>AliExpress pages</h2>
+            <button type="button" class="info" aria-label="About the page button" aria-describedby="tip-general">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+            </button>
+            <span id="tip-general" role="tooltip" class="tip">Shows or hides the Add to Sheet button on AliExpress product pages.</span>
           </div>
-          <div>
-            <label for="excludeKeywords">Leave out these words (comma separated)</label>
-            <input id="excludeKeywords" name="excludeKeywords" placeholder="wholesale, lot, vintage" />
-          </div>
-        </section>
-      </form>
-
-      <section>
-        <h2>General</h2>
-        <label class="inline"><input id="showPageButton" type="checkbox" /> Show the Add to Sheet button on AliExpress pages</label>
-        <p class="hint">Reload open product pages after changing this.</p>
-      </section>
-
-      <p id="saveStatus" role="status"></p>
+          <label class="inline"><input id="showPageButton" type="checkbox" /> Show the Add to Sheet button on AliExpress pages</label>
+        </div>
+      </div>
 
       <footer class="muted">
         <span id="version"></span>
@@ -114,30 +154,95 @@
       </footer>
     </main>
 
-    <dialog id="addDialog">
-      <form id="addForm">
-        <h2>Add a sheet</h2>
-        <div>
-          <label for="sheetName">Name</label>
-          <input id="sheetName" maxlength="40" placeholder="My store" required autocomplete="off" />
+    <dialog id="editDialog" aria-labelledby="editTitle">
+      <form id="editForm">
+        <div class="dialog-head"><h2 id="editTitle">Edit sheet</h2></div>
+        <div class="dialog-body">
+          <p id="editNotice" class="notice error" role="alert"></p>
+          <div>
+            <label for="editName">Name</label>
+            <input id="editName" name="name" maxlength="40" required autofocus autocomplete="off" />
+          </div>
+          <div>
+            <label for="editId">Sheet ID</label>
+            <div class="input-row">
+              <input id="editId" readonly />
+              <a id="editOpen" class="btn btn-quiet" target="_blank" rel="noopener" aria-label="Open sheet in a new tab">
+                Open sheet
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" /></svg>
+              </a>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <label for="editTab">Sheet tab</label>
+              <input id="editTab" name="sheetTab" required autocomplete="off" />
+            </div>
+            <div>
+              <label for="editRow">First data row</label>
+              <input id="editRow" name="startRow" type="number" min="1" step="1" required />
+            </div>
+          </div>
+          <div role="group" aria-labelledby="h-cols">
+            <div class="title-row">
+              <h3 id="h-cols">Columns</h3>
+              <button type="button" class="info" aria-label="About columns" aria-describedby="tip-cols">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-cols" role="tooltip" class="tip">Type the column letter where each field goes. Each product is added on a new row, just below the last row that has keywords, and never above the first data row.</span>
+            </div>
+            <div id="colList" class="col-list"></div>
+          </div>
         </div>
-        <div>
-          <label for="sheetRef">Sheet link or ID</label>
-          <input id="sheetRef" placeholder="https://docs.google.com/spreadsheets/d/..." required autocomplete="off" />
-        </div>
-        <div>
-          <label for="newSheetTab">Tab name</label>
-          <input id="newSheetTab" placeholder="Sheet1" autocomplete="off" />
-        </div>
-        <p id="addError" class="error" role="alert"></p>
-        <div class="actions">
-          <button id="cancelBtn" class="btn btn-quiet" type="button">Cancel</button>
-          <button class="btn" type="submit">Add</button>
+        <div class="dialog-foot">
+          <div id="editActions" class="actions">
+            <button id="deleteBtn" class="btn btn-danger" type="button">Delete sheet</button>
+            <button id="editCancel" class="btn btn-quiet" type="button">Cancel</button>
+            <button id="editSave" class="btn" type="submit">Save</button>
+          </div>
+          <div id="deleteConfirm" class="confirm" role="group" aria-labelledby="delQ" hidden>
+            <p><strong id="delQ"></strong></p>
+            <p id="delWhy" class="muted">Its settings are removed. Your Google Sheet stays as it is.</p>
+            <div class="actions">
+              <button id="keepBtn" class="btn btn-quiet" type="button" aria-describedby="delWhy">Keep sheet</button>
+              <button id="delBtn" class="btn btn-danger" type="button" data-confirm>Delete</button>
+            </div>
+          </div>
         </div>
       </form>
     </dialog>
 
+    <dialog id="addDialog" aria-labelledby="addTitle">
+      <form id="addForm">
+        <div class="dialog-head"><h2 id="addTitle">Add sheet</h2></div>
+        <div class="dialog-body">
+          <div>
+            <label for="sheetName">Name</label>
+            <input id="sheetName" maxlength="40" placeholder="My store" required autofocus autocomplete="off" />
+          </div>
+          <div>
+            <label for="sheetRef">Sheet link or ID</label>
+            <input id="sheetRef" placeholder="https://docs.google.com/spreadsheets/d/..." required autocomplete="off" />
+          </div>
+          <div>
+            <label for="newSheetTab">Sheet tab</label>
+            <input id="newSheetTab" placeholder="Sheet1" autocomplete="off" />
+          </div>
+          <p id="addError" class="notice error" role="alert"></p>
+        </div>
+        <div class="dialog-foot">
+          <div class="actions">
+            <button id="cancelBtn" class="btn btn-quiet" type="button">Cancel</button>
+            <button class="btn" type="submit">Add</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toasts" aria-live="polite"></div>
+
     <script src="../lib/shared.js"></script>
+    <script src="../lib/ui.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

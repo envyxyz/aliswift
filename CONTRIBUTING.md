@@ -16,7 +16,7 @@ Run the tests with `npm test`. They use Node's built-in test runner (Node 20 or 
 | --- | --- |
 | `manifest.json` | Permissions, content script matches, OAuth client |
 | `lib/shared.js` | Settings defaults, price parsing, formula evaluator, pricing. Loaded by every part |
-| `lib/ui.css` | Colors, inputs and buttons shared by the popup and settings |
+| `lib/ui.css`, `lib/ui.js` | Colors, controls, tabs, dialogs, tooltips and toasts shared by every page |
 | `content.js`, `content.css` | Reads the product page, injects the green button |
 | `background.js` | Google sign-in and all Sheets API calls |
 | `popup/` | Toolbar popup |

@@ -1,6 +1,12 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { SHEET_DEFAULTS, parsePrice, evalFormula, priceProduct } = require("../lib/shared.js");
+const {
+  SHEET_DEFAULTS,
+  parsePrice,
+  evalFormula,
+  priceProduct,
+  afterRemoval,
+} = require("../lib/shared.js");
 
 test("parsePrice handles currency text and both decimal styles", () => {
   assert.equal(parsePrice("US $4.77"), 4.77);
@@ -49,4 +55,12 @@ test("priceProduct margin, .99 rounding and sell price off", () => {
 test("priceProduct leaves sell price empty when the formula is invalid", () => {
   const sheet = { ...SHEET_DEFAULTS, formulaValue: "costPrice *" };
   assert.equal(priceProduct(4, 0, sheet).salePrice, "");
+});
+
+test("afterRemoval picks the next sheet, then the previous one, then nothing", () => {
+  const sheets = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  assert.equal(afterRemoval(sheets, "a"), "b");
+  assert.equal(afterRemoval(sheets, "b"), "c");
+  assert.equal(afterRemoval(sheets, "c"), "b");
+  assert.equal(afterRemoval([{ id: "a" }], "a"), "");
 });

@@ -6,6 +6,13 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ### Changed
 
+- Settings are split into tabs: Sheets, Pricing, Title and General. Explanations moved out from under the inputs into "i" icons that show a tooltip on hover and keyboard focus.
+- Each sheet has a pencil that opens an Edit sheet dialog (name, tab, first data row, columns). The "x" is gone. Delete sheet lives in that dialog and asks for confirmation there instead of in a browser popup.
+- Pricing and Title edit the highlighted sheet, shown in a "Settings for" bar. Failed saves show a message with a Retry button.
+- "Tab name" is now called "Sheet tab".
+- The page button follows "Show the Add to Sheet button on AliExpress pages" straight away, without reloading the product page.
+- Shared styles (`lib/ui.css`) now cover tabs, dialogs, tooltips, toasts and empty states, and `lib/ui.js` adds toasts. The popup and page button pick up the same error red.
+- Requires Chrome 117 or newer.
 - Popup and settings page redesigned. They use system fonts (no Google Fonts request), follow your system light or dark theme, and the popup picks sheets with a native dropdown.
 - Settings now save as you change them. There is no Save button, and switching sheets no longer drops edits.
 - Adding a sheet accepts the full Google Sheets link as well as the ID. New sheets start from default settings.

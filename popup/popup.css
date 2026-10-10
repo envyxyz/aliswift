@@ -22,23 +22,6 @@ h1 svg {
   color: var(--accent);
 }
 
-.icon-btn {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  color: var(--muted);
-  background: none;
-  border: 0;
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-
-.icon-btn:hover {
-  color: var(--text);
-  background: var(--surface);
-}
-
 main {
   padding: 16px;
 }

@@ -69,9 +69,9 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 
 1. Create a Google Sheet. It has to be a native Google Sheet, not an uploaded `.xlsx` file.
 2. Open AliSwift settings (gear icon in the popup) and click **Add sheet**.
-3. Paste the sheet's link, give it a name, and type the tab name (for example `Inventory`).
-4. Check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E.
-5. Pick formula or margin pricing. Settings save as you change them.
+3. Paste the sheet's link, give it a name, and type the sheet tab (for example `Inventory`).
+4. Click the pencil next to the sheet and check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E.
+5. Open the **Pricing** tab and pick formula or margin pricing. Settings save as you change them.
 
 The first time you add a product, Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
 
@@ -81,7 +81,7 @@ The first time you add a product, Google asks you to let AliSwift edit your spre
 2. Click the green **Add to Sheet** button on the page, or click the AliSwift icon, check the values, and press **Add to Sheet**.
 3. The row is written below the last filled keyword in your sheet.
 
-To switch sheets, use the dropdown in the popup or click another sheet in settings. Prices are recalculated with that sheet's rules.
+To switch sheets, use the dropdown in the popup or click another sheet on the Sheets tab. Prices are recalculated with that sheet's rules.
 
 ## How prices are calculated
 
