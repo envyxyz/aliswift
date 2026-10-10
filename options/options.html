@@ -19,7 +19,10 @@
           </h1>
           <p class="muted">Send AliExpress products to Google Sheets.</p>
         </div>
-        <p id="saveStatus" role="status"></p>
+        <div class="page-head-right">
+          <p id="saveStatus" role="status"></p>
+          <div class="profile" id="profile"></div>
+        </div>
       </header>
 
       <div id="tabs" class="tabs" role="tablist" aria-label="Settings sections">
@@ -44,17 +47,18 @@
               </button>
               <span id="tip-sheets" role="tooltip" class="tip">AliSwift saves each product to the highlighted sheet. Every sheet has its own columns, pricing and title rules. Use the pencil to edit one.</span>
             </div>
-            <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
+            <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button" aria-describedby="lockSheets">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
               Add sheet
             </button>
           </div>
+          <p id="lockSheets" class="lock" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg><button type="button" class="link-btn" data-signin>Sign in</button> to add sheets.</p>
           <div id="chips" class="chips" role="group" aria-label="Your sheets"></div>
           <div id="empty" class="empty" hidden>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
             <h3>No sheets yet</h3>
             <p>Let AliSwift create a ready-made Google Sheet for you, or connect one you already have. The first time you save a product, Google asks you to allow access.</p>
-            <button id="emptyAddBtn" class="btn" type="button">Add a sheet</button>
+            <button id="emptyAddBtn" class="btn" type="button" aria-describedby="lockSheets">Add a sheet</button>
           </div>
         </div>
       </div>
@@ -210,7 +214,7 @@
               <button type="button" class="info" aria-label="About marketplace" aria-describedby="tip-region">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-              <span id="tip-region" role="tooltip" class="tip">Sets the currency shown for this sheet and which eBay site opens when you list.</span>
+              <span id="tip-region" role="tooltip" class="tip">Sets the currency for this sheet and which eBay site opens when you list. If it's not set, prices are saved as shown, with no currency check.</span>
             </div>
             <select id="editRegion" name="region"></select>
           </div>

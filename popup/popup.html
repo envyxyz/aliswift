@@ -14,16 +14,24 @@
         </svg>
         AliSwift
       </h1>
-      <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path
-            d="M19.14 12.94c.04-.3.06-.61.06-.94c0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.62l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.48.1.62l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.62l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.48-.1-.62l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
-          />
-        </svg>
-      </button>
+      <div class="head-tools">
+        <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path
+              d="M19.14 12.94c.04-.3.06-.61.06-.94c0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.62l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.48.1.62l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.62l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.48-.1-.62l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+            />
+          </svg>
+        </button>
+        <div class="profile" id="profile"></div>
+      </div>
     </header>
 
     <main>
+      <section id="signin" hidden>
+        <p>Sign in with Google to save products to your sheets.</p>
+        <button type="button" class="btn" data-signin>Sign in</button>
+      </section>
+
       <section id="setup" hidden>
         <p>Add a Google Sheet to start saving products.</p>
         <button id="setupBtn" class="btn" type="button">Open settings</button>
@@ -40,14 +48,28 @@
           <label for="title">Keywords</label>
           <input id="title" type="text" required autocomplete="off" />
         </div>
-        <div class="row">
-          <div>
-            <label for="price">Cost price</label>
-            <input id="price" type="text" inputmode="decimal" placeholder="0.00" required autocomplete="off" />
+        <div>
+          <div class="row">
+            <div>
+              <label for="price">Cost price <span id="priceCur" class="muted"></span></label>
+              <input id="price" type="text" inputmode="decimal" placeholder="0.00" required autocomplete="off" />
+            </div>
+            <div>
+              <label for="salePrice">Sell price <span id="saleCur" class="muted"></span></label>
+              <input id="salePrice" type="text" inputmode="decimal" placeholder="Optional" autocomplete="off" />
+            </div>
           </div>
-          <div>
-            <label for="salePrice">Sell price <span class="muted">(optional)</span></label>
-            <input id="salePrice" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" />
+          <div id="currency" role="status">
+            <div id="fxWarn" class="notice" data-tone="warn" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" /></svg>
+              <div><p><span id="fxWarnText"></span> <a id="fxSettings" href="../options/options.html#sheets" hidden>Set marketplace</a></p></div>
+            </div>
+            <p id="fxNote" class="note" hidden></p>
+            <div id="rateRow" class="rate-row" hidden>
+              <label for="rate">1 <span id="rateTo"></span> =</label>
+              <input id="rate" type="text" inputmode="decimal" pattern="[0-9]+([.,][0-9]+)?" placeholder="0.00" autocomplete="off" aria-describedby="rateUnit" />
+              <span id="rateUnit" class="muted"></span>
+            </div>
           </div>
         </div>
         <div>
@@ -60,6 +82,7 @@
     </main>
 
     <script src="../lib/shared.js"></script>
+    <script src="../lib/ui.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

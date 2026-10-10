@@ -14,16 +14,16 @@ const SHIPPING_SELECTORS = [
 const LABEL = "Add to Sheet";
 let resetTimer;
 
-// First number found in the first matching element. Text matching `ignore`
-// (e.g. "Free shipping over $10") counts as 0 instead of being read as a price.
+// First number found in the first matching element, with the text it came from (the currency is read
+// from that text). Text matching `ignore` (e.g. "Free shipping over $10") counts as 0 instead of a price.
 function firstNumber(selectors, ignore) {
   for (const sel of selectors) {
     const text = document.querySelector(sel)?.textContent ?? "";
-    if (ignore?.test(text)) return 0;
+    if (ignore?.test(text)) return { n: 0, text };
     const n = parsePrice(text);
-    if (!Number.isNaN(n)) return n;
+    if (!Number.isNaN(n)) return { n, text };
   }
-  return NaN;
+  return { n: NaN, text: "" };
 }
 
 function getTitle(maxWords, excludeKeywords) {
@@ -44,6 +44,10 @@ function getLink() {
   return url.match(/^(https:\/\/.+?\.html)/)?.[1] ?? url;
 }
 
+// The product on the page. `currency` is what price and salePrice are in ("" when the page's currency is
+// unknown); `kind` says how the page relates to the sheet (see currencyKind). When the page's currency is not
+// the sheet's, `fx` holds the raw amounts and the rate. With no rate (fx.rate null) price is the raw page
+// amount and nothing may be saved until the user supplies one.
 async function scrapeRow() {
   const sheet = (await getActiveSheet()) ?? SHEET_DEFAULTS;
   const row = {
@@ -51,10 +55,25 @@ async function scrapeRow() {
     link: getLink(),
     price: "",
     salePrice: "",
+    currency: "",
+    kind: "unknown",
   };
-  const price = firstNumber(PRICE_SELECTORS);
+  const { n: price, text } = firstNumber(PRICE_SELECTORS);
   if (price > 0) {
-    Object.assign(row, priceProduct(price, firstNumber(SHIPPING_SELECTORS, /free/i) || 0, sheet));
+    const shipping = firstNumber(SHIPPING_SELECTORS, /free/i).n || 0;
+    const from = detectCurrency(document.cookie, text);
+    const to = REGIONS[sheet.region]?.currency ?? "";
+    row.kind = currencyKind(from, to);
+    let rate = 1;
+    if (row.kind === "convert") {
+      const found = await chrome.runtime.sendMessage({ action: "rate", data: { sheetId: sheet.id, from, to } }).catch(() => null);
+      rate = found?.rate || null;
+      row.fx = { from, to, price, shipping, rate, source: found?.source, at: found?.at };
+    }
+    // Pricing runs in the sheet's currency: extraCost and the formula are written for it.
+    if (rate) Object.assign(row, priceProduct(price / rate, shipping / rate, sheet));
+    else row.price = (price + shipping).toFixed(2);
+    row.currency = row.kind === "same" || (row.kind === "convert" && rate) ? to : from;
   }
   return row;
 }
@@ -69,19 +88,30 @@ async function addToSheet(btn) {
   clearTimeout(resetTimer);
   setState(btn, "loading", "Adding...");
   let result;
+  let row = {};
   try {
-    const row = await scrapeRow();
-    result =
-      row.title && row.price
-        ? await chrome.runtime.sendMessage({ action: "appendToSheet", data: row })
-        : { error: "Couldn't read this product. Reload the page." };
+    row = await scrapeRow();
+    const { title, price, salePrice, link, currency } = row;
+    if (!title || !price) result = { error: "Couldn't read this product. Reload the page." };
+    else if (row.fx && !row.fx.rate) {
+      result = { error: `Prices are ${row.fx.from}, sheet is ${row.fx.to}. Set a rate in the popup.` };
+    } else result = await chrome.runtime.sendMessage({ action: "appendToSheet", data: { title, price, salePrice, link, currency } });
   } catch (e) {
     result = { error: e.message };
   }
   if (result?.success) {
-    setState(btn, "success", result.sku ? `Added as ${result.sku}` : "Added");
+    const symbol = row.fx && (Object.values(REGIONS).find((r) => r.currency === row.fx.to)?.symbol ?? `${row.fx.to} `);
+    const note = row.fx
+      ? `, converted to ${symbol}${row.price}`
+      : row.kind === "unset"
+        ? `, ${row.currency}`
+        : row.kind === "unknown"
+          ? ". Currency unknown."
+          : "";
+    setState(btn, "success", (result.sku ? `Added as ${result.sku}` : "Added") + note);
   } else {
-    setState(btn, "error", result?.error ?? "Something went wrong");
+    // ponytail: signed out shows this until P3's library gives the page button somewhere to save.
+    setState(btn, "error", result?.code === "signin" ? "Signed out. Open the AliSwift popup." : (result?.error ?? "Something went wrong"));
   }
   resetTimer = setTimeout(() => setState(btn, "", LABEL), result?.success ? 3000 : 4000); // long enough to read the SKU
 }

@@ -35,6 +35,12 @@ form {
   margin-bottom: 24px;
 }
 
+.page-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 #saveStatus {
   font-size: var(--fs-sm);
   line-height: 22px;

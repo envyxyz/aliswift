@@ -9,22 +9,40 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 const read = (file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
 
 // Runs background.js against a fake chrome + fetch. `replies` are fetch responses in order.
-function setup(sheet, replies) {
+// `local` seeds chrome.storage.local; `tokens` is what getAuthToken hands out in turn (null = it fails, as it
+// does when a prompt would be needed); the last one repeats.
+function setup(sheet, replies, { local = {}, tokens = ["token"] } = {}) {
   const calls = [];
   const removed = [];
+  const tokenCalls = [];
+  const store = { ...local };
   let listener;
-  const ctx = vm.createContext({
-    chrome: {
-      runtime: {
-        getURL: (p) => `chrome-extension://abc/${p}`,
-        onMessage: { addListener: (fn) => (listener = fn) },
-      },
-      identity: {
-        getAuthToken: (_opts, cb) => cb("token"),
-        removeCachedAuthToken: (opts, cb) => (removed.push(opts.token), cb()),
-      },
-      storage: { sync: { get: async () => ({ sheets: [sheet], activeSheetId: sheet.id }) } },
+  const chrome = {
+    runtime: {
+      getURL: (p) => `chrome-extension://abc/${p}`,
+      onMessage: { addListener: (fn) => (listener = fn) },
     },
+    identity: {
+      getAuthToken: (opts, cb) => {
+        tokenCalls.push(opts);
+        const token = tokens.length > 1 ? tokens.shift() : tokens[0];
+        if (token) return cb(token);
+        chrome.runtime.lastError = { message: "OAuth2 not granted or revoked." };
+        cb();
+        chrome.runtime.lastError = undefined;
+      },
+      removeCachedAuthToken: (opts, cb) => (removed.push(opts.token), cb()),
+    },
+    storage: {
+      sync: { get: async () => ({ sheets: [sheet], activeSheetId: sheet.id }) },
+      local: {
+        get: async (defaults) => ({ ...defaults, ...store }),
+        set: async (items) => void Object.assign(store, items),
+      },
+    },
+  };
+  const ctx = vm.createContext({
+    chrome,
     fetch: async (url, init) => {
       calls.push({ url, body: init?.body && JSON.parse(init.body) });
       const { status = 200, json = {} } = replies.shift();
@@ -41,6 +59,8 @@ function setup(sheet, replies) {
     listener,
     calls,
     removed,
+    tokenCalls,
+    store,
   };
 }
 
@@ -327,6 +347,135 @@ test("a handler that throws still answers", async () => {
   const result = await ask(listener, { action: "createSheet", data: null }, options);
   assert.equal(result.success, false);
   assert.ok(result.error);
+});
+
+/* Sign-in state */
+
+const SIGNIN = { success: false, code: "signin", error: "Sign in to Google to use sheets." };
+
+test("a save never opens a sign-in window: every token request is silent", async () => {
+  const { appendRow, tokenCalls } = setup(sheet, [{ json: {} }, { json: {} }]);
+  assert.equal((await appendRow(product)).success, true);
+  assert.deepEqual(plain(tokenCalls), [{ interactive: false }, { interactive: false }]);
+});
+
+test("a token Chrome can't give silently means sign in, on the first call and after a 401", async () => {
+  const first = setup(sheet, [], { tokens: [null] });
+  assert.deepEqual(await first.appendRow(product), SIGNIN);
+  assert.equal(first.calls.length, 0);
+
+  const revoked = setup(sheet, [{ status: 401 }], { tokens: ["token", null] });
+  assert.deepEqual(await revoked.appendRow(product), SIGNIN);
+  assert.deepEqual(revoked.removed, ["token"]);
+  assert.ok(revoked.tokenCalls.every((c) => c.interactive === false));
+});
+
+test("while the user is signed out here, Chrome is not asked for a token and nothing is written", async () => {
+  const { appendRow, calls, tokenCalls } = setup(sheet, [], { local: { authOff: true } });
+  assert.deepEqual(await appendRow(product), SIGNIN);
+  assert.equal(tokenCalls.length, 0);
+  assert.equal(calls.length, 0);
+});
+
+test("authState answers from a silent probe and never hands out the token", async () => {
+  const on = setup(sheet, []);
+  assert.deepEqual(await ask(on.listener, { action: "authState" }, page), { success: true, signedIn: true });
+  assert.deepEqual(plain(on.tokenCalls), [{ interactive: false }]);
+  assert.deepEqual(await ask(setup(sheet, [], { tokens: [null] }).listener, { action: "authState" }, page), { success: true, signedIn: false });
+  const off = setup(sheet, [], { local: { authOff: true } });
+  assert.deepEqual(await ask(off.listener, { action: "authState" }, page), { success: true, signedIn: false });
+  assert.equal(off.tokenCalls.length, 0);
+});
+
+test("signIn is the only interactive call, from AliSwift's pages, and clears the signed-out flag once Google answers", async () => {
+  const { listener, tokenCalls, store } = setup(sheet, [], { local: { authOff: true } });
+  assert.deepEqual(await ask(listener, { action: "signIn" }, page), { success: false, error: "Not allowed." });
+  assert.equal(tokenCalls.length, 0);
+  assert.deepEqual(await ask(listener, { action: "signIn" }, options), { success: true, signedIn: true });
+  assert.deepEqual(plain(tokenCalls), [{ interactive: true }]);
+  assert.equal(store.authOff, false);
+
+  const closed = setup(sheet, [], { local: { authOff: true }, tokens: [null] });
+  const reply = await ask(closed.listener, { action: "signIn" }, options);
+  assert.deepEqual(reply, { success: false, error: "OAuth2 not granted or revoked." });
+  assert.equal(closed.store.authOff, true); // a closed window changes nothing
+});
+
+test("signOut is local: it sets the flag and drops the cached token, from AliSwift's pages only", async () => {
+  const { listener, removed, store, appendRow } = setup(sheet, []);
+  assert.deepEqual(await ask(listener, { action: "signOut" }, page), { success: false, error: "Not allowed." });
+  assert.equal(store.authOff, undefined);
+  assert.deepEqual(await ask(listener, { action: "signOut" }, options), { success: true });
+  assert.equal(store.authOff, true);
+  assert.deepEqual(removed, ["token"]);
+  assert.deepEqual(await appendRow(product), SIGNIN);
+});
+
+/* Currency */
+
+const uk = { ...sheet, region: "UK" };
+const dashboardCell = (formula, number) => ({
+  json: { sheets: [{ data: [{ rowData: [{ values: [{ userEnteredValue: { formulaValue: formula }, effectiveValue: { numberValue: number } }] }] }] }] },
+});
+const lookup = { sheetId: sheet.id, from: "PKR", to: "GBP" };
+
+test("a save is refused when the prices are in another currency than the sheet's", async () => {
+  const wrong = setup(uk, []);
+  const result = await wrong.appendRow({ ...product, currency: "PKR" });
+  assert.deepEqual(result, { success: false, code: "currency", error: "Prices are in PKR but this sheet is GBP. Nothing was saved." });
+  assert.equal(wrong.calls.length, 0);
+
+  // Same currency, or one side unknown: nothing to refuse.
+  for (const [s, currency] of [[uk, "GBP"], [uk, ""], [uk, undefined], [sheet, "PKR"]]) {
+    assert.equal((await setup(s, [{ json: {} }, { json: {} }]).appendRow({ ...product, currency })).success, true, `${s.region} ${currency}`);
+  }
+});
+
+test("the rate comes from the cache, then the sheet's own cell, then the one the user typed", async () => {
+  const now = Date.now();
+  // A fresh cached rate: no request at all.
+  const cached = setup(sheet, [], { local: { rates: { "GBP:PKR": { rate: 370, at: now - 60 * 1000 } } } });
+  assert.deepEqual(await ask(cached.listener, { action: "rate", data: lookup }, page), { success: true, rate: 370, source: "sheet", at: now - 60 * 1000 });
+  assert.equal(cached.calls.length, 0);
+
+  // A stale one: read Dashboard!D2, keep it for next time.
+  const stale = { rates: { "GBP:PKR": { rate: 370, at: now - 13 * 3600 * 1000 } } };
+  const fresh = setup(sheet, [dashboardCell('=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),374.37)', 374.5)], { local: stale });
+  const found = await ask(fresh.listener, { action: "rate", data: lookup }, page);
+  assert.equal(found.rate, 374.5);
+  assert.equal(found.source, "sheet");
+  assert.match(decodeURIComponent(fresh.calls[0].url), /\/sheet-id-1234567890\?ranges=Dashboard!D2&fields=sheets\.data\.rowData\.values\(userEnteredValue,effectiveValue\)$/);
+  assert.equal(fresh.store.rates["GBP:PKR"].rate, 374.5);
+
+  // A number that is not a lookup of this pair is never a rate; the typed rate is next.
+  const typed = { rates: { "GBP:PKR:typed": { rate: 360, at: 5 } } };
+  for (const reply of [dashboardCell("", 5), dashboardCell('=GOOGLEFINANCE("CURRENCY:GBPUSD")', 1.3), { status: 400, json: {} }]) {
+    const miss = setup(sheet, [reply], { local: typed });
+    assert.deepEqual(await ask(miss.listener, { action: "rate", data: lookup }, page), { success: true, rate: 360, source: "typed", at: 5 });
+  }
+
+  // Signed out, or a sheet that is not one of the user's: no request, typed rate or nothing.
+  const out = setup(sheet, [], { local: { ...typed, authOff: true } });
+  assert.equal((await ask(out.listener, { action: "rate", data: lookup }, page)).rate, 360);
+  const stranger = setup(sheet, []);
+  assert.deepEqual(await ask(stranger.listener, { action: "rate", data: { ...lookup, sheetId: "someone-elses-sheet" } }, page), { success: true, rate: null });
+  assert.equal(stranger.calls.length, 0);
+});
+
+test("the rate lookup refuses a bad pair; setRate is for AliSwift's pages and keeps the rate apart from the cache", async () => {
+  const { listener, store } = setup(sheet, []);
+  for (const data of [{ ...lookup, from: "pkr" }, { ...lookup, to: "GBPX" }, { ...lookup, to: "PKR" }, undefined]) {
+    assert.equal((await ask(listener, { action: "rate", data }, page)).success, false);
+  }
+  const set = { action: "setRate", data: { from: "PKR", to: "GBP", rate: 374.37 } };
+  assert.deepEqual(await ask(listener, set, page), { success: false, error: "Not allowed." });
+  assert.equal(store.rates, undefined);
+  assert.deepEqual(await ask(listener, set, options), { success: true });
+  assert.equal(store.rates["GBP:PKR:typed"].rate, 374.37);
+  assert.equal(store.rates["GBP:PKR"], undefined);
+  for (const rate of [0, -1, "x", 1e9]) {
+    assert.equal((await ask(listener, { ...set, data: { ...set.data, rate } }, options)).success, false, String(rate));
+  }
 });
 
 /* Your data stays yours */

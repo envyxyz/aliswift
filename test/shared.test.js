@@ -12,6 +12,9 @@ const {
   evalFormula,
   priceProduct,
   afterRemoval,
+  detectCurrency,
+  currencyKind,
+  rateFromCell,
 } = require("../lib/shared.js");
 
 test("parsePrice handles currency text and both decimal styles", () => {
@@ -69,6 +72,65 @@ test("afterRemoval picks the next sheet, then the previous one, then nothing", (
   assert.equal(afterRemoval(sheets, "b"), "c");
   assert.equal(afterRemoval(sheets, "c"), "b");
   assert.equal(afterRemoval([{ id: "a" }], "a"), "");
+});
+
+/* Currency */
+
+test("detectCurrency reads a code or an unambiguous symbol from the price text", () => {
+  const cases = {
+    "PKR 1,491.00": "PKR", "PKR1,491.00": "PKR", "usd 4.77": "USD", "Rs.1,491": "PKR", "Rs 1,491": "PKR", "₨ 1491": "PKR",
+    "£8.97": "GBP", "4,77 €": "EUR", "US $4.77": "USD", "US$4.77": "USD", "C$12.50": "CAD", "A$9.00": "AUD",
+  };
+  for (const [text, code] of Object.entries(cases)) assert.equal(detectCurrency("", text), code, text);
+  // Words that only look like a marker are not one.
+  for (const text of ["Rsx 5", "price 5", "TRYING 5", ""]) assert.equal(detectCurrency("", text), "", text);
+});
+
+test("detectCurrency falls back to the cookie only when the text does not say", () => {
+  const jar = (c) => `a=b; aep_usuc_f=site=glo&c_tp=${c}&region=PK&b_locale=en_US; x=y`;
+  assert.equal(detectCurrency(jar("PKR"), "$4.77"), "PKR"); // a bare $ is ambiguous
+  assert.equal(detectCurrency(jar("GBP"), "1,491.00"), "GBP"); // no marker at all
+  assert.equal(detectCurrency(jar("PKR"), "US $4.77"), "USD"); // the text is where the number came from
+  assert.equal(detectCurrency(jar("PKR"), "£8.97"), "GBP");
+  assert.equal(detectCurrency("aep_usuc_f=site%3Dglo%26c_tp%3Dusd", ""), "USD"); // encoded, lower case
+  assert.equal(detectCurrency("aep_usuc_f=c_tp=EUR", "5"), "EUR");
+  // Nothing to go on: unknown, never a guess.
+  for (const cookie of ["", undefined, "a=b", "aep_usuc_f=site=glo", "other=c_tp=USD", "aep_usuc_f=c_tp=US&x=1"]) {
+    assert.equal(detectCurrency(cookie, "$4.77"), "", String(cookie));
+  }
+});
+
+test("currencyKind says how a page's prices relate to the sheet", () => {
+  assert.equal(currencyKind("PKR", "GBP"), "convert");
+  assert.equal(currencyKind("GBP", "GBP"), "same");
+  assert.equal(currencyKind("PKR", ""), "unset"); // the sheet has no marketplace
+  assert.equal(currencyKind("", "GBP"), "unknown"); // the page's currency is not known
+  assert.equal(currencyKind("", ""), "unknown");
+});
+
+test("rateFromCell takes the cell only when its formula looks up this very pair", () => {
+  const f = '=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),374.37)';
+  assert.equal(rateFromCell(f, 374.5, "PKR", "GBP"), 374.5); // 1 GBP = 374.5 PKR
+  assert.equal(rateFromCell(f, 374.5, "GBP", "PKR"), 1 / 374.5); // the inverse pair
+  assert.equal(rateFromCell(f.toLowerCase(), 4, "pkr", "gbp"), 4);
+  assert.equal(rateFromCell(f, 374.5, "PKR", "USD"), null); // another pair
+  assert.equal(rateFromCell("", 374.5, "PKR", "GBP"), null); // a typed number is not a lookup
+  assert.equal(rateFromCell(undefined, 374.5, "PKR", "GBP"), null);
+  assert.equal(rateFromCell('=GOOGLEFINANCE("CURRENCY:GBPUSD")', 1.3, "PKR", "GBP"), null);
+  for (const bad of [0, -2, NaN, Infinity, undefined, null, "x"]) assert.equal(rateFromCell(f, bad, "PKR", "GBP"), null, String(bad));
+  assert.equal(rateFromCell("=CURRENCY:", 5, "", ""), null); // empty codes match every formula
+});
+
+test("a sheet with no marketplace is the default: no currency to compare, and an import may leave it unset", () => {
+  assert.equal(SHEET_DEFAULTS.region, "");
+  assert.equal(REGIONS[SHEET_DEFAULTS.region], undefined);
+  const sheet = { ...SHEET_DEFAULTS, id: "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", name: "Store" };
+  for (const region of ["", "UK", "US"]) {
+    assert.equal(validateImport({ app: "aliswift", version: 1, sync: { sheets: [{ ...sheet, region }] } }).ok, true, region);
+  }
+  for (const region of ["XX", "uk", "constructor"]) {
+    assert.equal(validateImport({ app: "aliswift", version: 1, sync: { sheets: [{ ...sheet, region }] } }).ok, false, region);
+  }
 });
 
 /* SKUs and rows */
