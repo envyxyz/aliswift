@@ -475,7 +475,8 @@ function validateAuto() {
   const cur = $("homeCur");
   cur.setCustomValidity(/^[A-Za-z]{3}$/.test(cur.value.trim()) ? "" : "Use a 3-letter currency code, like PKR.");
   const rate = $("rate").value;
-  $("rate").setCustomValidity(rate === "" || Number(rate) > 0 ? "" : "Enter a number above 0, or leave this empty.");
+  // 0.000001 is the smallest rate the service worker accepts.
+  $("rate").setCustomValidity(rate === "" || Number(rate) >= 1e-6 ? "" : "Enter a rate of 0.000001 or more, or leave this empty.");
   checkName($("sheetName"));
 }
 
@@ -547,6 +548,8 @@ async function createAuto() {
     const reason = res?.error ?? "AliSwift didn't answer. Reload the extension and try again.";
     if (orphanId) showOrphan(data.name, reason, orphanId);
     else setNotice($("addNotice"), `Couldn't create the sheet. ${reason}`);
+    // Esc can close the dialog while it works (the browser stops honouring preventDefault after a few presses).
+    if (!$("addDialog").open) $("addDialog").showModal();
     return $("addSubmit").focus();
   }
   const { sheet } = res;
@@ -612,6 +615,10 @@ addForm.addEventListener("input", (e) => {
 $("addDialog").addEventListener("cancel", (e) => {
   if (adding) e.preventDefault();
 });
+// The finished file is added to AliSwift by this page, so closing the tab mid-create would lose it.
+window.addEventListener("beforeunload", (e) => {
+  if (adding) e.preventDefault();
+});
 
 $("addSheetBtn").addEventListener("click", openAdd);
 $("emptyAddBtn").addEventListener("click", openAdd);
@@ -670,6 +677,7 @@ $("importFile").addEventListener("change", async (e) => {
   const from = m ? `${m} from the file` : "none from the file";
   $("impQ").textContent = n ? `Replace your ${countOf(n)} with ${from}?` : `Import ${countOf(m)} from the file?`;
   $("impGo").textContent = n ? "Replace" : "Import";
+  $("impGo").classList.toggle("btn-danger", n > 0); // nothing is replaced when there are no sheets
   $("importDialog").showModal();
 });
 
@@ -753,7 +761,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
   const next = changes.sheets?.newValue ?? sheets;
   const nextId = changes.activeSheetId?.newValue ?? activeId;
-  if (JSON.stringify([next, nextId]) === JSON.stringify([sheets, activeId])) return;
+  if (canonical([next, nextId]) === canonical([sheets, activeId])) return;
   sheets = next;
   activeId = nextId;
   render();

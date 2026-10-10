@@ -259,14 +259,27 @@ test("when setup fails twice the half-built file's id comes back", async () => {
 });
 
 test("resumeId finishes the same file without creating another", async () => {
-  const { createSheet, calls } = setup(sheet, [{ json: created }, { json: {} }]);
+  const { createSheet, calls } = setup(sheet, [{ json: created }, { json: { range: "Inventory!B3:F1000" } }, { json: {} }]);
   const result = await createSheet({ ...form, resumeId: "new-sheet-id-123456" });
   assert.equal(result.success, true);
   assert.equal(result.sheet.id, "new-sheet-id-123456");
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.ok(calls[0].url.startsWith(`${base}/new-sheet-id-123456?fields=`)); // a read, not a create
   assert.equal(calls[0].body, undefined);
-  assert.equal(calls[1].url, `${base}/new-sheet-id-123456:batchUpdate`);
+  assert.ok(calls[1].url.startsWith(`${base}/new-sheet-id-123456/values/`)); // a read of the input columns
+  assert.equal(calls[2].url, `${base}/new-sheet-id-123456:batchUpdate`);
+});
+
+test("resumeId will not run setup over an Inventory tab the owner has started filling in", async () => {
+  const { createSheet, calls } = setup(sheet, [
+    { json: created },
+    { json: { values: [[], ["", "", "", "9.99"]] } }, // a sell price typed on row 4
+  ]);
+  const result = await createSheet({ ...form, resumeId: "new-sheet-id-123456" });
+  assert.equal(result.success, false);
+  assert.equal(result.orphanId, "new-sheet-id-123456");
+  assert.match(result.error, /already has data/);
+  assert.ok(calls.every((c) => !c.url.endsWith(":batchUpdate")), "nothing was written");
 });
 
 test("createSheet reports Google's message when the file can't be created", async () => {

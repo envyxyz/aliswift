@@ -93,6 +93,14 @@ async function createSheet(data) {
     // Ids come from the response, not from the request, so nothing depends on Google accepting chosen ids.
     ids = book.createBody.sheets.map((t) => file.sheets.find((s) => s.properties.title === t.properties.title)?.properties.sheetId);
     if (ids.includes(undefined)) throw new Error("That file has no Dashboard, Inventory and Orders tabs.");
+    if (data.resumeId) {
+      // Retry setup rewrites labels and formulas, so never run it over a file the owner has started using.
+      // B3:F1000 are input columns only: setup puts nothing in them.
+      const typed = await sheetsFetch(`/${id}/values/${encodeURIComponent("Inventory!B3:F1000")}`);
+      if (typed.values?.some((row) => row.some((c) => String(c).trim()))) {
+        throw new Error("The Inventory tab already has data, so setup was not repeated. Delete the file in Drive and create the sheet again.");
+      }
+    }
   } catch (error) {
     return { success: false, error: error.message, orphanId: id };
   }

@@ -4,6 +4,7 @@ const {
   SHEET_DEFAULTS,
   REGIONS,
   TEMPLATE_LAYOUT,
+  canonical,
   nextRow,
   nextSku,
   validateImport,
@@ -156,12 +157,48 @@ test("validateImport rejects files that are not AliSwift's, or are newer, or are
   for (const bad of [
     { keywordsCol: "BB" }, { keywordsCol: "1" }, { skuCol: "a" }, { startRow: 0 }, { startRow: "2" }, { region: "XX" },
     { region: "constructor" }, { skuPrefix: 'SKU-"&' }, { skuPrefix: "ABCDEFGHI" }, { pricingMethod: "free" },
-    { includeSalePrice: "yes" }, { oCols: [] }, { oCols: { no: "AB" } }, { formulaValue: "x".repeat(201) }, { extraCost: null },
+    { includeSalePrice: "yes" }, { oCols: [] }, { oCols: { no: "AB" } }, { extraCost: null },
   ]) {
     assert.equal(reason(backup({ sheets: [{ ...fullSheet(), ...bad }] })), "structure", JSON.stringify(bad));
   }
   assert.equal(reason(backup({ sheets: [], homeCurrency: "pkr" })), "structure");
   assert.equal(reason(backup({ sheets: [], showPageButton: "no" })), "structure");
+});
+
+test("an export of a sheet the page saved imports again, long free text included", () => {
+  const sheet = { ...fullSheet(), excludeKeywords: "spam, ".repeat(50), formulaValue: "costPrice * 1.7 + 2 ".repeat(15), sheetTab: "T".repeat(100), oTab: "Orders" };
+  assert.ok(sheet.excludeKeywords.length >= 300);
+  // The same trip a file takes: JSON out of Export, JSON back in at Import.
+  const file = JSON.parse(JSON.stringify(backup({ sheets: [sheet], activeSheetId: sheet.id, homeCurrency: "PKR" })));
+  const result = validateImport(file);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.sync.sheets, [sheet]);
+});
+
+test("validateImport rejects an id that is not a string, and blank settings every add needs", () => {
+  const reason = (sheet) => validateImport(backup({ sheets: [sheet] })).reason;
+  assert.equal(reason({ ...fullSheet(), id: 1234567890123 }), "structure"); // a number passes the pattern after coercion
+  assert.equal(reason({ ...fullSheet(), id: [ID] }), "structure"); // so does a one-item array
+  assert.equal(reason({ ...fullSheet(), name: "   " }), "structure");
+  for (const blank of ["sheetTab", "keywordsCol", "linkCol", "priceCol", "salePriceCol"]) {
+    assert.equal(reason({ ...fullSheet(), [blank]: "" }), "structure", blank);
+  }
+  assert.equal(reason({ ...fullSheet(), sheetTab: "  " }), "structure");
+  // Optional columns and the Orders tab may be blank: that is how "off" is saved.
+  assert.equal(reason({ ...fullSheet(), skuCol: "", statusCol: "", oTab: "" }), undefined);
+});
+
+test("a huge value is stopped by the size check, not stored", () => {
+  assert.equal(validateImport(backup({ sheets: [{ ...fullSheet(), excludeKeywords: "x".repeat(9000) }] })).reason, "size");
+});
+
+test("canonical ignores key order and nothing else", () => {
+  const a = [{ id: "1", name: "x", sheetTab: "S", oCols: { no: "A", sku: "B" } }];
+  const b = [{ sheetTab: "S", oCols: { sku: "B", no: "A" }, name: "x", id: "1" }]; // as chrome.storage returns it
+  assert.equal(canonical([a, "1"]), canonical([b, "1"]));
+  assert.notEqual(canonical([a, "1"]), canonical([[{ ...a[0], name: "y" }], "1"]));
+  assert.notEqual(canonical([a, "1"]), canonical([a, "2"]));
+  assert.notEqual(canonical([[1, 2]]), canonical([[2, 1]])); // array order still matters
 });
 
 test("validateImport rejects a payload too big for one synced item", () => {
