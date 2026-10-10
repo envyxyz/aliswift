@@ -48,6 +48,23 @@ test("options.html aria and label references point at real ids", () => {
   for (const [, id] of refs) assert.ok(ids.has(id), `options.html refers to #${id}, which does not exist`);
 });
 
+test("sign-in asks for no extra permission: no email, one scope", () => {
+  assert.deepEqual(manifest.permissions, ["storage", "identity"]); // not identity.email, which warns "Know your email address"
+  assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/spreadsheets"]);
+});
+
+test("popup.js only uses ids that exist in popup.html, and so do the popup's references", () => {
+  const html = fs.readFileSync(path.join(root, "popup/popup.html"), "utf8");
+  const js = fs.readFileSync(path.join(root, "popup/popup.js"), "utf8");
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+  const used = [...js.matchAll(/\$\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(used.length > 15, "the id scan found almost nothing");
+  for (const id of used) assert.ok(ids.has(id), `popup.js uses #${id}, missing from popup.html`);
+  for (const [, id] of html.matchAll(/\b(?:aria-describedby|aria-labelledby|for)="([^"]+)"/g)) {
+    assert.ok(ids.has(id), `popup.html refers to #${id}, which does not exist`);
+  }
+});
+
 test("description fits the Chrome Web Store limit", () => {
   assert.ok(manifest.description.length <= 132);
 });

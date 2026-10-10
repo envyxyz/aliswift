@@ -16,6 +16,8 @@
   --danger-solid: #c4281c;
   --tone-red-fg: #991b1b;
   --tone-red-bg: #fee2e2;
+  --tone-amber-fg: #854d0e;
+  --tone-amber-bg: #fef9c3;
   --hover: color-mix(in srgb, var(--text) 8%, transparent);
   --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--bg));
   --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));
@@ -53,6 +55,8 @@
     --danger: #ff7b72;
     --tone-red-fg: #fca5a5;
     --tone-red-bg: #3b1618;
+    --tone-amber-fg: #fde68a;
+    --tone-amber-bg: #3a2e0b;
     --shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }
@@ -113,6 +117,142 @@ select {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+select:disabled {
+  opacity: 0.6;
+}
+
+/* Themed dropdown. Older Chrome keeps the native list. The picker is a top-layer popover, so it stays
+   inside the browser pane: in the popup it opens below or above the select and scrolls. */
+@supports (appearance: base-select) {
+  select,
+  ::picker(select) {
+    appearance: base-select;
+  }
+
+  select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  select:disabled {
+    cursor: default;
+  }
+
+  select::picker-icon {
+    content: "";
+    flex: none;
+    width: 7px;
+    height: 7px;
+    color: var(--muted);
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    rotate: 45deg;
+    translate: 0 -2px;
+    transition: rotate var(--dur-fast) var(--ease), translate var(--dur-fast) var(--ease);
+  }
+
+  select:open::picker-icon {
+    rotate: 225deg;
+    translate: 0 2px;
+  }
+
+  ::picker(select) {
+    --shift: -4px;
+    min-inline-size: anchor-size(width);
+    max-inline-size: calc(100vw - 32px);
+    margin-block: 4px;
+    padding: 4px;
+    color: var(--text);
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    opacity: 0;
+    translate: 0 var(--shift);
+    transition: opacity var(--dur-fast) var(--ease), translate var(--dur-fast) var(--ease),
+      display var(--dur-fast) allow-discrete, overlay var(--dur-fast) allow-discrete;
+  }
+
+  select:open::picker(select) {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  @starting-style {
+    select:open::picker(select) {
+      opacity: 0;
+      translate: 0 var(--shift);
+    }
+  }
+
+  option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  option:hover,
+  option:focus-visible {
+    background: var(--hover);
+  }
+
+  option:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  option:checked {
+    font-weight: 600;
+    background: var(--accent-soft);
+  }
+
+  option::checkmark {
+    order: 1;
+    margin-left: auto;
+    color: var(--accent);
+  }
+
+  option:disabled {
+    color: var(--muted);
+    cursor: default;
+  }
+
+  @media (pointer: coarse) {
+    option {
+      min-height: 40px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    ::picker(select) {
+      --shift: 0px;
+      transition-duration: 100ms;
+    }
+
+    select::picker-icon {
+      transition: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    ::picker(select) {
+      border: 1px solid CanvasText;
+    }
+
+    option:checked {
+      outline: 1px solid Highlight;
+      outline-offset: -1px;
+    }
+  }
 }
 
 input::placeholder {
@@ -265,6 +405,7 @@ a.btn {
 /* notice: an inline banner with an icon. data-tone="error" tints it. */
 .notice {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--sp-2);
   padding: 10px 12px;
@@ -285,8 +426,14 @@ a.btn {
 }
 
 .notice > div {
-  flex: 1;
+  flex: 1 1 14em;
   min-width: 0;
+}
+
+.notice > .btn,
+.notice > .link-btn {
+  flex: none;
+  margin-left: auto;
 }
 
 .notice p + p {
@@ -303,8 +450,89 @@ a.btn {
   border-color: color-mix(in srgb, var(--tone-red-fg) 25%, transparent);
 }
 
+.notice[data-tone="warn"] {
+  color: var(--tone-amber-fg);
+  background: var(--tone-amber-bg);
+  border-color: color-mix(in srgb, var(--tone-amber-fg) 25%, transparent);
+}
+
 .notice[data-tone] > svg {
   color: currentColor;
+}
+
+/* One reason line for a gated feature: "[Sign in] to do X." The link is the verb. */
+.lock {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.lock svg {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.link-btn {
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration-thickness: 2px;
+}
+
+.link-btn[aria-disabled="true"] {
+  color: var(--muted);
+  text-decoration: none;
+  cursor: default;
+}
+
+.note {
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-wrap: pretty;
+}
+
+.rate-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rate-row label {
+  margin: 0;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.rate-row input {
+  flex: 0 1 120px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .field-narrow {
@@ -778,6 +1006,157 @@ dialog form {
   font-size: var(--fs-xs);
 }
 
+/* Google account button and its menu, rendered by profileButton() in lib/ui.js. */
+
+.profile {
+  display: inline-flex;
+}
+
+.profile-btn {
+  position: relative;
+}
+
+.profile-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.profile-btn[data-state="in"] {
+  color: var(--text);
+}
+
+.profile-btn[data-state="in"] svg {
+  fill: currentColor;
+}
+
+.profile-btn[data-state="in"]::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.profile-btn[data-state="busy"] svg {
+  display: none;
+}
+
+.profile-btn[data-state="busy"]::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.profile-btn[aria-disabled="true"] {
+  cursor: default;
+}
+
+.profile-btn[aria-disabled="true"]:active {
+  transform: none;
+}
+
+/* top and right are set by profileButton() when the menu opens. */
+.menu {
+  --shift: -4px;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(240px, calc(100vw - 16px));
+  padding: 4px;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  translate: 0 var(--shift);
+  transition: opacity var(--dur-fast) var(--ease), translate var(--dur-fast) var(--ease),
+    display var(--dur-fast) allow-discrete, overlay var(--dur-fast) allow-discrete;
+}
+
+.menu:popover-open {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@starting-style {
+  .menu:popover-open {
+    opacity: 0;
+    translate: 0 var(--shift);
+  }
+}
+
+.menu-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.menu-label[data-tone="error"] {
+  color: var(--tone-red-fg);
+}
+
+.menu-label svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.menu-detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  padding: 0 10px 8px 34px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: var(--hover);
+}
+
+.menu-item:focus-visible {
+  outline-offset: -2px;
+}
+
+.menu-item svg {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -806,6 +1185,13 @@ dialog form {
   .icon-btn:active {
     transform: none;
   }
+  .menu {
+    --shift: 0px;
+    transition-duration: 100ms;
+  }
+  .profile-btn[data-state="busy"]::before {
+    animation: none;
+  }
 }
 
 @media (forced-colors: active) {
@@ -821,5 +1207,11 @@ dialog form {
   }
   .segmented input:checked + span {
     outline: 2px solid Highlight;
+  }
+  .menu {
+    border: 1px solid CanvasText;
+  }
+  .profile-btn[data-state="in"]::after {
+    background: Highlight;
   }
 }

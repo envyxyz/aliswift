@@ -5,7 +5,15 @@ importScripts("lib/shared.js", "lib/template.js");
 const handlers = {
   appendToSheet: { run: (request) => appendRow(request.data) },
   createSheet: { pagesOnly: true, run: (request) => createSheet(request.data) },
+  authState: { run: () => authState() },
+  signIn: { pagesOnly: true, run: () => signIn() },
+  signOut: { pagesOnly: true, run: () => signOut() },
+  rate: { run: (request) => getRate(request.data) },
+  setRate: { pagesOnly: true, run: (request) => setRate(request.data) },
 };
+
+// A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer.
+const fail = (error) => ({ success: false, error: error.message, ...(error.code && { code: error.code }) });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!Object.hasOwn(handlers, request?.action)) return;
@@ -16,7 +24,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   Promise.resolve()
     .then(() => handler.run(request))
-    .catch((error) => ({ success: false, error: error.message }))
+    .catch(fail)
     .then(sendResponse);
   return true;
 });
@@ -29,16 +37,88 @@ function appendRow(data) {
   return run;
 }
 
-function getToken() {
+// Silent unless `interactive`, which only signIn() passes: a sign-in window never opens on its own.
+// A silent failure means "sign in first" and carries code "signin". While authOff is set (the user signed
+// out here) a silent call does not even ask Chrome, because Chrome would still hand back the old grant.
+async function getToken(interactive = false) {
+  if (!interactive && (await chrome.storage.local.get({ authOff: false })).authOff) throw signinError();
   return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+    chrome.identity.getAuthToken({ interactive }, (token) => {
       if (chrome.runtime.lastError || !token) {
-        reject(chrome.runtime.lastError ?? new Error("Google sign-in failed."));
+        const message = chrome.runtime.lastError?.message ?? "";
+        reject(
+          interactive
+            ? new Error(/not supported/i.test(message) ? "Google sign-in isn't available in this browser." : message || "Google sign-in failed.")
+            : signinError(),
+        );
       } else {
         resolve(token);
       }
     });
   });
+}
+
+const signinError = () => Object.assign(new Error("Sign in to Google to use sheets."), { code: "signin" });
+
+async function authState() {
+  return { success: true, signedIn: await getToken().then(() => true, () => false) };
+}
+
+// Clears authOff only once Google has given a token, so a closed window leaves the state as it was.
+async function signIn() {
+  await getToken(true);
+  await chrome.storage.local.set({ authOff: false });
+  return { success: true, signedIn: true };
+}
+
+// Local only: the Google grant stays (revoking would sign out every device and ask for consent again).
+async function signOut() {
+  const token = await getToken().catch(() => null);
+  await chrome.storage.local.set({ authOff: true });
+  if (token) await new Promise((r) => chrome.identity.removeCachedAuthToken({ token }, r));
+  return { success: true };
+}
+
+// Exchange rates are stored as "<to>:<from>" = how many `from` buy one `to`. A rate read from the sheet
+// is cached for 12 hours; one the user typed is kept under "<to>:<from>:typed" until they change it.
+const RATE_TTL = 12 * 60 * 60 * 1000;
+const CURRENCY = /^[A-Z]{3}$/;
+
+async function saveRate(key, rate) {
+  const { rates } = await chrome.storage.local.get({ rates: {} });
+  await chrome.storage.local.set({ rates: { ...rates, [key]: { rate, at: Date.now() } } });
+}
+
+// The rate for converting `from` prices into the sheet's `to`: cache, then the sheet's own exchange-rate
+// cell, then a rate the user typed. { success: true, rate: null } when there is none.
+async function getRate({ sheetId, from, to } = {}) {
+  if (!CURRENCY.test(from) || !CURRENCY.test(to) || from === to) throw new Error("Choose two different currencies.");
+  const key = `${to}:${from}`;
+  const { rates } = await chrome.storage.local.get({ rates: {} });
+  if (rates[key] && Date.now() - rates[key].at < RATE_TTL) return { success: true, rate: rates[key].rate, source: "sheet", at: rates[key].at };
+  try {
+    const { sheets } = await chrome.storage.sync.get({ sheets: [] });
+    if (!sheets.some((s) => s.id === sheetId)) throw new Error("Not one of your sheets.");
+    const fields = encodeURIComponent("sheets.data.rowData.values(userEnteredValue,effectiveValue)");
+    const file = await sheetsFetch(`/${sheetId}?ranges=${encodeURIComponent("Dashboard!D2")}&fields=${fields}`);
+    const cell = file.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values?.[0];
+    const rate = rateFromCell(cell?.userEnteredValue?.formulaValue, cell?.effectiveValue?.numberValue, from, to);
+    if (rate) {
+      await saveRate(key, rate);
+      return { success: true, rate, source: "sheet", at: Date.now() };
+    }
+  } catch {
+    // ponytail: signed out, a sheet without a Dashboard tab or a failed read all end here: fall back to the typed rate.
+  }
+  const typed = rates[`${key}:typed`];
+  return typed ? { success: true, rate: typed.rate, source: "typed", at: typed.at } : { success: true, rate: null };
+}
+
+async function setRate({ from, to, rate } = {}) {
+  if (!CURRENCY.test(from) || !CURRENCY.test(to) || from === to) throw new Error("Choose two different currencies.");
+  if (!(Number(rate) >= 1e-6 && Number(rate) <= 1e7)) throw new Error("Enter a rate above 0.");
+  await saveRate(`${to}:${from}:typed`, Number(rate));
+  return { success: true };
 }
 
 // Calls the Sheets API; path starts with "/" (or is empty for spreadsheets.create).
@@ -120,9 +200,16 @@ async function createSheet(data) {
 
 async function writeRow(data) {
   try {
-    const { title, price, salePrice, link } = data;
+    const { title, price, salePrice, link, currency } = data;
     const sheet = await getActiveSheet();
     if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+
+    // The one place every save passes: prices in another currency than the sheet's never get written.
+    // `currency` is what the numbers are in. Unknown on either side (no marketplace set) means nothing to compare.
+    const sheetCurrency = REGIONS[sheet.region]?.currency;
+    if (currency && sheetCurrency && currency !== sheetCurrency) {
+      throw Object.assign(new Error(`Prices are in ${currency} but this sheet is ${sheetCurrency}. Nothing was saved.`), { code: "currency" });
+    }
 
     const tab = `'${sheet.sheetTab.replace(/'/g, "''")}'`;
 
@@ -160,6 +247,6 @@ async function writeRow(data) {
     });
     return { success: true, ...(sku && { sku }) };
   } catch (error) {
-    return { success: false, error: error.message };
+    return fail(error);
   }
 }

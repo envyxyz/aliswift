@@ -1,5 +1,18 @@
 body {
   width: 360px;
+  min-height: 200px;
+}
+
+/* Shipped inactive. If a themed select ever misbehaves in the popup, put class="select-native" on <body>. */
+@supports (appearance: base-select) {
+  body.select-native select,
+  body.select-native select::picker(select) {
+    appearance: auto;
+  }
+
+  body.select-native select {
+    display: inline-block;
+  }
 }
 
 header {
@@ -8,6 +21,11 @@ header {
   justify-content: space-between;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
+}
+
+.head-tools {
+  display: flex;
+  gap: 4px;
 }
 
 h1 {
@@ -26,6 +44,7 @@ main {
   padding: 16px;
 }
 
+#signin,
 #setup {
   display: grid;
   justify-items: start;
@@ -41,6 +60,11 @@ form {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+/* The currency block is empty for a same-currency product, so only what shows adds space. */
+#currency > :not([hidden]) {
+  margin-top: 8px;
 }
 
 #addBtn {

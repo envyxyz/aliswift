@@ -336,9 +336,10 @@ $("orderGrid").prepend(
     return cell;
   }),
 );
-for (const sel of [$("editRegion"), $("region")]) {
-  sel.replaceChildren(...Object.entries(REGIONS).map(([key, r]) => new Option(r.label, key)));
-}
+const regionOptions = () => Object.entries(REGIONS).map(([key, r]) => new Option(r.label, key));
+// Only a sheet that already exists can have no marketplace: a new sheet needs one.
+$("editRegion").replaceChildren(new Option("Not set", ""), ...regionOptions());
+$("region").replaceChildren(...regionOptions());
 
 editForm.addEventListener("input", validateEdit);
 
@@ -620,8 +621,15 @@ window.addEventListener("beforeunload", (e) => {
   if (adding) e.preventDefault();
 });
 
-$("addSheetBtn").addEventListener("click", openAdd);
-$("emptyAddBtn").addEventListener("click", openAdd);
+// Adding a sheet needs Google, so the buttons stay visible but inert while signed out (see lockSheets).
+const locked = () => !$("lockSheets").hidden;
+$("addSheetBtn").addEventListener("click", () => locked() || openAdd());
+$("emptyAddBtn").addEventListener("click", () => locked() || openAdd());
+// Unknown counts as signed in, so the buttons never flicker locked on load.
+document.addEventListener("authchange", (e) => {
+  $("lockSheets").hidden = e.detail.signedIn;
+  for (const id of ["addSheetBtn", "emptyAddBtn"]) $(id).setAttribute("aria-disabled", String(!e.detail.signedIn));
+});
 $("cancelBtn").addEventListener("click", () => {
   if (!adding) $("addDialog").close();
 });
@@ -768,6 +776,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 showTab(location.hash.slice(1));
+profileButton($("profile"));
 
 (async () => {
   $("version").textContent = `v${chrome.runtime.getManifest().version}`;
