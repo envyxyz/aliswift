@@ -156,7 +156,7 @@
               <button type="button" class="info" aria-label="About the Gemini key" aria-describedby="tip-key">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-              <span id="tip-key" role="tooltip" class="tip">Used for AI features such as mapping an imported sheet. The key stays on this device. It isn't synced or exported, and it is sent only to Google's Gemini API.</span>
+              <span id="tip-key" role="tooltip" class="tip">Used for AI features such as writing listings and mapping an imported sheet. The key stays on this device. It isn't synced or exported, and it is sent only to Google's Gemini API, with the product details and photos of each listing you write.</span>
             </div>
             <div class="input-row">
               <input id="geminiKey" type="password" aria-labelledby="h-key" required maxlength="200" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" />
@@ -165,6 +165,30 @@
             <p id="keyState" class="muted" role="status"></p>
           </div>
         </form>
+
+        <div class="group">
+          <div class="title-row">
+            <h2 id="h-model">Model</h2>
+            <button type="button" class="info" aria-label="About the model" aria-describedby="tip-model">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+            </button>
+            <span id="tip-model" role="tooltip" class="tip">The Gemini model that writes your listings. Change it only if Google retires the default.</span>
+          </div>
+          <input id="aiModel" aria-labelledby="h-model" maxlength="100" placeholder="gemini-3.8-flash" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="group">
+          <div class="title-row">
+            <h2 id="h-inst">Listing instructions</h2>
+            <button type="button" class="info" aria-label="About the listing instructions" aria-describedby="tip-inst">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+            </button>
+            <span id="tip-inst" role="tooltip" class="tip">These rules tell Gemini how to write your title, item specifics and description. Edit them to match your style.</span>
+            <button type="button" class="btn btn-quiet btn-sm ai-reset" id="aiReset">Reset to default</button>
+          </div>
+          <textarea id="aiInstructions" aria-labelledby="h-inst" rows="14" maxlength="6000" spellcheck="true"></textarea>
+          <p id="aiCount" class="counter muted">0/6000</p>
+        </div>
       </div>
 
       <div role="tabpanel" id="panel-general" aria-labelledby="tab-general" class="panel" hidden>
@@ -532,6 +556,7 @@
 
     <script src="../lib/shared.js"></script>
     <script src="../lib/importmap.js"></script>
+    <script src="../lib/listing.js"></script>
     <script src="../lib/ui.js"></script>
     <script src="options.js"></script>
   </body>

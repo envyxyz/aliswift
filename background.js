@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js");
+importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js");
 
 // The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -24,10 +24,18 @@ const handlers = {
   listSpreadsheets: { pagesOnly: true, run: () => listSpreadsheets() },
   readSpreadsheetMeta: { pagesOnly: true, run: (request) => readSpreadsheetMeta(request.id) },
   mapSheet: { pagesOnly: true, run: (request) => mapSheet(request.data) },
+  generateListing: { pagesOnly: true, run: (request) => generateListing(request) },
+  saveListing: { pagesOnly: true, run: (request) => saveListing(request) },
 };
 
-// A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer.
-const fail = (error) => ({ success: false, error: error.message, ...(error.code && { code: error.code }) });
+// A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
+// call also says which model and which HTTP status, so a page can say "that model is gone" (404).
+const fail = (error) => ({
+  success: false,
+  error: error.message,
+  ...(error.code && { code: error.code }),
+  ...(error.model && { model: error.model, status: error.status }),
+});
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!Object.hasOwn(handlers, request?.action)) return;
@@ -54,8 +62,10 @@ function enqueue(job) {
 
 // `dest: "local"` saves to the library; anything else goes to the sheet. Nothing here ever turns a failed
 // sheet save into a library save: the page that asked decides.
-function appendRow(data) {
-  return enqueue(() => (data?.dest === "local" ? saveLocal(data) : writeRow(data)));
+async function appendRow(data) {
+  const result = await enqueue(() => (data?.dest === "local" ? saveLocal(data) : writeRow(data)));
+  if (result.success) await saveDetails(data);
+  return result;
 }
 
 // Silent unless `interactive`, which only signIn() passes: a sign-in window never opens on its own.
@@ -538,6 +548,126 @@ function importLibrary(incoming) {
     await chrome.storage.local.set({ library: lib });
     return { success: true, added: lib.length - library.length };
   });
+}
+
+/* Listings (Gemini). One listing per product, kept under listing:<sheetId>:<key> in storage.local ("local" is the
+   library's sheetId). Nothing here reads or writes a sheet. */
+
+const IMAGES_MAX = 4;
+// Photos are fetched here, not by the page, from AliExpress's own hosts only. 3 MB each keeps four of them, as
+// base64, under Gemini's 20 MB request limit.
+const IMAGE_HOSTS = /(^|\.)(alicdn\.com|aliexpress-media\.com|aliexpress\.com|aliexpress\.us)$/;
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const IMAGE_BYTES = 3 * 1024 * 1024;
+
+// The AliExpress item number in a product link, or "".
+const itemIdOf = (link) => /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(link ?? ""))?.[1] ?? "";
+
+// What a listing is filed under: the SKU, or the item number when the sheet has no SKU column.
+const listingKey = (product) => text(product?.sku).slice(0, 40) || itemIdOf(product?.link);
+
+// What a save may attach for the listing writer, as { fullTitle, specs: [[name, value]], description, images }, capped.
+// The page sends it, so it is cleaned like everything else the page sends. null when nothing usable is in it.
+function cleanDetails(d) {
+  if (!d || typeof d !== "object") return null;
+  const out = {
+    fullTitle: text(d.fullTitle).slice(0, 500),
+    specs: (Array.isArray(d.specs) ? d.specs : []).slice(0, 50).filter(Array.isArray).map(([k, v]) => [text(k).slice(0, 100), text(v).slice(0, 200)]).filter(([k, v]) => k && v),
+    description: text(d.description).slice(0, 4000),
+    images: (Array.isArray(d.images) ? d.images : []).slice(0, 20).map((u) => httpsUrl(u)).filter(Boolean).slice(0, IMAGES_MAX),
+  };
+  return out.fullTitle || out.specs.length || out.description || out.images.length ? { ...out, savedAt: Date.now() } : null;
+}
+
+// Keeps a saved product's details (details:<item number>) for its listing. Never fails the save it follows.
+// ponytail: about 6 KB each against storage.local's 10 MB, so it stops at 6 MB in use. Upgrade: prune the oldest.
+async function saveDetails(data) {
+  try {
+    const id = itemIdOf(data?.link);
+    const details = id && cleanDetails(data.details);
+    if (details && !((await chrome.storage.local.getBytesInUse?.(null)) > 6e6)) await chrome.storage.local.set({ [`details:${id}`]: details });
+  } catch {
+    // The product is saved; its listing is just written from less.
+  }
+}
+
+// One photo as { mime, data: base64 }, or null for anything that isn't a small JPEG, PNG or WebP from an AliExpress host.
+async function fetchImage(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" || !IMAGE_HOSTS.test(u.hostname)) return null;
+    const res = await fetch(u.href, { credentials: "omit", redirect: "error", signal: AbortSignal.timeout(10000) });
+    const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!res.ok || !IMAGE_TYPES.includes(mime) || Number(res.headers.get("content-length")) > IMAGE_BYTES) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > IMAGE_BYTES) return null;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { mime, data: btoa(binary) };
+  } catch {
+    return null; // a photo that won't load only makes the listing text-only
+  }
+}
+
+// Writes a listing for one product with Gemini, or answers the one already kept (unless `force`).
+// `product` is a dashboard card's product ({ sku, title, link, salePrice, image, currency }). Only the sell price
+// goes to Gemini, never the cost. Answers { success, key, listing, limited, model, createdAt, warnings, cached? }.
+// `limited` means no saved details were found, so it was written from the sheet's name and photo alone.
+// A failed reply has `code`: nokey, invalid-key, rate, network, timeout or bad-output; with `status` 404 and `model`
+// when that model is gone.
+async function generateListing({ sheetId, product, force } = {}) {
+  const p = product && typeof product === "object" ? product : {};
+  const key = listingKey(p);
+  if (!key) throw new Error("This product has no SKU or AliExpress link to keep its listing under.");
+  const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
+  const slot = `listing:${sheetId}:${key}`;
+  if (!force) {
+    const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
+    if (kept) return { success: true, key, cached: true, ...kept };
+  }
+  const { model } = await geminiSettings(); // no key: stop before any photo is fetched
+
+  const id = itemIdOf(p.link);
+  const details = id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null;
+  const urls = [...new Set((details?.images?.length ? details.images : [p.image]).map((u) => httpsUrl(u)).filter(Boolean))].slice(0, IMAGES_MAX);
+  const photos = (await Promise.all(urls.map(async (url) => ({ url, image: await fetchImage(url) })))).filter((x) => x.image);
+
+  const { aiInstructions } = await chrome.storage.sync.get({ aiInstructions: "" });
+  const region = REGIONS[sheet?.region] ? sheet.region : p.currency === "USD" ? "US" : "UK";
+  const wordsToLeaveOut = sheet?.excludeKeywords ?? "";
+  const currency = sheet ? REGIONS[sheet.region]?.currency : p.currency;
+  const request = buildListingRequest(
+    {
+      title: details?.fullTitle || p.title,
+      description: details?.description,
+      specifics: details?.specs,
+      images: photos.map((x) => x.url),
+      sellPrice: p.salePrice == null ? "" : `${currency ?? ""} ${p.salePrice}`.trim(),
+    },
+    { region, wordsToLeaveOut, instructions: typeof aiInstructions === "string" ? aiInstructions : "" },
+  );
+  // 90 s: a listing with photos takes a while. Not retried on a timeout (that would be three minutes); Regenerate is.
+  const raw = await callGemini({ ...request, images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000 });
+  const { listing, warnings, ok } = validateListing(raw, { wordsToLeaveOut });
+  if (!ok) throw Object.assign(new Error("Gemini's answer had no usable title and description. Try again."), { code: "bad-output" });
+
+  const record = { listing, limited: !details, model, createdAt: Date.now(), warnings };
+  await chrome.storage.local.set({ [slot]: record });
+  return { success: true, key, ...record };
+}
+
+// Keeps the seller's edits to a listing's title and description (the dialog's two editable fields).
+// { sheetId, key, title?, description? } -> { success, listing }. The title is cut to 80 characters.
+async function saveListing({ sheetId, key, title, description } = {}) {
+  if (sheetId !== LOCAL) await sheetById(sheetId);
+  const slot = `listing:${sheetId}:${text(key).slice(0, 40)}`;
+  const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
+  if (!kept) throw new Error("That product has no saved listing. Create one first.");
+  const listing = { ...kept.listing };
+  if (typeof title === "string") listing.title = clampTitle(stripControlChars(title).replace(/\s+/g, " ").trim()).title;
+  if (typeof description === "string") listing.description = stripControlChars(description).trim().slice(0, 5000);
+  await chrome.storage.local.set({ [slot]: { ...kept, listing, edited: true } });
+  return { success: true, listing };
 }
 
 /* Import from Google Sheets. READ-ONLY: every request below is a GET and nothing here writes to the user's sheet

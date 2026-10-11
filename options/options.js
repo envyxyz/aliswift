@@ -1173,6 +1173,58 @@ $("keyState").addEventListener("click", async (e) => {
 chrome.storage.onChanged.addListener((changes, area) => area === "local" && changes.geminiKey && renderKey(Boolean(changes.geminiKey.newValue)));
 chrome.storage.local.get({ geminiKey: "" }).then(({ geminiKey }) => renderKey(Boolean(String(geminiKey).trim())));
 
+/* AI tab: the model and the listing instructions. Settings, not secrets, so they sync and export.
+   Blank means the default: the instructions are stored as "" until the seller edits them. */
+
+const modelInput = $("aiModel");
+const instInput = $("aiInstructions");
+const aiSaved = { aiModel: "", aiInstructions: "" };
+
+function showAi() {
+  modelInput.value = aiSaved.aiModel;
+  instInput.value = aiSaved.aiInstructions || DEFAULT_INSTRUCTIONS;
+  $("aiCount").textContent = `${instInput.value.length}/6000`;
+}
+
+// Shows the new value at once; a failed save puts the old one back.
+function saveAi(patch) {
+  const before = { ...aiSaved };
+  Object.assign(aiSaved, patch);
+  showAi();
+  return setSync(
+    patch,
+    () => {
+      Object.assign(aiSaved, before);
+      showAi();
+    },
+    () => saveAi(patch),
+  );
+}
+
+modelInput.addEventListener("change", () => {
+  const v = modelInput.value.trim();
+  modelInput.setCustomValidity(/^[\w.-]{0,100}$/.test(v) ? "" : "Use a model id from Google, like gemini-3.8-flash.");
+  if (!modelInput.reportValidity()) return flash("Not saved", true);
+  saveAi({ aiModel: v });
+});
+
+instInput.addEventListener("input", () => ($("aiCount").textContent = `${instInput.value.length}/6000`));
+instInput.addEventListener("change", () => saveAi({ aiInstructions: instInput.value.trim() === DEFAULT_INSTRUCTIONS ? "" : instInput.value.trim() }));
+
+$("aiReset").addEventListener("click", () => {
+  const before = aiSaved.aiInstructions;
+  if (!before && instInput.value === DEFAULT_INSTRUCTIONS) return;
+  saveAi({ aiInstructions: "" });
+  toast("Instructions reset.", { duration: 8000, action: { label: "Undo", onClick: () => saveAi({ aiInstructions: before }) } });
+});
+
+// Another tab, or a settings import, changed them.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !("aiModel" in changes || "aiInstructions" in changes)) return;
+  for (const key of Object.keys(aiSaved)) if (key in changes) aiSaved[key] = changes[key].newValue ?? "";
+  if (document.activeElement !== instInput && document.activeElement !== modelInput) showAi();
+});
+
 /* Settings backup */
 
 const IMPORT_ERRORS = {
@@ -1335,10 +1387,14 @@ profileButton($("profile"));
     activeSheetId: "",
     showPageButton: true,
     homeCurrency: "",
+    aiModel: "",
+    aiInstructions: "",
   });
   sheets = stored.sheets;
   activeId = stored.activeSheetId;
   homeCurrency = stored.homeCurrency;
   $("showPageButton").checked = stored.showPageButton;
+  Object.assign(aiSaved, { aiModel: stored.aiModel, aiInstructions: stored.aiInstructions });
+  showAi();
   render();
 })();

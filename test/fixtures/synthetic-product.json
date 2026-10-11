@@ -1,0 +1,17 @@
+{
+  "title": "Synthetic Wireless Ergonomic Mouse 2.4GHz USB Optical",
+  "description": "<p>Ergonomic wireless mouse designed for comfortable all-day office and home use.</p><ul><li><b>Sensor:</b> 1600 DPI Optical</li><li><b>Connection:</b> 2.4GHz USB receiver</li><li><b>Battery:</b> 1x AA battery</li></ul>",
+  "sellPrice": "14.99",
+  "costPrice": "4.50",
+  "profit": "6.85",
+  "specifics": [
+    { "name": "Brand", "value": "Unbranded" },
+    { "name": "Type", "value": "Standard Mouse" },
+    { "name": "Connectivity", "value": "Wireless, 2.4GHz" },
+    { "name": "Color", "value": "Matte Black" }
+  ],
+  "images": [
+    "https://example.com/images/mouse-front.jpg",
+    "https://example.com/images/mouse-side.jpg"
+  ]
+}
