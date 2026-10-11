@@ -29,6 +29,7 @@
         <button type="button" role="tab" id="tab-sheets" aria-controls="panel-sheets" aria-selected="true" tabindex="0">Sheets</button>
         <button type="button" role="tab" id="tab-pricing" aria-controls="panel-pricing" aria-selected="false" tabindex="-1">Pricing</button>
         <button type="button" role="tab" id="tab-title" aria-controls="panel-title" aria-selected="false" tabindex="-1">Title</button>
+        <button type="button" role="tab" id="tab-ai" aria-controls="panel-ai" aria-selected="false" tabindex="-1">AI</button>
         <button type="button" role="tab" id="tab-general" aria-controls="panel-general" aria-selected="false" tabindex="-1">General</button>
       </div>
 
@@ -47,10 +48,16 @@
               </button>
               <span id="tip-sheets" role="tooltip" class="tip">AliSwift saves each product to the highlighted sheet. Every sheet has its own columns, pricing and title rules. Use the pencil to edit one.</span>
             </div>
-            <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
-              Add sheet
-            </button>
+            <div id="groupActions" class="group-actions">
+              <button id="gsOpen" class="btn btn-quiet btn-sm" type="button" aria-haspopup="dialog">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
+                Import from Google Sheets
+              </button>
+              <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
+                Add sheet
+              </button>
+            </div>
           </div>
           <p id="lockSheets" class="lock" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg><button type="button" class="link-btn" data-signin>Sign in</button> to add sheets.</p>
           <div id="chips" class="chips" role="group" aria-label="Your sheets"></div>
@@ -58,7 +65,10 @@
             <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
             <h3>No sheets yet</h3>
             <p>Let AliSwift create a ready-made Google Sheet for you, or connect one you already have.</p>
-            <button id="emptyAddBtn" class="btn" type="button">Add a sheet</button>
+            <div class="empty-actions">
+              <button id="emptyAddBtn" class="btn" type="button">Add a sheet</button>
+              <button id="gsOpenEmpty" class="btn btn-quiet" type="button" aria-haspopup="dialog">Import from Google Sheets</button>
+            </div>
           </div>
         </div>
       </div>
@@ -134,6 +144,25 @@
               <label for="excludeKeywords">Words to leave out <span class="muted">(separate with commas)</span></label>
               <input id="excludeKeywords" name="excludeKeywords" placeholder="wholesale, lot, vintage" />
             </div>
+          </div>
+        </form>
+      </div>
+
+      <div role="tabpanel" id="panel-ai" aria-labelledby="tab-ai" class="panel" hidden>
+        <form id="keyForm">
+          <div class="group">
+            <div class="title-row">
+              <h2 id="h-key">Gemini key</h2>
+              <button type="button" class="info" aria-label="About the Gemini key" aria-describedby="tip-key">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-key" role="tooltip" class="tip">Used for AI features such as mapping an imported sheet. The key stays on this device. It isn't synced or exported, and it is sent only to Google's Gemini API.</span>
+            </div>
+            <div class="input-row">
+              <input id="geminiKey" type="password" aria-labelledby="h-key" required maxlength="200" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" />
+              <button type="submit" class="btn" id="keySave">Save key</button>
+            </div>
+            <p id="keyState" class="muted" role="status"></p>
           </div>
         </form>
       </div>
@@ -352,6 +381,137 @@
       </form>
     </dialog>
 
+    <dialog id="gsDialog" aria-labelledby="gsTitle">
+      <form id="gsForm" autocomplete="off">
+        <div class="dialog-head"><h2 id="gsTitle">Import from Google Sheets</h2></div>
+        <div class="dialog-body">
+          <fieldset id="gsChoose" class="bare gs-pane" role="none">
+            <p class="muted">Pick a sheet and AliSwift works out its tabs and columns. It only reads your sheet.</p>
+            <div id="gsNotice" class="notice" data-tone="error" role="alert" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="" /></svg>
+              <div></div>
+            </div>
+            <div id="gsListWrap">
+              <input type="search" id="gsSearch" placeholder="Search your sheets" aria-label="Search your sheets" aria-controls="gsList" autofocus />
+              <div id="gsList" class="pick-list" role="radiogroup" aria-label="Your Google Sheets"></div>
+              <p id="gsCount" class="note" role="status"></p>
+            </div>
+            <div id="gsEmpty" class="empty" hidden>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
+              <h3>No sheets found</h3>
+              <p>Create one in Google Sheets, or paste a link below.</p>
+            </div>
+            <div>
+              <label id="gsPasteLabel" for="gsPaste">Or paste the sheet link or ID</label>
+              <input id="gsPaste" placeholder="https://docs.google.com/spreadsheets/d/..." spellcheck="false" />
+            </div>
+          </fieldset>
+
+          <fieldset id="gsRead" class="bare gs-pane" role="none" hidden disabled>
+            <div class="gs-state">
+              <span class="gs-spinner" aria-hidden="true"></span>
+              <p id="gsReadMsg" role="status">Reading your sheet...</p>
+              <p class="note">AliSwift only reads your sheet. Nothing in it changes.</p>
+              <button type="button" class="link-btn" id="gsSkipAi" hidden>Match by headers instead</button>
+            </div>
+          </fieldset>
+
+          <fieldset id="gsMap" class="bare gs-pane" role="none" hidden disabled>
+            <div class="gs-method">
+              <span id="gsMethod" class="tag"></span>
+              <span id="gsAiInfo" class="title-row" hidden>
+                <button type="button" class="info" aria-label="About AI matching" aria-describedby="tip-gs-ai">
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+                </button>
+                <span id="tip-gs-ai" role="tooltip" class="tip">AI saw your tab names, column titles and up to 3 sample rows per tab, without columns that look like personal data (names, addresses, emails, notes). It used your own Gemini key.</span>
+              </span>
+              <span id="gsReason" class="note" hidden></span>
+              <button type="button" class="link-btn" id="gsRetryAi" hidden>Try AI again</button>
+            </div>
+            <div id="gsMissing" class="notice" data-tone="warn" role="status" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" /></svg>
+              <div></div>
+            </div>
+            <div id="gsSaveNotice" class="notice" data-tone="error" role="alert" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
+              <div></div>
+            </div>
+            <div class="gs-pair">
+              <div>
+                <label for="gsName">Name</label>
+                <input id="gsName" name="name" maxlength="40" required autocomplete="off" />
+              </div>
+              <div>
+                <div class="title-row" data-align="end">
+                  <label for="gsRegion">Marketplace</label>
+                  <button type="button" class="info" aria-label="About marketplace" aria-describedby="tip-gs-region">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+                  </button>
+                  <span id="tip-gs-region" role="tooltip" class="tip">Sets the currency for this sheet and which eBay site opens when you list. If it's not set, prices are saved as shown, with no currency check.</span>
+                </div>
+                <select id="gsRegion" name="region"></select>
+              </div>
+            </div>
+
+            <div class="gs-group">
+              <h3 id="h-gs-inv">Inventory</h3>
+              <div class="gs-pair">
+                <div>
+                  <div class="title-row"><label for="gsInvTab">Inventory tab</label><span id="gsInvTabC" class="tag"></span></div>
+                  <select id="gsInvTab" name="sheetTab" required></select>
+                </div>
+                <div>
+                  <label for="gsInvRow">First data row</label>
+                  <input id="gsInvRow" name="startRow" type="number" min="1" step="1" required />
+                </div>
+              </div>
+              <p id="gsSkipped" class="note" hidden></p>
+              <table class="map" role="table" aria-labelledby="h-gs-inv">
+                <thead class="sr-only"><tr role="row"><th role="columnheader">Field</th><th role="columnheader">Column in your sheet</th><th role="columnheader">Match</th></tr></thead>
+                <tbody id="gsInvRows"></tbody>
+              </table>
+              <details id="gsInvMore" class="disclosure">
+                <summary>More columns <span id="gsInvCount" class="muted"></span></summary>
+                <table class="map" role="table" aria-label="More Inventory columns">
+                  <thead class="sr-only"><tr role="row"><th role="columnheader">Field</th><th role="columnheader">Column in your sheet</th><th role="columnheader">Match</th></tr></thead>
+                  <tbody id="gsInvMoreRows"></tbody>
+                </table>
+              </details>
+            </div>
+
+            <div class="gs-group">
+              <h3 id="h-gs-ord">Orders</h3>
+              <div class="gs-pair">
+                <div>
+                  <div class="title-row"><label for="gsOrdTab">Orders tab</label><span id="gsOrdTabC" class="tag"></span></div>
+                  <select id="gsOrdTab" name="oTab"></select>
+                </div>
+                <div id="gsOrdRowWrap">
+                  <label for="gsOrdRow">First row</label>
+                  <input id="gsOrdRow" name="oRow" type="number" min="1" step="1" />
+                </div>
+              </div>
+              <details id="gsOrdCols" class="disclosure">
+                <summary>Order columns <span id="gsOrdCount" class="muted"></span></summary>
+                <table class="map" role="table" aria-labelledby="h-gs-ord">
+                  <thead class="sr-only"><tr role="row"><th role="columnheader">Field</th><th role="columnheader">Column in your sheet</th><th role="columnheader">Match</th></tr></thead>
+                  <tbody id="gsOrdRows"></tbody>
+                </table>
+              </details>
+            </div>
+          </fieldset>
+          <p id="gsLive" class="sr-only" role="status"></p>
+        </div>
+        <div class="dialog-foot">
+          <div class="actions">
+            <button id="gsBack" class="btn btn-quiet" type="button" hidden>Back</button>
+            <button id="gsCancel" class="btn btn-quiet" type="button">Cancel</button>
+            <button id="gsGo" class="btn" type="submit" disabled>Continue</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="importDialog" aria-labelledby="impTitle">
       <form method="dialog">
         <div class="dialog-head"><h2 id="impTitle">Import settings</h2></div>
@@ -371,6 +531,7 @@
     <div class="toasts" aria-live="polite"></div>
 
     <script src="../lib/shared.js"></script>
+    <script src="../lib/importmap.js"></script>
     <script src="../lib/ui.js"></script>
     <script src="options.js"></script>
   </body>

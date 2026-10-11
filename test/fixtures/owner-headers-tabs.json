@@ -1,0 +1,80 @@
+[
+  {
+    "title": "Dashboard",
+    "headers": ["Metric", "Value"],
+    "sample": [
+      ["Total Products Listed", "10"],
+      ["Total Orders", "5"]
+    ]
+  },
+  {
+    "title": "Inventory",
+    "headers": [
+      "SKU",
+      "Product Name",
+      "Supplier URL",
+      "Cost Price (USD)",
+      "Sell Price (USD)",
+      "Ad Rate %",
+      "Ad Cost (USD)",
+      "eBay Fee (USD)",
+      "Payment Fee (USD)",
+      "Net Profit (USD)",
+      "Net Profit (PKR)",
+      "Margin %",
+      "Status",
+      "Notes"
+    ],
+    "sample": [
+      [
+        "SKU-101",
+        "Synthetic Silicone Kitchen Spatula",
+        "https://example.com/supplier/9001",
+        "4.20",
+        "11.50",
+        "0.02",
+        "0.23",
+        "1.56",
+        "0.40",
+        "5.11",
+        "1420",
+        "0.44",
+        "Listed",
+        "Red color variant"
+      ]
+    ]
+  },
+  {
+    "title": "Orders",
+    "headers": [
+      "Order Number",
+      "SKU",
+      "Product Name",
+      "Order Date",
+      "QTY",
+      "Sell Price (USD)",
+      "Cost Price (USD)",
+      "Profit (USD)",
+      "Profit (PKR)",
+      "Status",
+      "Tracking Number",
+      "Notes"
+    ],
+    "sample": [
+      [
+        "SYN-US-8001",
+        "SKU-101",
+        "Synthetic Silicone Kitchen Spatula",
+        "15/10/2026",
+        "1",
+        "11.50",
+        "4.20",
+        "5.11",
+        "1420",
+        "Pending",
+        "TRK11223344",
+        "Standard shipping"
+      ]
+    ]
+  }
+]

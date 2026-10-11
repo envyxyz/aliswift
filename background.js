@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/template.js");
+importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js");
 
 // The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -20,6 +20,9 @@ const handlers = {
   addOrder: { pagesOnly: true, run: (request) => addOrder(request.sheetId, request.order) },
   updateOrder: { pagesOnly: true, run: (request) => updateOrder(request) },
   moveLocal: { pagesOnly: true, run: (request) => moveLocal(request.sheetId) },
+  listSpreadsheets: { pagesOnly: true, run: () => listSpreadsheets() },
+  readSpreadsheetMeta: { pagesOnly: true, run: (request) => readSpreadsheetMeta(request.id) },
+  mapSheet: { pagesOnly: true, run: (request) => mapSheet(request.data) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer.
@@ -151,26 +154,26 @@ async function setRate({ from, to, rate } = {}) {
   return { success: true };
 }
 
-// Calls the Sheets API; path starts with "/" (or is empty for spreadsheets.create).
-// A 401 means the cached token is stale or revoked: drop it and retry once with a fresh one.
-async function sheetsFetch(path, init = {}) {
+// Calls a Google API with the user's token. A 401 means the cached token is stale or revoked: drop it and retry
+// once with a fresh one. A failed reply throws an Error carrying the HTTP `status`.
+async function googleFetch(url, init = {}) {
   for (let attempt = 0; ; attempt++) {
     const token = await getToken();
-    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets${path}`, {
-      ...init,
-      headers: { ...init.headers, Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
     if (res.status === 401 && attempt === 0) {
       await new Promise((r) => chrome.identity.removeCachedAuthToken({ token }, r));
       continue;
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error?.message ?? `Google Sheets error ${res.status}`);
+      throw Object.assign(new Error(body.error?.message ?? `Google Sheets error ${res.status}`), { status: res.status });
     }
     return res.json();
   }
 }
+
+// Calls the Sheets API; path starts with "/" (or is empty for spreadsheets.create).
+const sheetsFetch = (path, init) => googleFetch(`https://sheets.googleapis.com/v4/spreadsheets${path}`, init);
 
 const toNumber = (v) => {
   const n = parsePrice(v);
@@ -518,4 +521,99 @@ async function moveLocal(sheetId) {
     }
     return { success: true, moved: fresh.length, skipped: dupes.length, needRate };
   });
+}
+
+/* Import from Google Sheets. READ-ONLY: every request below is a GET and nothing here writes to the user's sheet
+   or Drive (a test reads this section and fails on any write). Gemini gets a POST, but that is not their sheet. */
+
+const IMPORT_TIMEOUT = 15000;
+const SHEET_ID = /^[\w-]{10,100}$/;
+const importError = (code, message) => Object.assign(new Error(message), { code });
+
+// What a failed Google read means to the dialog, or null when the HTTP status has to decide.
+function readCode(error) {
+  if (error.code === "signin") return "signin";
+  if (error.code === "offline") return "network";
+  if (error.name === "TimeoutError" || error.name === "AbortError") return "timeout";
+  if (error.status === 429 || (error.status === 403 && /rate limit|quota/i.test(error.message))) return "rate";
+  return error.status ? null : "network"; // no status: the request itself failed
+}
+
+// The user's own spreadsheets, newest first, up to 100 ("truncated" when there are more). Needs the Drive
+// metadata scope: names, ids and dates only, never a file's content. A reply code is "scope" (refused: the scope
+// isn't granted), "signin" or "network".
+async function listSpreadsheets() {
+  const query = {
+    q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+    orderBy: "modifiedTime desc",
+    pageSize: 100,
+    fields: "nextPageToken,files(id,name,modifiedTime)",
+  };
+  const qs = Object.entries(query).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+  try {
+    const { files = [], nextPageToken } = await googleFetch(`https://www.googleapis.com/drive/v3/files?${qs}`, { signal: AbortSignal.timeout(IMPORT_TIMEOUT) });
+    return {
+      success: true,
+      truncated: Boolean(nextPageToken),
+      files: files.filter((f) => SHEET_ID.test(f.id)).map((f) => ({ id: f.id, name: text(f.name).slice(0, 200), modified: text(f.modifiedTime) })),
+    };
+  } catch (error) {
+    const code = readCode(error);
+    throw importError(code === "signin" ? "signin" : code === null && error.status === 403 ? "scope" : "network", error.message);
+  }
+}
+
+// The tabs of one spreadsheet and the first rows of each (up to 20 tabs, A to Z, 4 rows): { title, tabs, skipped }
+// with each tab as prepareTabs makes it. A reply code is forbidden, xlsx (an Excel file opened in Sheets),
+// noheaders (no tab has column titles), network, timeout, rate, signin or other.
+async function readSpreadsheetMeta(id) {
+  if (!SHEET_ID.test(id ?? "")) throw importError("other", "That doesn't look like a Google Sheets link or ID.");
+  const signal = AbortSignal.timeout(IMPORT_TIMEOUT);
+  let title;
+  let raw;
+  try {
+    const file = await sheetsFetch(`/${id}?fields=${encodeURIComponent("properties.title,sheets.properties(title,sheetType)")}`, { signal });
+    title = text(file.properties?.title).slice(0, 100);
+    const names = (file.sheets ?? []).map((s) => s.properties).filter((p) => p?.title && (!p.sheetType || p.sheetType === "GRID")).map((p) => p.title).slice(0, 20);
+    const ranges = names.map((n) => `ranges=${encodeURIComponent(`${quote(n)}!A1:Z4`)}`).join("&");
+    const { valueRanges = [] } = names.length ? await sheetsFetch(`/${id}/values:batchGet?${ranges}`, { signal }) : {};
+    raw = names.map((name, i) => ({ title: name, rows: valueRanges[i]?.values ?? [] }));
+  } catch (error) {
+    const code = readCode(error) ?? ([403, 404].includes(error.status) ? "forbidden" : /not supported for this document/i.test(error.message) ? "xlsx" : "other");
+    throw importError(code, error.message);
+  }
+  const { tabs, skipped } = prepareTabs(raw);
+  if (!tabs.length) throw importError("noheaders", "No tab has column titles.");
+  return { success: true, id, title, tabs, skipped };
+}
+
+// The draft sheet settings for the tabs readSpreadsheetMeta returned: the AI's proposal when a Gemini key is saved
+// (checked, then merged with matching by titles), else matching by titles alone. A failed AI call never fails
+// this: the draft comes back with method "headers" and the reason. `skipAi` is the user's choice, reason "".
+// What Gemini gets is aiRequest's filtered tabs, never the rest of the sheet.
+async function mapSheet(data) {
+  const tabs = cleanTabs(data?.tabs);
+  if (!tabs.length) throw importError("noheaders", "No tab has column titles.");
+  const skipped = firstOf(data?.skipped, MAX_TABS).map((n) => text(n).slice(0, 100));
+  let ai = null;
+  let reason = "";
+  if (!data.skipAi) {
+    try {
+      const { mapping } = validateAiMapping(await callGemini(aiRequest(tabs)), tabs);
+      if (!Object.keys(mapping.inv.fields).length) throw importError("bad-output", "Nothing usable in the answer.");
+      ai = mapping;
+    } catch (error) {
+      reason = GEMINI_CODES.includes(error.code) ? error.code : "bad-output";
+    }
+  }
+  const draft = buildDraft({
+    id: SHEET_ID.test(data.id ?? "") ? data.id : "",
+    title: text(data.title).slice(0, 100),
+    tabs,
+    skipped,
+    method: ai ? "ai" : "headers",
+    reason,
+    mapped: mapTabs(tabs, ai),
+  });
+  return { success: true, draft };
 }

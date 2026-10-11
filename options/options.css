@@ -99,6 +99,7 @@ form {
 
 .group-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -200,6 +201,10 @@ footer a {
 
 #addDialog {
   --dialog-w: 440px;
+}
+
+#gsDialog {
+  --dialog-w: 560px;
 }
 
 /* A fieldset used only to group or lock its children. */
@@ -307,7 +312,7 @@ fieldset.bare {
 }
 
 /* The template preset fades the fields it changed. */
-input[data-flash] {
+:is(input, select)[data-flash] {
   animation: flash 600ms var(--ease);
 }
 
@@ -318,7 +323,9 @@ input[data-flash] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  input[data-flash] {
+  :is(input, select)[data-flash],
+  .gs-pane,
+  .gs-spinner {
     animation: none;
   }
 }
@@ -336,5 +343,252 @@ input[data-flash] {
 @keyframes fade-in {
   from {
     opacity: 0;
+  }
+}
+
+/* Import from Google Sheets */
+
+.group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.group-actions .btn,
+.empty-actions .btn {
+  white-space: nowrap;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.empty-actions .btn {
+  margin-top: 0;
+}
+
+.gs-pane {
+  animation: fade-in 150ms;
+}
+
+#gsBack {
+  margin-right: auto;
+}
+
+.title-row > .tag {
+  margin-left: auto;
+}
+
+#gsListWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.gs-pair {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.gs-group {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.gs-group + .gs-group {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.gs-method {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--sp-2);
+}
+
+.gs-method .note {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+.gs-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--sp-2);
+  min-height: 160px;
+  padding: var(--sp-4);
+  text-align: center;
+  color: var(--muted);
+}
+
+#gsRead .gs-state {
+  min-height: 240px;
+}
+
+#gsReadMsg {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.gs-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.pick-list {
+  max-height: min(264px, 38dvh);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 40px;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: var(--fs-md);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.pick + .pick {
+  border-top: 1px solid var(--border);
+}
+
+.pick:hover {
+  background: var(--hover);
+}
+
+.pick:has(input:checked) {
+  background: var(--accent-soft);
+}
+
+.pick:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pick input {
+  flex: none;
+  margin: 0;
+}
+
+.pick input:focus-visible {
+  outline: none;
+}
+
+.pick-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-date {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+table.map {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.map tbody {
+  display: block;
+}
+
+.map tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "field conf" "col col";
+  gap: 6px var(--sp-2);
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.map tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
+
+.map th {
+  grid-area: field;
+  padding: 0;
+  text-align: left;
+}
+
+.map th label {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 400;
+}
+
+.map td {
+  min-width: 0;
+  padding: 0;
+}
+
+.map td:nth-child(2) {
+  grid-area: col;
+}
+
+.map td.conf {
+  grid-area: conf;
+  justify-self: end;
+}
+
+.map select {
+  min-width: 0;
+}
+
+@media (min-width: 592px) {
+  .map tr {
+    grid-template-columns: 8.5rem minmax(0, 1fr) 6.25rem;
+    grid-template-areas: "field col conf";
+    gap: var(--sp-3);
+    min-height: 52px;
+  }
+
+  .map td.conf {
+    justify-self: start;
+  }
+
+  .gs-pair {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+@media (pointer: coarse) {
+  .pick {
+    min-height: 44px;
+  }
+
+  .map select {
+    height: 40px;
+  }
+}
+
+@media (forced-colors: active) {
+  .pick:has(input:checked) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
   }
 }

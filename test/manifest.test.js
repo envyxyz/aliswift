@@ -57,9 +57,13 @@ test("the Add sheet buttons point at the sign-in hint only while it shows", () =
   assert.match(js, /removeAttribute\("aria-describedby"\)/);
 });
 
-test("sign-in asks for no extra permission: no email, one scope", () => {
+test("sign-in asks for no extra permission: no email, and only the two scopes the features need", () => {
   assert.deepEqual(manifest.permissions, ["storage", "identity"]); // not identity.email, which warns "Know your email address"
-  assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/spreadsheets"]);
+  // spreadsheets: read and write the sheets the user added. drive.metadata.readonly: list their spreadsheets' names
+  // and dates for the import picker, never a file's content. Not drive, drive.file or drive.readonly.
+  assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.metadata.readonly"]);
+  // The hosts the service worker calls: Sheets, Drive's file list and Gemini. No wildcard over all of Google.
+  assert.deepEqual(manifest.host_permissions.filter((h) => /google/.test(h)), ["https://sheets.googleapis.com/*", "https://www.googleapis.com/drive/*", "https://generativelanguage.googleapis.com/*"]);
 });
 
 test("popup.js only uses ids that exist in popup.html, and so do the popup's references", () => {
