@@ -3,7 +3,7 @@
 ![banner.png](./screenshots/banner.png)
 
 [![Release](https://img.shields.io/github/v/release/envyxyz/aliswift?style=flat-square&color=ff4f00)](https://github.com/envyxyz/aliswift/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/envyxyz/aliswift/ci.yml?style=flat-square&label=tests)](https://github.com/envyxyz/aliswift/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/envyxyz/aliswift/test.yml?style=flat-square&label=tests)](https://github.com/envyxyz/aliswift/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/envyxyz/aliswift?style=flat-square&color=1d1b20)](LICENSE)
 [![Chrome](https://img.shields.io/badge/Chrome-MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://github.com/envyxyz/aliswift/releases)
 [![Sheets](https://img.shields.io/badge/Google%20Sheets-API%20v4-34A853?style=flat-square&logo=googlesheets&logoColor=white)](https://developers.google.com/sheets)
@@ -21,23 +21,30 @@
 
 AliSwift is a Chrome extension for eBay and Shopify dropshippers who source from AliExpress. Instead of copying a product's title, price and link by hand, you click one button and the row lands in your Google Sheet, already priced.
 
-You can keep several sheets, each with its own column layout and pricing rules. It is plain JavaScript on Chrome Manifest V3, with no build step, no dependencies, no servers and no account to create.
+Sign-in is optional: you can save products directly to an on-device local library without a Google account, and move them to a Google Sheet later.
+
+You can keep several sheets, each with its own column layout, pricing rules and marketplace region. It is plain JavaScript on Chrome Manifest V3, with no build step, no dependencies, no project-run servers and no account registration.
 
 ## Features
 
-- **One click** from the green button on the product page, or from the toolbar popup
-- **Auto sheets**: AliSwift creates a Google Sheet for you, set up for eBay UK or eBay US with fee, profit and margin formulas, status lists and an Orders tab
-- **Import from Google Sheets**: pick one of your own sheets (or paste a link) and AliSwift reads its tabs and column titles and fills in the sheet settings. It matches titles by itself, or with AI if you add your own Gemini key in Settings, then shows every match for you to check or change. It only reads your sheet
-- **Multiple sheets**, each with its own columns, tab name and pricing
-- **SKUs** added with each product, matching the numbering of the sheet it creates
-- **Settings backup**: export and import your sheets and settings as a file
-- **Formula or margin pricing**, for example `costPrice * 1.7` or `(costPrice + 2) * 1.5`
-- **Landed cost**: item price, plus shipping when the page shows it, plus an extra cost you set
-- **.99 rounding** for sell prices (4.77 becomes 4.99)
-- **Title cleanup**: cap the word count and drop noise words like "wholesale" or "lot"
-- **Safe writes**: titles go into the sheet as plain text, so a seller cannot sneak a spreadsheet formula into your sheet
-- **Light and dark** theme that follows your system
-- **Private**: no tracking, no analytics, nothing leaves your browser except the write to your own sheet, and AI column matching if you add your own Gemini key ([details](PRIVACY.md))
+- **One click saving** from the button on the product page, or from the toolbar popup
+- **Optional sign-in and local library**: start immediately without signing in; items save to your device's local storage and can be moved to a Google Sheet whenever you are ready
+- **Move to sheet**: transfer products from your local library into any connected sheet with automated currency conversion and duplicate skipping
+- **Dashboard**: a full-page view featuring a Products view (cards, search, filters, remove and restore) and an Orders view (table, status, totals, add and edit order), opened from the popup and Settings
+- **AI listing generation**: from a product card on the dashboard, "Create listing" uses your own Gemini key to write an eBay title (up to 80 characters), description and item specifics. Editable, with a copy button for each field
+- **eBay panel and form fill**: on eBay listing pages (`ebay.com` and `ebay.co.uk`), after you pick a product with **List on eBay** on the dashboard, an injected side panel fills title, SKU, description and price, and fills item specifics with Gemini. Anything it cannot fill reliably becomes a copy button. It never presses "List it" and never fills Condition
+- **Auto sheets**: AliSwift creates a ready-made Google Sheet in your Drive, set up for eBay UK or eBay US with fee, profit and margin formulas, status dropdowns, and an Orders tab
+- **Import from Google Sheets**: select an existing spreadsheet from your Drive or paste its link; AliSwift reads its tabs and headers and maps columns automatically (with AI column mapping if you provide your Gemini key)
+- **SKUs**: automatic SKU generation matching your sheet template numbering (for example, "Added as SKU-31" or "Saved to library as L-03")
+- **Settings backup**: export and import your sheets, settings and local library as a file
+- **Formula or margin pricing**: customize rules such as `costPrice * 1.7` or `(costPrice + 2) * 1.5`
+- **Landed cost**: combines item price, visible shipping cost, and optional extra buffer cost
+- **Currency handling**: converts supplier currencies using sheet exchange rates or manual entries
+- **.99 rounding**: rounds sell prices up to clean retail endings (4.77 becomes 4.99)
+- **Title cleanup**: caps word count and removes unwanted noise words
+- **Safe writes**: writes plain values to spreadsheets; never deletes rows or clears existing cells
+- **Light and dark theme**: respects your system preferences
+- **Private**: no project-run backend, no tracking, and no analytics ([details](PRIVACY.md))
 
 ## Screenshots
 
@@ -52,14 +59,14 @@ You can keep several sheets, each with its own column layout and pricing rules. 
 
 ## Install
 
-AliSwift is not on the Chrome Web Store yet. Installing by hand takes about a minute.
+AliSwift is not on the Chrome Web Store yet. Installing takes about a minute.
 
 **From a release (recommended)**
 
-1. Download the latest zip from [Releases](https://github.com/envyxyz/aliswift/releases) and unzip it. You get a folder named `aliswift`.
-2. Open `chrome://extensions` and turn on **Developer mode** (top right).
-3. Click **Load unpacked** and pick the `aliswift` folder.
-4. Pin AliSwift from the puzzle-piece menu so the icon is always visible.
+1. Download the latest zip from [Releases](https://github.com/envyxyz/aliswift/releases) and unzip it to a folder named `aliswift`.
+2. Open `chrome://extensions` and enable **Developer mode** (top right).
+3. Click **Load unpacked** and select the `aliswift` folder.
+4. Pin AliSwift from the extensions menu so the icon stays accessible.
 
 **From source**
 
@@ -67,93 +74,72 @@ AliSwift is not on the Chrome Web Store yet. Installing by hand takes about a mi
 git clone https://github.com/envyxyz/aliswift.git
 ```
 
-Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build.
+Then follow steps 2 to 4 above and select the cloned folder. There is no build step.
 
 ## Set up
 
-**Auto (easiest).** Open AliSwift settings (gear icon in the popup), click **Add sheet** and keep **Auto** selected. Give the sheet a name, pick eBay UK or eBay US, and type the currency you spend in (for example PKR). Click **Create sheet**. AliSwift creates a Google Sheet in your Drive with Dashboard, Inventory and Orders tabs and adds it for you. There are no columns to set. Then open the **Pricing** tab and pick formula or margin pricing. The fee rates sit in the Inventory tab's hidden row 1 (unhide row 1 and columns G to I to edit them); the international fee and tax rates are defaults, so check them against a real order's fee breakdown. The exchange rate cell is on the Dashboard tab (unhide rows 1 to 4).
+### 1. Local library mode (no sign-in required)
+If you do not sign in, AliSwift runs in local library mode. The button reads **Save to library**. Products are stored safely on your device in local storage (`chrome.storage.local`). You can browse them on the dashboard, view their supplier links, and remove or restore them.
 
-**Manual (a sheet you already have).**
+### 2. Auto sheet creation
+Open settings (gear icon in popup), click **Add sheet**, keep **Auto** selected, choose your marketplace (eBay UK or eBay US) and enter your currency (for example GBP, USD, or PKR). Click **Create sheet**. AliSwift creates a spreadsheet in your Google Drive with Dashboard, Inventory and Orders tabs, and configures fee calculations automatically.
 
-1. Create a Google Sheet. It has to be a native Google Sheet, not an uploaded `.xlsx` file.
-2. Open AliSwift settings, click **Add sheet**, and switch to **Manual**.
-3. Paste the sheet's link, give it a name, and type the sheet tab (for example `Inventory`).
-4. Click the pencil next to the sheet and check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E. **Use AliSwift template layout** fills every field for a sheet shaped like the Auto one.
-5. Open the **Pricing** tab and pick formula or margin pricing. Settings save as you change them.
+### 3. Manual sheet setup
+If you have an existing spreadsheet:
+1. Open AliSwift settings, click **Add sheet**, and choose **Manual**.
+2. Paste the sheet URL and specify the tab name (for example `Inventory`).
+3. Set your column letters to match your sheet structure, or click **Use AliSwift template layout**.
+4. Adjust pricing rules on the **Pricing** tab.
 
-**Moving to another computer.** On the **General** tab, **Export settings** saves your sheets and settings to `aliswift-settings.json`. **Import settings** loads that file. It also carries the products saved to your on-device library; an import adds them and never removes any. Your sheets themselves live in Google Sheets and are not part of the file.
+### 4. Import from Google Sheets
+Choose **Import from Google Sheets** to pick a sheet from your Drive or paste its link. Sign-in requests a single permission list that includes read-only Drive metadata (`drive.metadata.readonly`), which is required whether picking a sheet or pasting a link. AliSwift reads sheet headers and sample rows to identify columns. If you save your Gemini API key in the AI tab, Gemini proposes the column mapping automatically. Import sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns with personal data (such as names, addresses, phone numbers, or emails); always check the preview before confirming. Gemini requests allow up to 15 s per attempt and retry once, taking up to about 30 s.
 
-**Updating from an older build.** The sign-in key was rotated, so the extension ID changed and Chrome treats the new build as a new extension with empty settings. Export your settings before updating, then import them and sign in again. Your sheets are not affected.
+### 5. Moving local products to a sheet
+Once a Google Sheet is connected, click **Move to a sheet** on the dashboard library banner. AliSwift transfers products into your sheet, applies currency conversion rates, and safely skips duplicates.
 
-Before the first save, click the account button in the popup or settings page and sign in with Google. Google asks you to let AliSwift edit your spreadsheets. If Google shows an "unverified app" screen, pick **Advanced**, then continue. You can run your own sign-in client instead; see [CONTRIBUTING](CONTRIBUTING.md#google-sign-in-for-your-own-build).
+### 6. Updating from an older build
+The extension signing key was rotated in the release after 0.5.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets and library items.
 
 ## Usage
 
 1. Open an AliExpress product page.
-2. Click the green **Add to Sheet** button on the page, or click the AliSwift icon, check the values, and press **Add to Sheet**.
-3. The row is written below the last filled keyword in your sheet. If the sheet has a SKU column, the button shows the SKU it was given, for example "Added as SKU-31".
+2. Click the page button (**Add to Sheet** or **Save to library**), or open the toolbar popup.
+3. The item is saved with its calculated sell price, image, and assigned SKU.
+4. Open the **Dashboard** via the icon in the popup header to manage your products, generate eBay listings, and track customer orders.
 
-AliSwift only ever writes into the next free row. It never deletes rows or clears cells.
+AliSwift only writes into the next free row of your sheet. It never deletes rows or clears existing cells.
 
-To switch sheets, use the dropdown in the popup or click another sheet on the Sheets tab. Prices are recalculated with that sheet's rules.
-
-## How prices are calculated
+## Pricing calculation
 
 ```
-cost price = item price + shipping (if the page shows it) + extra cost
-sell price = formula(cost price)   or   cost price x (1 + margin / 100)
+cost price = item price + shipping (if shown on page) + extra cost
+sell price = formula(cost price)   or   cost price * (1 + margin / 100)
 ```
 
-AliSwift copies the number AliExpress shows and does no currency conversion. Set your AliExpress currency to the one your sheet uses.
+When supplier currency differs from your sheet currency, conversion uses the exchange rate defined in your sheet or configured manually.
 
-## Known issues
+## Privacy
 
-- **Shipping detection is limited.** Only shipping costs written on the page are picked up. If AliExpress says "free shipping over $X" or hides the cost until checkout, nothing is added. Use **Extra cost** as a manual fallback.
-- **Native Google Sheets only.** The Sheets API cannot write to `.xlsx` files stored in Drive. Use File > Save as Google Sheets first.
-- **Needs a signed-in Chrome profile.** Sign-in uses `chrome.identity`, which works with the Google account your Chrome profile is signed into.
-- **AliExpress changes its pages.** If the title or price stops scraping, [open an issue](https://github.com/envyxyz/aliswift/issues/new/choose) with the product URL. The selectors are the constants at the top of `content.js`.
+AliSwift has no servers and collects no analytics. Product data is stored only on your own device (in your local library and exported settings file) or in your own Google Sheet, never on our servers (we have none). Your Gemini key stays in storage.local on this device, is sent only to Google's Gemini API, and is not included in settings export ([read full Privacy Policy](PRIVACY.md)).
 
 ## Roadmap
 
-- Chrome Web Store release
-- Bulk scrape from search and category pages
-- Image URL scraping
-- Firefox support
+Planned features and future enhancements are tracked in [ROADMAP.md](ROADMAP.md):
+- Profit analytics on the dashboard and across regions
+- Adding eBay orders automatically (CSV import first, unverified)
+- Connecting AliExpress to pull orders and exact prices (research only)
+- Confirming the eBay fee defaults against real orders
+
+## Development
+
+For developers configuring or testing the extension:
+- The Google Cloud project that owns the OAuth client ID must have both the **Google Sheets API** and the **Google Drive API** enabled for spreadsheet creation, metadata listing, and link verification to work.
+- Plain JavaScript with Chrome Manifest V3; no build step. Run automated tests with `npm test`.
 
 ## Contributing
 
-Bug reports, scraping fixes and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers running it locally, the tests, and how releases are cut. Changes are listed in [CHANGELOG.md](CHANGELOG.md). Report security problems privately, see [SECURITY.md](SECURITY.md).
-
-## How it works
-
-A content script reads the product page and calculates the prices. The service worker holds the Google token and talks to the Sheets API. The popup and settings page are plain HTML.
-
-```mermaid
-graph LR
-    A[AliExpress page] -->|content script reads title, price, shipping| B(AliSwift)
-    B -->|OAuth 2.0 token| C{Google Sheets API}
-    C -->|values:batchUpdate| D[Your Google Sheet]
-
-    style B fill:#d63f00,stroke:#333,stroke-width:2px,color:#fff
-    style C fill:#fff,stroke:#333,stroke-dasharray: 5 5
-```
-
-## Author
-
-Built by [ameer<3](https://github.com/envyxyz)
-
-[![GitHub](https://img.shields.io/badge/GitHub-envyxyz-1d1b20?style=flat-square&logo=github)](https://github.com/envyxyz)
+Bug reports, selector fixes, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for testing guidelines and development setup.
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
----
-
-<div align="center">
-
-If AliSwift saves you time, consider leaving a star.
-
-[![Star](https://img.shields.io/github/stars/envyxyz/aliswift?style=social)](https://github.com/envyxyz/aliswift/stargazers)
-
-</div>
