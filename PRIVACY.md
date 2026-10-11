@@ -24,7 +24,7 @@ The Gemini key is stored on this device only (`chrome.storage.local`). It is nev
 
 Your sheet names, sheet IDs, column letters, SKU prefix, marketplace, Orders tab name, pricing settings and the currency you last used, in Chrome's extension storage (`chrome.storage.sync`). If Chrome sync is on, Chrome syncs these settings through your Google account like any other extension setting.
 
-You can export these settings to a file on your computer and import them again. The file is made in your browser and goes nowhere else. It holds no Google token and no product data.
+You can export these settings to a file on your computer and import them again. The file is made in your browser and goes nowhere else. It holds no Google token. It does hold the products you saved to your on-device library (title, link, price and image link).
 
 AliSwift does not store product data. It does not store your Google token either: Chrome manages the token.
 

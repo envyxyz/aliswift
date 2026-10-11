@@ -917,3 +917,84 @@ test("two library records for the same link and title move as one row", async ()
   assert.equal(Object.keys(cellsOf(t.calls[1])).filter((r) => r.startsWith("'Inventory'!B")).length, 1);
   assert.deepEqual(plain(t.store.library), []);
 });
+
+/* P3 QA fixes */
+
+test("updateOrder with no order number writes nothing, unless key.row names the one row; an empty row is never written", async () => {
+  // Row 2 is an order, row 3 has a SKU but no number, row 4 is empty, row 5 is an order.
+  const keys = () => columns(["Order Number", "12-1", "", "", "12-2"], ["SKU", "SKU-01", "SKU-02"]);
+  const patch = { status: "Shipped" };
+  for (const request of [{ orderNumber: "", patch }, { patch }, { orderNumber: "  ", key: { sku: "SKU-02" }, patch }]) {
+    const t = setup(full, [keys()]);
+    const reply = await ask(t.listener, { action: "updateOrder", sheetId: full.id, ...request }, options);
+    assert.equal(reply.success, false, JSON.stringify(request));
+    assert.equal(t.calls.length, 1, "a read only, nothing was written");
+  }
+  const row3 = setup(full, [keys(), { json: {} }]);
+  assert.equal((await ask(row3.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "", key: { row: 3 }, patch }, options)).success, true);
+  assert.deepEqual(cellsOf(row3.calls[1]), { "'Orders'!J3": "Shipped" });
+  const row4 = setup(full, [keys()]);
+  assert.equal((await ask(row4.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "", key: { row: 4 }, patch }, options)).success, false);
+  assert.equal(row4.calls.length, 1);
+  assertNothingDestroyed([...row3.calls, ...row4.calls]);
+});
+
+test("listOrders reads an order with a blank status cell as Pending, so Undo can send a status the sheet accepts", async () => {
+  const t = setup(full, [columns(["12-1"], ["SKU-01"], [46305], [1], [5], [2], [3], [], [], []), columns(["SKU-01"], ["ring"])]);
+  assert.equal((await ask(t.listener, { action: "listOrders", sheetId: full.id }, options)).orders[0].status, "Pending");
+});
+
+test("moveLocal prices a product saved as shown with the sheet's own rules, in the sheet's currency", async () => {
+  const gbp = { ...full, extraCost: 2, formulaValue: "costPrice * 1.7", roundToNinetyNine: false };
+  const library = [
+    rec(1, { currency: "PKR", price: 1870, salePrice: null }), // 1870 PKR at 374 = 5, plus 2 extra = 7, sells at 11.9
+    rec(2, { price: 4, salePrice: null }), // pounds already: 4 + 2 = 6, sells at 10.2
+    rec(3, { price: 4, salePrice: 9 }), // priced already (a typed sell price): written as it is
+  ];
+  const t = setup(gbp, [{ status: 400, json: {} }, sheetNow(), { json: {} }], { local: { library, rates: { "GBP:PKR:typed": { rate: 374, at: 5 } } } });
+  const reply = await ask(t.listener, { action: "moveLocal", sheetId: gbp.id }, options);
+  assert.deepEqual(reply, { success: true, moved: 3, skipped: 0, needRate: 0 });
+  const written = cellsOf(t.calls[2]);
+  assert.deepEqual([written["'Inventory'!D4"], written["'Inventory'!E4"]], [7, 11.9]);
+  assert.deepEqual([written["'Inventory'!D5"], written["'Inventory'!E5"]], [6, 10.2]);
+  assert.deepEqual([written["'Inventory'!D6"], written["'Inventory'!E6"]], [4, 9]);
+  assertNothingDestroyed(t.calls);
+});
+
+test("importLibrary adds a backup's products and never replaces or removes one; it is for AliSwift's pages and takes a checked list", async () => {
+  const library = [rec(1), rec(2)];
+  const t = setup(full, [], { local: { library } });
+  const incoming = [rec(2, { title: "changed" }), rec(1, { id: "other" }), rec(3)];
+  assert.deepEqual(await ask(t.listener, { action: "importLibrary", library: incoming }, page), { success: false, error: "Not allowed." });
+  assert.deepEqual(await ask(t.listener, { action: "importLibrary", library: incoming }, options), { success: true, added: 2 });
+  // The incoming L-01 and L-03 were taken by then, so they got the next free SKU.
+  assert.deepEqual(plain(t.store.library.map((x) => [x.id, x.sku, x.title])), [["id1", "L-01", "item 1"], ["id2", "L-02", "item 2"], ["other", "L-03", "item 1"], ["id3", "L-04", "item 3"]]);
+  for (const bad of [undefined, "x", [{}], [rec(1), rec(1)]]) {
+    assert.equal((await ask(t.listener, { action: "importLibrary", library: bad }, options)).success, false, JSON.stringify(bad));
+  }
+  assert.equal(t.store.library.length, 4);
+  assert.equal(t.calls.length, 0);
+});
+
+test("a page-button library save keeps the price as shown: cost is price plus shipping, no sell price, no sheet rules", async () => {
+  const el = (textContent) => ({ textContent });
+  const dom = { '[class*="price-default--current"]': el("£15.00"), '[class*="shipping-cost"]': el("Shipping: £2.50"), 'h1[data-pl="product-title"]': el("Gold ring") };
+  const cfg = { id: "s1", name: "S", region: "UK", extraCost: 2 };
+  let listener;
+  const ctx = vm.createContext({
+    chrome: {
+      storage: { sync: { get: (d, cb) => { const r = { ...d, sheets: [cfg], activeSheetId: "s1" }; return cb ? cb(r) : Promise.resolve(r); } }, onChanged: { addListener() {} } },
+      runtime: { onMessage: { addListener: (fn) => (listener = fn) }, sendMessage: async () => null },
+    },
+    document: { querySelector: (sel) => dom[sel] ?? null, getElementById: () => null, addEventListener() {}, cookie: "", documentElement: { lang: "en" } },
+    location: { href: "https://www.aliexpress.com/item/1.html" },
+    setInterval: () => 0, clearInterval() {}, clearTimeout, setTimeout, URL, console,
+  });
+  vm.runInContext(read("lib/shared.js"), ctx);
+  vm.runInContext(read("content.js"), ctx);
+  const scrape = (dest) => ask(listener, { action: "scrape", dest }, "");
+  const local = await scrape("local");
+  assert.deepEqual([local.price, local.salePrice, local.currency], ["17.50", "", "GBP"]);
+  const sheetRow = await scrape("sheet");
+  assert.deepEqual([sheetRow.price, sheetRow.salePrice], ["19.50", "33.15"]); // the sheet path still prices: 17.5 + 2 extra, x 1.7
+});

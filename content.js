@@ -64,7 +64,8 @@ function getLink() {
 // unknown); `kind` says how the page relates to the sheet (see currencyKind). When the page's currency is not
 // the sheet's, `fx` holds the raw amounts and the rate. With no rate (fx.rate null) price is the raw page
 // amount and nothing may be saved until the user supplies one. For the library (`where` is "local") there is no
-// sheet to compare with: prices stay as shown, with their currency, and are converted if the product is moved to a sheet.
+// sheet to compare with: prices stay as shown (cost = price + shipping, no sell price), with their currency, and
+// are converted and priced by the sheet's own rules when the product is moved to a sheet.
 async function scrapeRow(where = dest) {
   const sheet = (await getActiveSheet()) ?? SHEET_DEFAULTS;
   const row = {
@@ -89,7 +90,7 @@ async function scrapeRow(where = dest) {
       row.fx = { from, to, price, shipping, rate, source: found?.source, at: found?.at };
     }
     // Pricing runs in the sheet's currency: extraCost and the formula are written for it.
-    if (rate) Object.assign(row, priceProduct(price / rate, shipping / rate, sheet));
+    if (rate && where !== "local") Object.assign(row, priceProduct(price / rate, shipping / rate, sheet));
     else row.price = (price + shipping).toFixed(2);
     row.currency = row.kind === "same" || (row.kind === "convert" && rate) ? to : from;
   }

@@ -1184,12 +1184,15 @@ const IMPORT_ERRORS = {
 };
 const countOf = (n) => `${n} ${n === 1 ? "sheet" : "sheets"}`;
 let pendingImport = null;
+let pendingLibrary = [];
 
 $("exportBtn").addEventListener("click", async () => {
   try {
     // sheets is always there, so a backup of an empty setup can be imported again.
     const sync = { sheets: [], activeSheetId: "", ...(await chrome.storage.sync.get(EXPORT_KEYS)) };
-    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync };
+    // The library lives on this device only, so the file is the only way it survives a reinstall.
+    const { library } = await chrome.storage.local.get({ library: [] });
+    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync, library };
     const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
     Object.assign(document.createElement("a"), { href: url, download: "aliswift-settings.json" }).click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -1211,7 +1214,7 @@ $("importFile").addEventListener("change", async (e) => {
   if (!file) return;
   setNotice($("importNotice"), "");
   let result = { ok: false, reason: "size" };
-  if (file.size <= 200 * 1024) {
+  if (file.size <= 5 * 1024 * 1024) { // room for a full library: LIBRARY_MAX records of up to ~5 KB
     try {
       result = validateImport(JSON.parse(await file.text()));
     } catch {
@@ -1220,6 +1223,7 @@ $("importFile").addEventListener("change", async (e) => {
   }
   if (!result.ok) return setNotice($("importNotice"), IMPORT_ERRORS[result.reason]);
   pendingImport = result.sync;
+  pendingLibrary = result.library ?? [];
   const [n, m] = [sheets.length, pendingImport.sheets.length];
   const from = m ? `${m} from the file` : "none from the file";
   $("impQ").textContent = n ? `Replace your ${countOf(n)} with ${from}?` : `Import ${countOf(m)} from the file?`;
@@ -1237,7 +1241,14 @@ $("impGo").addEventListener("click", async () => {
   $("impGo").dataset.state = "loading";
   $("impGo").setAttribute("aria-disabled", "true");
   $("impGo").textContent = "Replacing...";
+  let added = 0;
   try {
+    // First, and only ever adding: a failure here leaves the sheets as they were.
+    if (pendingLibrary.length) {
+      const res = await chrome.runtime.sendMessage({ action: "importLibrary", library: pendingLibrary });
+      if (!res?.success) throw new Error(res?.error ?? "No answer from the extension.");
+      added = res.added;
+    }
     await chrome.storage.sync.set(next);
   } catch (err) {
     flash("Not saved", true);
@@ -1255,7 +1266,7 @@ $("impGo").addEventListener("click", async () => {
   render();
   flash("Saved");
   $("importDialog").close();
-  toast(`Imported ${countOf(next.sheets.length)}.`);
+  toast(`Imported ${countOf(next.sheets.length)}${added ? ` and ${added} saved ${added === 1 ? "product" : "products"}` : ""}.`);
   $("importBtn").focus();
 });
 
