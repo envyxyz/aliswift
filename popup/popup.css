@@ -44,13 +44,6 @@ main {
   padding: 16px;
 }
 
-#signin,
-#setup {
-  display: grid;
-  justify-items: start;
-  gap: 12px;
-}
-
 form {
   display: grid;
   gap: 14px;
@@ -65,6 +58,10 @@ form {
 /* The currency block is empty for a same-currency product, so only what shows adds space. */
 #currency > :not([hidden]) {
   margin-top: 8px;
+}
+
+#lockNote {
+  margin-top: 6px;
 }
 
 #addBtn {

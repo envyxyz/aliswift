@@ -16,6 +16,7 @@ function setup(sheet, replies, { local = {}, tokens = ["token"], failure = "OAut
   const removed = [];
   const tokenCalls = [];
   const store = { ...local };
+  const access = [];
   let listener;
   const chrome = {
     runtime: {
@@ -38,13 +39,17 @@ function setup(sheet, replies, { local = {}, tokens = ["token"], failure = "OAut
       local: {
         get: async (defaults) => ({ ...defaults, ...store }),
         set: async (items) => void Object.assign(store, items),
+        remove: async (keys) => keys.forEach((k) => delete store[k]),
+        setAccessLevel: async (opts) => void access.push(opts.accessLevel),
       },
     },
   };
   const ctx = vm.createContext({
     chrome,
+    crypto,
+    URL,
     fetch: async (url, init) => {
-      calls.push({ url, body: init?.body && JSON.parse(init.body) });
+      calls.push({ url, method: init?.method ?? "GET", body: init?.body && JSON.parse(init.body) });
       const { status = 200, json = {} } = replies.shift();
       return { ok: status < 400, status, json: async () => json };
     },
@@ -61,6 +66,7 @@ function setup(sheet, replies, { local = {}, tokens = ["token"], failure = "OAut
     removed,
     tokenCalls,
     store,
+    access,
   };
 }
 
@@ -505,4 +511,409 @@ test("no code the service worker loads can delete rows or clear cells", () => {
   for (const file of ["background.js", "lib/shared.js", "lib/template.js"]) {
     assert.doesNotMatch(read(file), forbidden, file);
   }
+});
+
+/* Products, orders and the local library */
+
+// A sheet with every column the data layer reads, as an Auto sheet has them.
+const full = {
+  ...template,
+  id: "full-sheet-id-123456",
+  region: "UK",
+  statusCol: "M",
+  imageCol: "O",
+  profitCol: "J",
+  marginCol: "L",
+  oTab: "Orders",
+  oRow: 2,
+};
+// Columns read down from a start row (majorDimension COLUMNS): Google leaves `values` out of an empty range.
+const columns = (...lists) => ({ json: { valueRanges: lists.map((l) => (l.length ? { values: [l] } : {})) } });
+const decoded = (c) => decodeURIComponent(c.url);
+const cellsOf = (call) => Object.fromEntries(call.body.data.map((d) => [d.range, d.values[0][0]]));
+
+// Nothing a handler sends may delete or clear: no DELETE, no clear or delete request, no empty value written.
+function assertNothingDestroyed(calls) {
+  for (const c of calls) {
+    assert.notEqual(c.method, "DELETE", c.url);
+    assert.doesNotMatch(c.url + JSON.stringify(c.body ?? ""), /deleteDimension|deleteRange|deleteSheet|:clear|clearBasicFilter/, c.url);
+    for (const d of c.body?.data ?? []) assert.ok(d.values.flat().every((v) => v !== "" && v != null), `${d.range} was cleared`);
+  }
+}
+
+test("the data layer's handlers are for AliSwift's own pages; the storage is closed to web pages", async () => {
+  const t = setup(full, []);
+  assert.deepEqual(t.access, ["TRUSTED_CONTEXTS"]);
+  for (const request of [
+    { action: "listProducts", sheetId: "local" },
+    { action: "setStatus", sheetId: "local", key: { sku: "L-01" }, status: "Listed" },
+    { action: "listOrders", sheetId: full.id },
+    { action: "addOrder", sheetId: full.id, order: { orderNumber: "1", sku: "a" } },
+    { action: "updateOrder", sheetId: full.id, orderNumber: "1", patch: { status: "Shipped" } },
+    { action: "moveLocal", sheetId: full.id },
+  ]) {
+    assert.deepEqual(await ask(t.listener, request, page), { success: false, error: "Not allowed." }, request.action);
+  }
+  assert.equal(t.calls.length, 0);
+  assert.equal((await ask(t.listener, { action: "listProducts", sheetId: "local" }, options)).success, true);
+});
+
+/* Saving to the library */
+
+test("a save with dest local goes to the library with L- SKUs, never asks for a token and never reaches Google", async () => {
+  const t = setup(full, [], { tokens: [null], local: { authOff: true } });
+  const one = await t.appendRow({ ...product, dest: "local", currency: "PKR", price: "1491.00", salePrice: "", image: "https://ae01.alicdn.com/a.jpg" });
+  assert.deepEqual(one, { success: true, local: true, sku: "L-01" });
+  const two = await t.appendRow({ ...product, dest: "local", image: "http://not-https/a.jpg" });
+  assert.equal(two.sku, "L-02");
+  assert.equal(t.calls.length, 0);
+  assert.equal(t.tokenCalls.length, 0);
+  assert.deepEqual(plain(t.store.library[0]), {
+    id: t.store.library[0].id, sku: "L-01", title: "ring", link: "https://x/1.html", price: 1491, salePrice: null,
+    image: "https://ae01.alicdn.com/a.jpg", currency: "PKR", status: "Not Listed", savedAt: t.store.library[0].savedAt,
+  });
+  assert.equal(t.store.library[1].image, ""); // only https images are kept
+  assert.notEqual(t.store.library[0].id, t.store.library[1].id);
+});
+
+test("saves to the library at the same moment get different SKUs", async () => {
+  const t = setup(full, []);
+  const results = await Promise.all([1, 2, 3].map(() => t.appendRow({ ...product, dest: "local" })));
+  assert.deepEqual(results.map((r) => r.sku).sort(), ["L-01", "L-02", "L-03"]);
+  assert.equal(t.store.library.length, 3);
+});
+
+test("a save to the sheet while signed out is refused and never turns into a library save", async () => {
+  const t = setup(full, [], { tokens: [null] });
+  assert.deepEqual(await t.appendRow({ ...product, dest: "sheet" }), SIGNIN);
+  assert.equal(t.store.library, undefined);
+  assert.equal(t.calls.length, 0);
+});
+
+test("a save to the sheet also writes the image, and only when the sheet has an image column", async () => {
+  const withImage = setup(full, [ranges(above, aboveB), { json: {} }]);
+  await withImage.appendRow({ ...product, image: "https://ae01.alicdn.com/a.jpg" });
+  assert.equal(cellsOf(withImage.calls[1])["'Inventory'!O3"], "https://ae01.alicdn.com/a.jpg");
+  const without = setup(template, [ranges(above, aboveB), { json: {} }]);
+  await without.appendRow({ ...product, image: "https://ae01.alicdn.com/a.jpg" });
+  assert.ok(!Object.keys(cellsOf(without.calls[1])).some((r) => r.endsWith("O3")));
+  const insecure = setup(full, [ranges(above, aboveB), { json: {} }]);
+  await insecure.appendRow({ ...product, image: "javascript:alert(1)" });
+  assert.ok(!Object.keys(cellsOf(insecure.calls[1])).some((r) => r.endsWith("O3")));
+});
+
+/* Products */
+
+// Rows 3 to 7 of an Inventory tab: row 5 is blank, rows 6 and 7 share one merged status.
+const productReplies = () => [
+  columns(
+    ["SKU-01", "SKU-02", "", "SKU-04", "SKU-05"], // sku
+    ["ring", "lamp", "", "vase", "vase blue"], // name
+    ["https://a/1", "https://a/2", "", "https://a/3", "https://a/3"], // link
+    [2.15, 1.5, "", 3, 3], // cost
+    [6.99, "", "", 7, 7], // sell
+    ["Listed", "", "", "Draft"], // status: rows 6 and 7 are one merged cell
+    ["https://img/1.jpg", "http://insecure/2.jpg"], // image
+    [3.25, 0.4, "", 1, 1], // profit
+    [0.46, "#DIV/0!"], // margin
+  ),
+  { json: { sheets: [{ properties: { title: "Inventory" }, merges: [{ startRowIndex: 5, endRowIndex: 7, startColumnIndex: 12, endColumnIndex: 13 }] }] } },
+];
+
+test("listProducts reads each configured column in one request, numbers rows from startRow and expands a merged status", async () => {
+  const t = setup(full, productReplies());
+  const reply = await ask(t.listener, { action: "listProducts", sheetId: full.id }, options);
+  assert.equal(reply.success, true);
+  assert.deepEqual(reply.products, [
+    { row: 3, sku: "SKU-01", title: "ring", link: "https://a/1", price: 2.15, salePrice: 6.99, image: "https://img/1.jpg", status: "Listed", statusShared: false, profit: 3.25, margin: 0.46 },
+    { row: 4, sku: "SKU-02", title: "lamp", link: "https://a/2", price: 1.5, salePrice: null, image: "", status: "Not Listed", statusShared: false, profit: 0.4, margin: null },
+    { row: 6, sku: "SKU-04", title: "vase", link: "https://a/3", price: 3, salePrice: 7, image: "", status: "Draft", statusShared: true, profit: 1, margin: null },
+    { row: 7, sku: "SKU-05", title: "vase blue", link: "https://a/3", price: 3, salePrice: 7, image: "", status: "Draft", statusShared: true, profit: 1, margin: null },
+  ]);
+  assert.equal(t.calls.length, 2);
+  const read = decoded(t.calls[0]);
+  assert.match(read, /majorDimension=COLUMNS&valueRenderOption=UNFORMATTED_VALUE$/);
+  for (const col of ["A", "B", "C", "D", "E", "M", "O", "J", "L"]) assert.ok(read.includes(`'Inventory'!${col}3:${col}`), col);
+  assertNothingDestroyed(t.calls);
+});
+
+test("listProducts without a Status column reads no merges; an unknown sheet is refused", async () => {
+  const t = setup({ ...full, statusCol: "" }, [columns(["SKU-01"], ["ring"], ["https://a/1"], [2], [4], [], [], [])]);
+  const reply = await ask(t.listener, { action: "listProducts", sheetId: full.id }, options);
+  assert.equal(reply.products[0].status, "Not Listed");
+  assert.equal(t.calls.length, 1);
+  const other = await ask(setup(full, []).listener, { action: "listProducts", sheetId: "someone-elses-sheet" }, options);
+  assert.equal(other.success, false);
+});
+
+test("listProducts for the library answers in the same shape without calling Google", async () => {
+  const t = setup(full, [], { tokens: [null] });
+  await t.appendRow({ ...product, dest: "local", currency: "PKR" });
+  const reply = await ask(t.listener, { action: "listProducts", sheetId: "local" }, options);
+  assert.equal(reply.products[0].sku, "L-01");
+  assert.equal(reply.products[0].profit, null);
+  assert.equal(reply.products[0].statusShared, false);
+  assert.equal(reply.products[0].currency, "PKR");
+  assert.equal(t.calls.length, 0);
+});
+
+test("setStatus finds the product again by SKU and writes only its status cell", async () => {
+  const t = setup(full, [...productReplies(), { json: {} }]);
+  // The dashboard's row hint is stale: the sheet was sorted since it read it.
+  const key = { sku: "SKU-02", row: 9, link: "https://a/2", title: "lamp" };
+  assert.deepEqual(await ask(t.listener, { action: "setStatus", sheetId: full.id, key, status: "Discontinued" }, options), { success: true });
+  assert.equal(t.calls.length, 3);
+  assert.equal(t.calls[2].body.valueInputOption, "RAW");
+  assert.deepEqual(cellsOf(t.calls[2]), { "'Inventory'!M4": "Discontinued" });
+  assertNothingDestroyed(t.calls);
+});
+
+test("setStatus refuses a status shared by merged variant rows, a vanished product, and any status it does not know", async () => {
+  const merged = setup(full, productReplies());
+  const shared = await ask(merged.listener, { action: "setStatus", sheetId: full.id, key: { sku: "SKU-04", row: 6, link: "https://a/3", title: "vase" }, status: "Listed" }, options);
+  assert.deepEqual(shared, { success: false, error: "This status is shared by 2 variant rows. Change it in the sheet." });
+  assert.equal(merged.calls.length, 2, "nothing was written");
+
+  const gone = setup(full, productReplies());
+  const missing = await ask(gone.listener, { action: "setStatus", sheetId: full.id, key: { sku: "SKU-99", row: 3, link: "https://a/1", title: "ring" }, status: "Listed" }, options);
+  assert.match(missing.error, /isn't in the sheet any more/);
+  assert.equal(gone.calls.length, 2);
+
+  const bad = setup(full, []);
+  for (const status of ["", "Deleted", undefined, "Cancelled", 5]) {
+    assert.equal((await ask(bad.listener, { action: "setStatus", sheetId: full.id, key: { sku: "SKU-01" }, status }, options)).success, false, String(status));
+  }
+  assert.equal(bad.calls.length, 0);
+
+  const noStatusColumn = setup({ ...full, statusCol: "" }, []);
+  const refused = await ask(noStatusColumn.listener, { action: "setStatus", sheetId: full.id, key: { sku: "SKU-01" }, status: "Listed" }, options);
+  assert.match(refused.error, /no Status column/);
+  assert.equal(noStatusColumn.calls.length, 0);
+});
+
+test("setStatus on a library product edits the record; removing it keeps the record", async () => {
+  const t = setup(full, [], { tokens: [null] });
+  await t.appendRow({ ...product, dest: "local" });
+  await t.appendRow({ ...product, title: "lamp", link: "https://x/2.html", dest: "local" });
+  const key = { sku: "L-02", row: 2, link: "https://x/2.html", title: "lamp" };
+  assert.deepEqual(await ask(t.listener, { action: "setStatus", sheetId: "local", key, status: "Discontinued" }, options), { success: true });
+  assert.deepEqual(plain(t.store.library.map((x) => x.status)), ["Not Listed", "Discontinued"]);
+  assert.equal(t.store.library.length, 2);
+  assert.deepEqual(await ask(t.listener, { action: "setStatus", sheetId: "local", key, status: "Not Listed" }, options), { success: true }); // restore
+  assert.deepEqual(plain(t.store.library.map((x) => x.status)), ["Not Listed", "Not Listed"]);
+  const missing = await ask(t.listener, { action: "setStatus", sheetId: "local", key: { sku: "L-09" }, status: "Listed" }, options);
+  assert.match(missing.error, /isn't in your library/);
+  assert.equal(t.calls.length, 0);
+});
+
+/* Orders */
+
+test("listOrders reads the Orders columns, names the product from Inventory and accepts all three date forms", async () => {
+  const t = setup(full, [
+    columns(
+      ["12-1", "12-1", "", 77], // order number
+      ["SKU-01", "SKU-02", "", "SKU-01"], // sku
+      [46305, "2026-10-09", "", "08/10/2026"], // date: a serial, ISO text, dd/mm/yyyy text
+      [2, "", "", 1], // qty
+      [13.98, 4.99, "", 7], // sell
+      [4.3, 1.5, "", "#N/A"], // cost
+      [5, 1, "", ""], // profit
+      ["Pending", "Shipped", "", "Cancelled"], // status
+      ["", "RR1", "", ""], // tracking
+      ["", "", "", "hi"], // notes
+    ),
+    columns(["SKU-01", "SKU-02"], ["ring", "lamp"]),
+  ]);
+  const reply = await ask(t.listener, { action: "listOrders", sheetId: full.id }, options);
+  assert.deepEqual(reply.orders, [
+    { row: 2, orderNumber: "12-1", sku: "SKU-01", product: "ring", date: "2026-10-10", qty: 2, sell: 13.98, cost: 4.3, profit: 5, status: "Pending", tracking: "", notes: "" },
+    { row: 3, orderNumber: "12-1", sku: "SKU-02", product: "lamp", date: "2026-10-09", qty: 1, sell: 4.99, cost: 1.5, profit: 1, status: "Shipped", tracking: "RR1", notes: "" },
+    { row: 5, orderNumber: "77", sku: "SKU-01", product: "ring", date: "2026-10-08", qty: 1, sell: 7, cost: null, profit: null, status: "Cancelled", tracking: "", notes: "hi" },
+  ]);
+  assert.match(decoded(t.calls[0]), /'Orders'!A2:A&ranges='Orders'!B2:B&ranges='Orders'!D2:D/);
+});
+
+test("orders need an Orders tab, and it is an error to ask a sheet that has none", async () => {
+  const t = setup({ ...full, oTab: "" }, []);
+  for (const request of [
+    { action: "listOrders", sheetId: full.id },
+    { action: "addOrder", sheetId: full.id, order: { orderNumber: "1", sku: "a" } },
+    { action: "updateOrder", sheetId: full.id, orderNumber: "1", patch: { status: "Shipped" } },
+  ]) {
+    assert.equal((await ask(t.listener, request, options)).error, "This sheet has no Orders tab set up.", request.action);
+  }
+  assert.equal(t.calls.length, 0);
+});
+
+// What the Orders keys and the product's prices read as, for addOrder. Row 1 is the header; rows 4 and 5 are gaps.
+const orderKeys = () => columns(["Order Number", "12-1", "12-2", "", "", "77"], ["SKU", "SKU-01", "SKU-02"]);
+const inventory = () => columns(["SKU-01", "SKU-02"], [2.15, 1.5], [6.99, 4.99]);
+
+test("addOrder writes below the gaps, snapshots sell and cost as numbers, and leaves the formula columns alone", async () => {
+  const t = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  const order = { orderNumber: "12-9", sku: "SKU-01", qty: 3, date: "2026-10-10", notes: "gift" };
+  assert.deepEqual(await ask(t.listener, { action: "addOrder", sheetId: full.id, order }, options), { success: true, row: 7 });
+  assert.equal(t.calls.length, 3);
+  assert.equal(t.calls[2].body.valueInputOption, "RAW");
+  assert.deepEqual(cellsOf(t.calls[2]), {
+    "'Orders'!A7": "12-9", "'Orders'!B7": "SKU-01", "'Orders'!D7": 46305, "'Orders'!E7": 3,
+    "'Orders'!F7": 20.97, // unit sell 6.99 x 3
+    "'Orders'!G7": 6.45, // unit cost 2.15 x 3
+    "'Orders'!J7": "Pending", "'Orders'!L7": "gift",
+  });
+  // The name (C), profit (H) and home-currency profit (I) columns keep their own formulas.
+  assert.ok(!Object.keys(cellsOf(t.calls[2])).some((r) => /![CHI]\d+$/.test(r)));
+  assertNothingDestroyed(t.calls);
+});
+
+test("addOrder takes a typed sell total over the product's price, and warns when the SKU is not in the sheet", async () => {
+  const typed = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  await ask(typed.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-9", sku: "SKU-02", qty: 2, sell: 7.5 } }, options);
+  assert.equal(cellsOf(typed.calls[2])["'Orders'!F7"], 7.5);
+  assert.equal(cellsOf(typed.calls[2])["'Orders'!G7"], 3); // 1.5 x 2
+
+  const unknown = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  const reply = await ask(unknown.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-9", sku: "SKU-77", sell: 9 } }, options);
+  assert.deepEqual(reply, { success: true, row: 7, warning: "SKU not found in your sheet, so cost is blank." });
+  assert.ok(!("'Orders'!G7" in cellsOf(unknown.calls[2])), "no cost cell was written");
+  assert.equal(cellsOf(unknown.calls[2])["'Orders'!F7"], 9);
+});
+
+test("addOrder rejects the same order number for the same SKU, but accepts another SKU on that order", async () => {
+  const dupe = setup(full, [orderKeys()]);
+  const reply = await ask(dupe.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-1", sku: "sku-01", sell: 5 } }, options);
+  assert.deepEqual(reply, { success: false, code: "duplicate", error: "Order 12-1 for sku-01 is already in the sheet." });
+  assert.equal(dupe.calls.length, 1, "nothing was written");
+
+  const second = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  assert.equal((await ask(second.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-1", sku: "SKU-02", sell: 5 } }, options)).success, true);
+});
+
+test("addOrder checks the order before it calls Google, and two at once land on different rows", async () => {
+  const t = setup(full, []);
+  for (const order of [{}, { orderNumber: "1" }, { orderNumber: "1", sku: "a", qty: 0 }, { orderNumber: "1", sku: "a", date: "tomorrow" }, { orderNumber: "1", sku: "a", status: "Gone" }]) {
+    assert.equal((await ask(t.listener, { action: "addOrder", sheetId: full.id, order }, options)).success, false, JSON.stringify(order));
+  }
+  assert.equal(t.calls.length, 0);
+  const wrongCurrency = await ask(t.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "1", sku: "a", currency: "PKR" } }, options);
+  assert.equal(wrongCurrency.code, "currency");
+  assert.equal(t.calls.length, 0);
+
+  const two = setup(full, [orderKeys(), inventory(), { json: {} }, columns(["Order Number", "12-1", "12-2", "", "", "77", "12-8"], ["SKU", "SKU-01", "SKU-02", "", "", "", "SKU-01"]), inventory(), { json: {} }]);
+  const [a, b] = await Promise.all(["12-8", "12-9"].map((orderNumber) => ask(two.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber, sku: "SKU-01", sell: 5 } }, options)));
+  assert.deepEqual([a.row, b.row], [7, 8]);
+});
+
+test("updateOrder writes only the fields in the patch, to every line of the order unless a SKU names one", async () => {
+  const keys = () => columns(["Order Number", "12-1", "12-1", "77"], ["SKU", "SKU-01", "SKU-02", "SKU-01"]);
+  const all = setup(full, [keys(), { json: {} }]);
+  const patch = { status: "Shipped", tracking: "=HYPERLINK(\"http://evil\")" };
+  assert.deepEqual(await ask(all.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "12-1", patch }, options), { success: true });
+  assert.equal(all.calls[1].body.valueInputOption, "RAW"); // the tracking text can't run as a formula
+  assert.deepEqual(cellsOf(all.calls[1]), {
+    "'Orders'!J2": "Shipped", "'Orders'!J3": "Shipped", "'Orders'!K2": patch.tracking, "'Orders'!K3": patch.tracking,
+  });
+
+  const one = setup(full, [keys(), { json: {} }]);
+  await ask(one.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "12-1", key: { sku: "SKU-02" }, patch: { notes: "call buyer" } }, options);
+  assert.deepEqual(cellsOf(one.calls[1]), { "'Orders'!L3": "call buyer" });
+  assertNothingDestroyed([...all.calls, ...one.calls]);
+});
+
+test("updateOrder never clears a cell, and says so when the order is gone", async () => {
+  const t = setup(full, []);
+  for (const patch of [{ tracking: "" }, { notes: "  " }, { status: "Gone" }, {}, undefined]) {
+    assert.equal((await ask(t.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "12-1", patch }, options)).success, false, JSON.stringify(patch));
+  }
+  assert.equal(t.calls.length, 0);
+  const gone = setup(full, [columns(["Order Number", "12-1"], ["SKU", "SKU-01"])]);
+  const reply = await ask(gone.listener, { action: "updateOrder", sheetId: full.id, orderNumber: "99-9", patch: { status: "Shipped" } }, options);
+  assert.match(reply.error, /isn't in the sheet any more/);
+  assert.equal(gone.calls.length, 1);
+});
+
+/* Moving the library into a sheet */
+
+const rec = (n, extra) => ({ id: `id${n}`, sku: `L-0${n}`, title: `item ${n}`, link: `https://a/${n}`, price: 2, salePrice: 5, image: "", currency: "GBP", status: "Not Listed", savedAt: n, ...extra });
+// The sheet as moveLocal reads it: whole columns, rows 1 and 2 are headers, row 3 holds one product.
+const sheetNow = (existing = [["SKU-01", "old", "https://a/9"]]) => ({
+  json: {
+    valueRanges: [
+      { values: [["eBay FVF Rate:"], ["SKU"], ...existing.map((r) => [r[0]])] },
+      { values: [["0.129"], ["Product Name"], ...existing.map((r) => [r[1]])] },
+      { values: [["x"], ["Supplier URL"], ...existing.map((r) => [r[2]])] },
+    ],
+  },
+});
+
+test("moveLocal moves the library with one read and one write, skips what is already in the sheet, and leaves removed ones", async () => {
+  const library = [rec(1), rec(2), rec(3, { title: "old", link: "https://a/9" }), rec(4, { status: "Discontinued" })];
+  const t = setup(full, [sheetNow(), { json: {} }], { local: { library, "listing:local:L-01": { text: "a listing" } } });
+  const reply = await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options);
+  assert.deepEqual(reply, { success: true, moved: 2, skipped: 1, needRate: 0 });
+  assert.equal(t.calls.length, 2);
+  assert.deepEqual(
+    Object.entries(cellsOf(t.calls[1])).filter(([r]) => /[AB]\d+$/.test(r)),
+    [["'Inventory'!B4", "item 1"], ["'Inventory'!A4", "SKU-02"], ["'Inventory'!B5", "item 2"], ["'Inventory'!A5", "SKU-03"]],
+  );
+  assert.equal(cellsOf(t.calls[1])["'Inventory'!D4"], 2);
+  assert.deepEqual(t.store.library.map((x) => x.id), ["id4"]); // the removed one stays on the device
+  // The generated listing follows its product to the sheet's key.
+  assert.deepEqual(plain(t.store[`listing:${full.id}:SKU-02`]), { text: "a listing" });
+  assert.equal("listing:local:L-01" in t.store, false);
+  assertNothingDestroyed(t.calls);
+});
+
+test("moveLocal can be run again after a crash between the sheet write and the library cleanup", async () => {
+  // The rows are already in the sheet but still in the library: nothing is written twice, the library is tidied.
+  const library = [rec(1), rec(2)];
+  const t = setup(full, [sheetNow([["SKU-01", "item 1", "https://a/1"], ["SKU-02", "item 2", "https://a/2"]])], { local: { library } });
+  assert.deepEqual(await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options), { success: true, moved: 0, skipped: 2, needRate: 0 });
+  assert.equal(t.calls.length, 1, "a read only");
+  assert.deepEqual(plain(t.store.library), []);
+});
+
+test("moveLocal converts other currencies with the same rate lookup as a save, and leaves what has no rate", async () => {
+  const library = [rec(1), rec(2, { currency: "PKR", price: 1870, salePrice: 3740 }), rec(3, { currency: "USD" })];
+  const typed = { "GBP:PKR:typed": { rate: 374, at: 5 } };
+  // Rate lookups go to Dashboard!D2 first (refused here), then the typed rate; USD has none.
+  const t = setup(full, [{ status: 400, json: {} }, { status: 400, json: {} }, sheetNow(), { json: {} }], { local: { library, rates: typed } });
+  const reply = await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options);
+  assert.deepEqual(reply, { success: true, moved: 2, skipped: 0, needRate: 1 });
+  const written = cellsOf(t.calls[3]);
+  assert.equal(written["'Inventory'!D4"], 2); // already pounds
+  assert.equal(written["'Inventory'!D5"], 5); // 1870 PKR at 374
+  assert.equal(written["'Inventory'!E5"], 10); // 3740 PKR at 374
+  assert.deepEqual(t.store.library.map((x) => x.id), ["id3"]); // the USD one waits for a rate
+});
+
+test("a failed move leaves the library exactly as it was", async () => {
+  const library = [rec(1), rec(2)];
+  const failed = setup(full, [sheetNow(), { status: 500, json: { error: { message: "Backend error" } } }], { local: { library } });
+  assert.deepEqual(await ask(failed.listener, { action: "moveLocal", sheetId: full.id }, options), { success: false, error: "Backend error" });
+  assert.deepEqual(plain(failed.store.library), library);
+
+  const signedOut = setup(full, [], { local: { library }, tokens: [null] });
+  assert.deepEqual(await ask(signedOut.listener, { action: "moveLocal", sheetId: full.id }, options), SIGNIN);
+  assert.deepEqual(plain(signedOut.store.library), library);
+
+  const stranger = await ask(setup(full, [], { local: { library } }).listener, { action: "moveLocal", sheetId: "someone-elses-sheet" }, options);
+  assert.equal(stranger.success, false);
+});
+
+test("a library save and a move issued together run one after the other", async () => {
+  const t = setup(full, [sheetNow(), { json: {} }], { local: { library: [rec(1)] } });
+  const saved = t.appendRow({ ...product, dest: "local" }); // queued first
+  const move = await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options);
+  assert.equal((await saved).sku, "L-02");
+  assert.equal(move.moved, 2, "the move saw the save that was queued before it");
+  assert.deepEqual(plain(t.store.library), []);
+});
+
+test("two library records for the same link and title move as one row", async () => {
+  const library = [rec(1), rec(2, { title: "item 1", link: "https://a/1" })];
+  const t = setup(full, [sheetNow(), { json: {} }], { local: { library } });
+  assert.deepEqual(await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options), { success: true, moved: 1, skipped: 1, needRate: 0 });
+  assert.equal(Object.keys(cellsOf(t.calls[1])).filter((r) => r.startsWith("'Inventory'!B")).length, 1);
+  assert.deepEqual(plain(t.store.library), []);
 });

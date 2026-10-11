@@ -17,6 +17,20 @@ const {
   rateFromCell,
   validRate,
   RATE_MESSAGE,
+  destination,
+  httpsUrl,
+  cleanSave,
+  libAdd,
+  libSetStatus,
+  libTake,
+  libToProducts,
+  findRow,
+  expandMerges,
+  toSerial,
+  fromSheetDate,
+  findOrderRows,
+  cleanOrder,
+  cleanPatch,
 } = require("../lib/shared.js");
 
 test("parsePrice handles currency text and both decimal styles", () => {
@@ -296,4 +310,137 @@ test("the regions and the template layout hold what the rest of the code expects
   assert.deepEqual([REGIONS.UK.currency, REGIONS.UK.symbol, REGIONS.US.currency, REGIONS.US.symbol], ["GBP", "£", "USD", "$"]);
   // Every key the preset fills in is a real setting.
   for (const key of Object.keys(TEMPLATE_LAYOUT)) assert.ok(key in SHEET_DEFAULTS, key);
+});
+
+/* Products, orders and the local library */
+
+test("destination is the sheet only when signed in and a sheet exists; offline counts as signed in", () => {
+  assert.equal(destination(true, {}), "sheet");
+  assert.equal(destination(null, {}), "sheet"); // couldn't tell: a sheet save will say what is wrong
+  assert.equal(destination(false, {}), "local");
+  assert.equal(destination(true, undefined), "local");
+  assert.equal(destination(false, undefined), "local");
+});
+
+test("httpsUrl keeps only https URLs, and resolves a relative one against its page", () => {
+  assert.equal(httpsUrl("https://ae01.alicdn.com/a.jpg"), "https://ae01.alicdn.com/a.jpg");
+  assert.equal(httpsUrl("//ae01.alicdn.com/a.jpg", "https://www.aliexpress.com/item/1.html"), "https://ae01.alicdn.com/a.jpg");
+  for (const bad of ["http://x/a.jpg", "javascript:alert(1)", "data:image/png;base64,AA", "", undefined, "/a.jpg", "https://x/" + "a".repeat(2000)]) {
+    assert.equal(httpsUrl(bad), "", String(bad).slice(0, 30));
+  }
+});
+
+test("cleanSave keeps text short, numbers numeric, the image https and the currency a code", () => {
+  assert.deepEqual(
+    cleanSave({ title: " Ring ", link: "https://a/1.html", price: "4.77", salePrice: "", image: "http://x/a.jpg", currency: "pkr" }),
+    { title: "Ring", link: "https://a/1.html", price: 4.77, salePrice: null, image: "", currency: "" },
+  );
+  assert.equal(cleanSave({ title: "x".repeat(900) }).title.length, 500);
+  assert.equal(cleanSave({ currency: "PKR" }).currency, "PKR");
+  assert.equal(cleanSave(undefined).title, "");
+});
+
+test("library: add assigns L- SKUs, a taken SKU falls back to highest + 1, status and take work on copies", () => {
+  const rec = { title: "a", link: "l", price: 1, salePrice: 2, image: "", currency: "GBP" };
+  let { lib, item } = libAdd([], rec, 1000, "id1");
+  assert.deepEqual(item, { id: "id1", sku: "L-01", ...rec, status: "Not Listed", savedAt: 1000 });
+  lib = libAdd(lib, rec, 2000, "id2").lib;
+  assert.deepEqual(lib.map((x) => x.sku), ["L-01", "L-02"]);
+
+  // L-01 moved to a sheet: the next one is L-03, not a second L-02.
+  const after = libTake(lib, ["id1"]);
+  assert.deepEqual(after.map((x) => x.id), ["id2"]);
+  assert.equal(libAdd(after, rec, 3000, "id3").item.sku, "L-03"); // count + 1 = 2 is taken, highest + 1
+  assert.equal(lib.length, 2, "take left the original alone");
+
+  const set = libSetStatus(lib, "id2", "Discontinued");
+  assert.deepEqual(set.map((x) => x.status), ["Not Listed", "Discontinued"]);
+  assert.equal(lib[1].status, "Not Listed");
+});
+
+test("libToProducts answers in the product shape: 1-based row, no profit or margin, nothing shared", () => {
+  const { lib } = libAdd([], { title: "a", link: "l", price: 1, salePrice: null, image: "", currency: "PKR" }, 1, "id1");
+  assert.deepEqual(libToProducts(lib), [
+    { row: 1, id: "id1", sku: "L-01", title: "a", link: "l", price: 1, salePrice: null, image: "", currency: "PKR", status: "Not Listed", statusShared: false, profit: null, margin: null },
+  ]);
+});
+
+test("findRow: the hinted row, a moved row, a SKU that is gone, a shared link told apart by title, no match", () => {
+  const rows = [
+    { row: 3, sku: "SKU-01", link: "https://a/1", title: "ring" },
+    { row: 4, sku: "SKU-02", link: "https://a/2", title: "lamp" },
+    { row: 5, sku: "", link: "https://a/2", title: "lamp blue" }, // a variant: same link, no SKU
+  ];
+  assert.equal(findRow(rows, { sku: "SKU-02", row: 4, link: "https://a/2", title: "lamp" }), 4); // hint holds
+  assert.equal(findRow(rows, { sku: "sku-02", row: 9, link: "https://a/2", title: "lamp" }), 4); // moved, any case
+  assert.equal(findRow(rows, { sku: "SKU-09", row: 4, link: "https://a/2", title: "lamp" }), -1); // SKU gone
+  assert.equal(findRow(rows, { sku: "", row: 5, link: "https://a/2", title: "lamp blue" }), 5); // title tells the variants apart
+  assert.equal(findRow(rows, { sku: "", link: "https://a/2", title: "lamp blue" }), 5);
+  assert.equal(findRow(rows, { sku: "", link: "https://a/9", title: "none" }), -1);
+  assert.equal(findRow(rows, {}), -1); // a key that names nothing never matches the first row
+  // The template's SKU formula renumbers when rows are sorted: the same SKU on another product is not a match.
+  assert.equal(findRow(rows, { sku: "SKU-01", row: 3, link: "https://a/2", title: "lamp" }), -1);
+});
+
+test("expandMerges copies the anchor value down a merged status and counts the rows that share it", () => {
+  // Rows 3 to 6 from startRow 3; a merge over rows 4-5 (0-based 3..5, end exclusive) in column index 12.
+  const column = ["Listed", "Draft", "", "Not Listed"];
+  const merges = [{ startRowIndex: 3, endRowIndex: 5, startColumnIndex: 12, endColumnIndex: 13 }];
+  const { values, shared } = expandMerges(column, merges, 12, 3);
+  assert.deepEqual(values, ["Listed", "Draft", "Draft", "Not Listed"]);
+  assert.deepEqual([shared[0], shared[1], shared[2], shared[3]], [undefined, 2, 2, undefined]);
+  // Another column's merge, or a one-row merge, shares nothing. Omitted indexes mean 0.
+  assert.deepEqual(expandMerges(column, merges, 11, 3).shared, []);
+  assert.deepEqual(expandMerges(column, [{ endRowIndex: 1, endColumnIndex: 13 }], 12, 1).shared, []);
+  assert.deepEqual(expandMerges(["x"], [{ endRowIndex: 2, endColumnIndex: 13 }], 5, 1).shared, [2, 2]);
+});
+
+test("dates round-trip: serial, ISO text and dd/mm/yyyy text", () => {
+  assert.equal(toSerial("1899-12-30"), 0);
+  assert.equal(toSerial("1970-01-01"), 25569);
+  assert.equal(toSerial("2026-10-10"), 46305);
+  assert.ok(Number.isNaN(toSerial("2026-02-30")));
+  assert.ok(Number.isNaN(toSerial("10/10/2026")));
+  assert.equal(fromSheetDate(46305), "2026-10-10");
+  assert.equal(fromSheetDate(46305.75), "2026-10-10"); // a time of day is dropped
+  assert.equal(fromSheetDate("2026-10-10"), "2026-10-10");
+  assert.equal(fromSheetDate("10/10/2026"), "2026-10-10");
+  assert.equal(fromSheetDate("3/9/2026"), "2026-09-03"); // day first
+  for (const bad of ["", "soon", "31/02/2026", null, undefined, 0, -5]) assert.equal(fromSheetDate(bad), "", String(bad));
+  assert.equal(fromSheetDate(toSerial("2024-02-29")), "2024-02-29");
+});
+
+test("findOrderRows: one order can be several rows; a SKU or a row narrows it", () => {
+  const rows = [
+    { row: 2, no: "12-1", sku: "SKU-01" },
+    { row: 3, no: "12-1", sku: "SKU-02" },
+    { row: 4, no: 77, sku: "SKU-01" }, // a number typed into the sheet
+  ];
+  assert.deepEqual(findOrderRows(rows, "12-1"), [2, 3]);
+  assert.deepEqual(findOrderRows(rows, "12-1", { sku: "sku-02" }), [3]);
+  assert.deepEqual(findOrderRows(rows, "12-1", { row: 2 }), [2]);
+  assert.deepEqual(findOrderRows(rows, "77", { sku: "SKU-01" }), [4]);
+  assert.deepEqual(findOrderRows(rows, "nope"), []);
+});
+
+test("cleanOrder checks the form's order and turns the date into a sheet serial", () => {
+  const ok = cleanOrder({ orderNumber: " 12-1 ", sku: "SKU-01", qty: "2", date: "2026-10-10", sell: "19.999", notes: "hi" });
+  assert.deepEqual(ok, { orderNumber: "12-1", sku: "SKU-01", qty: 2, serial: 46305, sell: 20, status: "Pending", tracking: "", notes: "hi" });
+  // No sell (or 0, which the form sends for a blank box) means "use the product's own price".
+  assert.equal(cleanOrder({ orderNumber: "a", sku: "b", sell: 0 }).sell, null);
+  assert.equal(cleanOrder({ orderNumber: "a", sku: "b", sell: "x" }).sell, null);
+  assert.equal(cleanOrder({ orderNumber: "a", sku: "b" }).serial, null);
+  assert.equal(cleanOrder({ orderNumber: "a", sku: "b" }).qty, 1);
+  for (const bad of [{}, { orderNumber: "a" }, { orderNumber: "a", sku: "b", qty: 0 }, { orderNumber: "a", sku: "b", qty: 1.5 },
+    { orderNumber: "a", sku: "b", qty: 10000 }, { orderNumber: "a", sku: "b", date: "10/10/2026" }, { orderNumber: "a", sku: "b", status: "Gone" }]) {
+    assert.throws(() => cleanOrder(bad), Error, JSON.stringify(bad));
+  }
+});
+
+test("cleanPatch passes only known fields and refuses to clear a cell", () => {
+  assert.deepEqual(cleanPatch({ status: "Shipped", tracking: " RR1 ", notes: "ok", sell: 1 }), { status: "Shipped", tracking: "RR1", notes: "ok" });
+  assert.equal(cleanPatch({ notes: "x".repeat(3000) }).notes.length, 2000);
+  for (const bad of [{}, undefined, { status: "Gone" }, { tracking: "" }, { notes: "   " }, { status: "Shipped", tracking: "" }]) {
+    assert.throws(() => cleanPatch(bad), Error, JSON.stringify(bad));
+  }
 });
