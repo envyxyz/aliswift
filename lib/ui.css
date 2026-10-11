@@ -590,6 +590,103 @@ a.btn {
   border: 0;
 }
 
+.spin {
+  animation: spin 0.7s linear infinite;
+}
+
+.input-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.input-row > input {
+  flex: 1;
+  min-width: 0;
+}
+
+a.icon-btn {
+  text-decoration: none;
+}
+
+.icon-btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* A dialog head with a close button on the right (the button's click handler closes the dialog). */
+.dialog-head[data-close] {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.dialog-head[data-close] > div {
+  min-width: 0;
+}
+
+.dialog-head[data-close] .icon-btn {
+  margin: -4px -8px 0 0;
+}
+
+.dialog-sub {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* copy-row: a label, a value and one copy button. The button shows the check for a moment after it copied. */
+.copy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "label meta action" "value value action";
+  column-gap: var(--sp-2);
+  row-gap: 2px;
+  align-items: center;
+  padding: var(--sp-2) 0;
+}
+
+.copy-row + .copy-row {
+  border-top: 1px solid var(--border);
+}
+
+.copy-label {
+  grid-area: label;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.copy-meta {
+  grid-area: meta;
+}
+
+.copy-value {
+  grid-area: value;
+  min-width: 0;
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.copy-row > .icon-btn {
+  grid-area: action;
+  align-self: start;
+}
+
+.icon-btn .i-check,
+.icon-btn[data-copied] .i-copy {
+  display: none;
+}
+
+.icon-btn[data-copied] .i-check {
+  display: block;
+  color: var(--ok);
+}
+
 .field-narrow {
   max-width: 160px;
 }
@@ -704,7 +801,8 @@ details.disclosure > :not(summary) {
   }
 }
 
-/* Info icon and tooltip. The tip stays open while the pointer is on it (WCAG 1.4.13). */
+/* Info icon and tooltip. The tip stays open while the pointer is on it (WCAG 1.4.13). A .has-tip is any focusable
+   element followed by a .tip, such as a disabled control that must say why. */
 
 .title-row {
   position: relative;
@@ -775,8 +873,8 @@ details.disclosure > :not(summary) {
   height: 8px;
 }
 
-.info:hover + .tip,
-.info:focus-visible + .tip,
+:is(.info, .has-tip):hover + .tip,
+:is(.info, .has-tip):focus-visible + .tip,
 .tip:hover {
   opacity: 1;
   visibility: visible;
@@ -784,16 +882,16 @@ details.disclosure > :not(summary) {
   transition: opacity 140ms var(--ease), transform 140ms var(--ease), visibility 0s;
 }
 
-.info:hover + .tip {
+:is(.info, .has-tip):hover + .tip {
   transition-delay: 300ms;
 }
 
-.info:focus-visible + .tip,
+:is(.info, .has-tip):focus-visible + .tip,
 .tip:hover {
   transition-delay: 0s;
 }
 
-.info[data-dismissed] + .tip {
+:is(.info, .has-tip)[data-dismissed] + .tip {
   opacity: 0;
   visibility: hidden;
   transition-delay: 0s;
@@ -874,6 +972,115 @@ details.disclosure > :not(summary) {
 
 .segmented input:disabled + span {
   opacity: 0.5;
+}
+
+.segmented[data-scroll] {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.segmented[data-scroll] span {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.segmented[data-scroll] input:focus-visible + span {
+  outline-offset: -2px;
+}
+
+.segmented small {
+  margin-left: 6px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* Status control: a native select dressed as a tone tag, on product cards and in order rows. */
+.status {
+  position: relative;
+  display: inline-grid;
+  color: var(--tone-grey-fg);
+  background: var(--tone-grey-bg);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.status[data-tone="amber"] {
+  color: var(--tone-amber-fg);
+  background: var(--tone-amber-bg);
+}
+
+.status[data-tone="green"] {
+  color: var(--tone-green-fg);
+  background: var(--tone-green-bg);
+}
+
+.status[data-tone="blue"] {
+  color: var(--tone-blue-fg);
+  background: var(--tone-blue-bg);
+}
+
+.status[data-tone="red"] {
+  color: var(--tone-red-fg);
+  background: var(--tone-red-bg);
+}
+
+.status select {
+  width: auto;
+  height: 28px;
+  padding: 0 26px 0 10px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+@supports not (appearance: base-select) {
+  .status select {
+    appearance: none;
+  }
+}
+
+@supports (appearance: base-select) {
+  .status select::picker-icon {
+    display: none;
+  }
+
+  .status select::picker(select) {
+    min-inline-size: 136px;
+  }
+}
+
+.status::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+.status:has(select:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.status[data-busy] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.status option {
+  color: var(--text);
 }
 
 /* Dialog. Needs Chrome 117 for @starting-style and allow-discrete; :user-invalid needs 119. */
@@ -1218,7 +1425,25 @@ dialog form {
   }
 }
 
+@media (pointer: coarse) {
+  .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  [role="tab"] {
+    height: 44px;
+  }
+
+  .status select {
+    height: 36px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
   .btn {
     transition: none;
   }

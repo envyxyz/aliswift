@@ -246,7 +246,6 @@ const LOCAL = "local";
 const quote = (tab) => `'${tab.replace(/'/g, "''")}'`;
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const text = (v) => String(v ?? "").trim();
-const round2 = (n) => Math.round(n * 100) / 100;
 
 // The configured sheet with this id, merged over the defaults. Writes only ever reach sheets the user added.
 async function sheetById(sheetId) {

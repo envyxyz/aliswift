@@ -1,0 +1,698 @@
+/* Dashboard styles for the AliSwift full-tab page. Tokens, tags, notices, copy rows, the status control,
+   segmented counts and the tooltip trigger live in lib/ui.css; this file is only what the dashboard alone uses. */
+
+textarea {
+  width: 100%;
+  height: auto;
+  min-height: 72px;
+  padding: 8px 12px;
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dash-sheet select {
+  min-width: 160px;
+}
+
+.toolbar .sort {
+  min-width: 208px;
+}
+
+/* ==========================================================================
+   Dashboard Shell & Page Layout
+   ========================================================================== */
+
+:root {
+  --gutter: 16px;
+  --head-h: 56px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+
+.dash-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--head-h);
+  padding: 0 var(--gutter);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.dash-brand .logo {
+  color: var(--accent);
+  flex: none;
+}
+
+.dash-sheet select {
+  width: auto;
+  max-width: min(260px, 45vw);
+}
+
+.dash-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+@media (max-width: 519px) {
+  .dash-head {
+    flex-wrap: wrap;
+    padding-block: 8px;
+  }
+  .dash-sheet {
+    order: 3;
+    flex: 1 1 100%;
+  }
+  .dash-sheet select {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+.dash-main {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--gutter) var(--sp-7);
+}
+
+.dash-main .tabs {
+  position: relative;
+  overflow: visible;
+  margin-top: var(--sp-3);
+}
+
+.dash-main .panel {
+  padding-top: 24px;
+}
+
+#offline,
+#libraryBanner {
+  margin-top: var(--sp-3);
+}
+
+/* Toolbar & Filters */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.toolbar .search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+
+.toolbar .sort {
+  width: auto;
+  margin-left: auto;
+}
+
+.results {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  min-height: 32px;
+  margin: var(--sp-3) 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.totals b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Product Card & Grid
+   ========================================================================== */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr));
+  gap: var(--sp-4);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--dur-fast), opacity var(--dur-fast), transform var(--dur-fast);
+  scroll-margin-top: calc(var(--head-h) + 8px);
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--text) 20%, var(--border));
+}
+
+.card.removing {
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 160ms ease-in, transform 160ms ease-in;
+  pointer-events: none;
+}
+
+.card-media {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+
+.card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+
+.card-media img[data-loaded] {
+  opacity: 1;
+}
+
+.card-media .card-ph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border-radius: inherit;
+}
+
+.card-slot {
+  position: absolute;
+  top: 8px;
+  z-index: 1;
+}
+
+.card-slot[data-pos="start"] {
+  left: 8px;
+}
+
+.card-slot[data-pos="end"] {
+  right: 8px;
+}
+
+.card-x {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+  width: 32px;
+  height: 32px;
+}
+
+.card-x:hover:not([aria-disabled="true"]) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.card[data-status="Discontinued"] .card-media {
+  opacity: 0.6;
+}
+
+.card-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-meta .icon-btn {
+  width: 28px;
+  height: 28px;
+  margin-right: -6px;
+}
+
+.card-name {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(2 * 1.35em);
+}
+
+.card-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.price {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+
+.card-actions .btn {
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Skeleton States
+   ========================================================================== */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface) 0%,
+    color-mix(in srgb, var(--text) 6%, var(--surface)) 50%,
+    var(--surface) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius);
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-card {
+  pointer-events: none;
+}
+.skeleton-media {
+  aspect-ratio: 4 / 3;
+  width: 100%;
+}
+.skeleton-line {
+  height: 14px;
+  width: 75%;
+}
+.skeleton-line-sm {
+  height: 12px;
+  width: 45%;
+}
+.skeleton-btn {
+  height: 32px;
+}
+
+.skeleton-row-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.skeleton-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  flex: none;
+}
+.skeleton-row-lines {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+}
+
+/* ==========================================================================
+   Orders Table & Stacked Rows
+   ========================================================================== */
+
+.orders {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fs-md);
+}
+
+.orders th {
+  position: sticky;
+  top: var(--head-h);
+  z-index: 5;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.orders td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.orders tbody tr:hover {
+  background: var(--hover);
+}
+
+.orders tr {
+  scroll-margin-top: calc(var(--head-h) + 8px);
+}
+
+.orders .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.orders [data-neg] {
+  color: var(--danger);
+}
+
+.orders tr[data-status="Cancelled"] td {
+  color: var(--muted);
+}
+.orders tr[data-status="Cancelled"] .name {
+  text-decoration: line-through;
+}
+
+.orders .c-order,
+.orders .c-date {
+  white-space: nowrap;
+}
+
+.prod {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 340px;
+}
+
+.prod > div,
+.orders .c-prod {
+  min-width: 0;
+}
+
+.prod img,
+.prod .ph {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: var(--surface);
+}
+
+.prod .ph {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.prod .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.prod .sub {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+/* In the table the product column takes what is left and its name ends in an ellipsis, so the table never
+   outgrows the page. */
+@media (min-width: 900px) {
+  .orders .c-prod {
+    width: 100%;
+    max-width: 0;
+  }
+}
+
+.c-act {
+  white-space: nowrap;
+}
+.c-act-inner {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+
+@media (max-width: 899px) {
+  .orders thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .orders,
+  .orders tbody {
+    display: block;
+  }
+  .orders tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .orders td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .orders td[data-label]::before {
+    content: attr(data-label) " ";
+    color: var(--muted);
+    font-size: var(--fs-xs);
+  }
+  .orders .c-prod {
+    flex: 1 1 calc(100% - 150px);
+    order: 1;
+  }
+  .orders .c-status {
+    flex: none;
+    order: 2;
+  }
+  .orders .c-order {
+    order: 3;
+  }
+  .orders .c-date {
+    order: 4;
+  }
+  .orders .c-qty {
+    order: 5;
+  }
+  .orders .c-sell {
+    order: 6;
+  }
+  .orders .c-profit {
+    order: 7;
+  }
+  .orders .c-track {
+    order: 8;
+  }
+  .orders .c-act {
+    order: 9;
+    margin-left: auto;
+  }
+  .orders .num {
+    text-align: left;
+  }
+}
+
+/* ==========================================================================
+   Error & Empty Modifiers
+   ========================================================================== */
+
+.empty[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.empty[data-tone="error"] svg {
+  color: var(--danger);
+}
+
+/* The add-order form has two fields per row (the shared .fields-row has three). */
+@media (min-width: 472px) {
+  #addOrderDialog .fields-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+#aoCaption {
+  min-height: 20px;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+}
+
+/* ==========================================================================
+   Listing dialog
+   ========================================================================== */
+
+.score {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.score-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.score h3,
+.dialog-body h3,
+.field-head label {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.field-head label {
+  margin: 0;
+}
+
+.counter {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.flags {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flags li {
+  display: flex;
+  gap: 8px;
+  font-size: var(--fs-sm);
+}
+
+.flags svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--tone-red-fg);
+}
+
+.kv-list {
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.copy-value.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  user-select: text;
+}
+
+#lsContent {
+  display: grid;
+  gap: 16px;
+}
+
+#lsBody[inert] {
+  opacity: 0.5;
+}
+
+.ls-actions #lsRegen {
+  margin-right: auto;
+}
+
+.ls-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ls-confirm p {
+  margin-right: auto;
+  font-size: var(--fs-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card.removing {
+    transform: none;
+  }
+  .skeleton {
+    animation: none;
+    background: var(--surface);
+  }
+  #refreshBtn[aria-busy="true"] {
+    opacity: 0.5;
+  }
+}
