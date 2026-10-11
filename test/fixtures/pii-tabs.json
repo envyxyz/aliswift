@@ -1,0 +1,46 @@
+[
+  {
+    "title": "Customer Orders",
+    "headers": [
+      "Order ID",
+      "Product Name",
+      "Buyer Name",
+      "Customer",
+      "Shipping Address",
+      "Email",
+      "Phone",
+      "Postcode",
+      "Total",
+      "Tracking Number",
+      "Order Notes"
+    ],
+    "sample": [
+      [
+        "ORD-5501",
+        "Synthetic Ceramic Mug",
+        "Synthetic Buyer",
+        "Synthetic Customer",
+        "10 Downing Street",
+        "synthetic.buyer@example.com",
+        "+44 7700 900123",
+        "SW1A 2AA",
+        "12.00",
+        "TRK5501",
+        "Leave at front porch"
+      ],
+      [
+        "ORD-5502",
+        "Synthetic Notebook",
+        "Test User",
+        "Test Buyer",
+        "221B Baker Street",
+        "test.user@example.com",
+        "+44 7700 900456",
+        "NW1 6XE",
+        "8.50",
+        "TRK5502",
+        "Ring bell"
+      ]
+    ]
+  }
+]

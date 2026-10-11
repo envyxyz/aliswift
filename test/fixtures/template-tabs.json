@@ -1,0 +1,99 @@
+[
+  {
+    "title": "Dashboard",
+    "headers": ["Metric", "Value"],
+    "sample": [
+      ["Total Products Listed", "42"],
+      ["Total Orders", "15"]
+    ]
+  },
+  {
+    "title": "Inventory",
+    "headers": [
+      "SKU",
+      "Product Name",
+      "Supplier URL",
+      "Cost Price (GBP)",
+      "Sell Price (GBP)",
+      "Ad Rate %",
+      "Ad Cost (GBP)",
+      "eBay Fee (GBP)",
+      "Order Fee (GBP)",
+      "Net Profit (GBP)",
+      "Net Profit (PKR)",
+      "Margin %",
+      "Status",
+      "Notes",
+      "Image URL"
+    ],
+    "sample": [
+      [
+        "SKU-01",
+        "Synthetic Stainless Steel Keychain",
+        "https://example.com/item/1001",
+        "3.50",
+        "8.99",
+        "0.05",
+        "0.45",
+        "1.15",
+        "0.30",
+        "3.59",
+        "1350",
+        "0.40",
+        "Listed",
+        "Primary supplier verified",
+        "https://example.com/img/1001.jpg"
+      ],
+      [
+        "SKU-02",
+        "Synthetic Desktop Cable Organizer",
+        "https://example.com/item/1002",
+        "2.10",
+        "6.49",
+        "0.00",
+        "0.00",
+        "0.85",
+        "0.30",
+        "3.24",
+        "1215",
+        "0.50",
+        "Not Listed",
+        "Test product",
+        "https://example.com/img/1002.jpg"
+      ]
+    ]
+  },
+  {
+    "title": "Orders",
+    "headers": [
+      "Order Number",
+      "SKU",
+      "Product Name",
+      "Order Date",
+      "QTY",
+      "Sell Price (GBP)",
+      "Cost Price (GBP)",
+      "Profit (GBP)",
+      "Profit (PKR)",
+      "Status",
+      "Tracking Number",
+      "Notes"
+    ],
+    "sample": [
+      [
+        "SYN-ORD-001",
+        "SKU-01",
+        "Synthetic Stainless Steel Keychain",
+        "12/10/2026",
+        "2",
+        "17.98",
+        "7.00",
+        "7.18",
+        "2700",
+        "Shipped",
+        "TRK987654321",
+        "Fast dispatch"
+      ]
+    ]
+  }
+]

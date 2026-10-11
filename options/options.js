@@ -259,7 +259,7 @@ function render() {
   activeId = active?.id ?? "";
   const has = sheets.length > 0;
   $("chips").replaceChildren(...sheets.map(chip));
-  $("chips").hidden = $("addSheetBtn").hidden = !has;
+  $("chips").hidden = $("groupActions").hidden = !has;
   $("empty").hidden = has;
   $("pricingEmpty").hidden = $("titleEmpty").hidden = has;
   pricingForm.hidden = titleForm.hidden = !has;
@@ -625,20 +625,553 @@ window.addEventListener("beforeunload", (e) => {
 const locked = () => !$("lockSheets").hidden;
 $("addSheetBtn").addEventListener("click", () => locked() || openAdd());
 $("emptyAddBtn").addEventListener("click", () => locked() || openAdd());
+for (const id of ["gsOpen", "gsOpenEmpty"]) $(id).addEventListener("click", (e) => locked() || openGs(e.currentTarget));
 // Unknown (null, or no event yet) counts as signed in, so the buttons never flicker locked on load.
 // The buttons point at the hint only while it shows: a hidden element would still be read out as their description.
 document.addEventListener("authchange", (e) => {
   const lock = e.detail.signedIn === false;
   $("lockSheets").hidden = !lock;
-  for (const id of ["addSheetBtn", "emptyAddBtn"]) {
+  for (const id of ["addSheetBtn", "emptyAddBtn", "gsOpen", "gsOpenEmpty"]) {
     $(id).setAttribute("aria-disabled", String(lock));
     if (lock) $(id).setAttribute("aria-describedby", "lockSheets");
     else $(id).removeAttribute("aria-describedby");
   }
+  if (e.detail.signedIn && $("gsDialog").open && gsListFailed) gsLoad(); // signed back in from the dialog
 });
 $("cancelBtn").addEventListener("click", () => {
   if (!adding) $("addDialog").close();
 });
+
+/* Import from Google Sheets. It only reads the user's sheet: nothing below writes to it, and a new sheet is only
+   a settings entry here. The service worker does the reading and matching (lib/importmap.js). */
+
+const gsForm = $("gsForm");
+const send = (message) => chrome.runtime.sendMessage(message).catch((e) => ({ success: false, error: e.message }));
+// One row per field, from the same lists the Edit dialog uses. Orders fields are named oc_<key> there too.
+const GS_ROWS = [
+  ...COLUMNS.map((c) => ({ ...c, scope: "inv", name: c.key, required: !c.optional })),
+  ...ORDER_COLS.map((c) => ({ ...c, scope: "ord", name: `oc_${c.key}` })),
+];
+const GS_KEYS = ["name", "sheetTab", "startRow", "region", ...COLUMNS.map((c) => c.key), "oTab", "oRow"];
+const GS_PANES = ["gsChoose", "gsRead", "gsMap"];
+const GS_TAGS = { matched: ["green", "success", "Matched"], guessed: ["amber", "warning", "Guessed"], yours: ["blue", "", "Your pick"] };
+const GS_NOTICE_ICON = { error: ICONS.error, warn: ICONS.warning, info: ICONS.info };
+const GS_REASONS = {
+  nokey: "Add a Gemini key in the AI tab to map with AI.",
+  "invalid-key": "Gemini rejected your key. Check it in the AI tab.",
+  rate: "Gemini is busy right now.",
+  network: "Couldn't reach Gemini.",
+  timeout: "Gemini took too long.",
+  "bad-output": "Gemini's answer didn't pass checks.",
+};
+const GS_RETRY = ["rate", "network", "timeout", "bad-output"];
+const GS_ERRORS = {
+  forbidden: "You don't have access to that sheet.",
+  xlsx: "That's an Excel file opened in Google Sheets. In Sheets, choose File, then Save as Google Sheets, and try again.",
+  noheaders: "Couldn't find column headers in any tab. Put titles like “Product” and “Price” in the first rows of a tab, then try again.",
+  network: "Couldn't reach Google. Check your connection.",
+  timeout: "Couldn't reach Google. Check your connection.",
+  rate: "Google is busy. Try again in a minute.",
+  signin: "Signed out.",
+};
+const clip = (s, n = 36) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+let gsFiles = [];
+let gsTruncated = false;
+let gsPicked = ""; // the radio the user chose; a pasted link excludes it
+let gsListFailed = false;
+let gsMeta = null; // what the service worker read
+let gsDraft = null; // what it matched
+let gsOpener = null;
+let gsAfter = null; // where focus goes on close instead of the opener
+let gsSaving = false;
+let gsWasMissing = false;
+let gsOpenId = 0; // bumped on open and close: a late list reply is ignored
+let gsRun = 0; // bumped when a read or match is abandoned or replaced
+let gsPaneTimer;
+let gsAiTimer;
+
+// A confidence tag: always words, never colour alone.
+function setTag(el, conf, required) {
+  const [tone, icon, word] = GS_TAGS[conf] ?? (required ? ["red", "error", "Not found"] : ["grey", "", "Not found"]);
+  el.dataset.tone = tone;
+  el.dataset.conf = conf;
+  el.innerHTML = (icon ? svgIcon(ICONS[icon], 12) : "") + word;
+}
+
+// The Choose pane's banner; no text hides it. action: { label, quiet, data } adds a button the notice's click handler answers.
+function gsNotify(tone, text, action) {
+  const el = $("gsNotice");
+  el.querySelector("button")?.remove();
+  el.hidden = !text;
+  if (!text) return;
+  if (tone === "info") el.removeAttribute("data-tone");
+  else el.dataset.tone = tone;
+  el.querySelector("path").setAttribute("d", GS_NOTICE_ICON[tone]);
+  el.querySelector("div").textContent = text;
+  if (!action) return;
+  const btn = Object.assign(document.createElement("button"), { type: "button", className: action.quiet ? "btn btn-quiet btn-sm" : "link-btn", textContent: action.label });
+  Object.assign(btn.dataset, action.data);
+  el.append(btn);
+}
+
+function gsStopTimers() {
+  clearTimeout(gsPaneTimer);
+  clearTimeout(gsAiTimer);
+  $("gsSkipAi").hidden = true;
+}
+
+function gsPane(id) {
+  for (const p of GS_PANES) $(p).hidden = $(p).disabled = p !== id;
+  $("gsBack").hidden = id !== "gsMap";
+  $("gsGo").hidden = id === "gsRead";
+  $("gsGo").textContent = id === "gsMap" ? "Add sheet" : "Continue";
+  $("gsGo").disabled = id === "gsChoose" && !(gsPicked || $("gsPaste").value.trim());
+  if (id === "gsRead") $("gsCancel").focus();
+}
+
+// Continue and Add sheet answer the press on the same frame; Cancel never waits for a request.
+function gsWait(on, label) {
+  const go = $("gsGo");
+  go.dataset.state = on ? "loading" : "";
+  go.textContent = on ? label : $("gsMap").hidden ? "Continue" : "Add sheet";
+  if (on) go.setAttribute("aria-disabled", "true");
+  else go.removeAttribute("aria-disabled");
+  if (!on && !$("gsMap").hidden) gsValidate();
+}
+
+/* Choose */
+
+function gsState(text, spin) {
+  const el = document.createElement("div");
+  el.className = "gs-state";
+  if (spin) el.innerHTML = '<span class="gs-spinner" aria-hidden="true"></span>';
+  el.append(Object.assign(document.createElement("p"), { textContent: text }));
+  return el;
+}
+
+function gsEdited(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  if (d.toDateString() === now.toDateString()) return "Edited today";
+  const year = d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" };
+  return `Edited ${d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...year })}`;
+}
+
+function gsRow(file) {
+  const label = Object.assign(document.createElement("label"), { className: "pick" });
+  const radio = Object.assign(document.createElement("input"), { type: "radio", name: "gsPick", value: file.id, checked: file.id === gsPicked });
+  const span = (cls, text) => Object.assign(document.createElement("span"), { className: cls, textContent: text });
+  label.append(radio, span("pick-name", file.name));
+  if (sheets.some((s) => s.id === file.id)) label.append(span("tag", "Added"));
+  label.append(span("pick-date", gsEdited(file.modified)));
+  return label;
+}
+
+function gsRenderList() {
+  const q = $("gsSearch").value.trim();
+  const shown = gsFiles.filter((f) => f.name.toLowerCase().includes(q.toLowerCase()));
+  if (!shown.some((f) => f.id === gsPicked)) gsPicked = "";
+  $("gsList").replaceChildren(...(shown.length ? shown.map(gsRow) : [gsState(`No sheets match “${q}”.`)]));
+  $("gsCount").textContent =
+    (q ? `${shown.length} of ${countOf(gsFiles.length)}` : countOf(gsFiles.length)) +
+    (gsTruncated ? ". Showing your 100 most recent sheets. Paste a link for older ones." : "");
+  $("gsGo").disabled = !(gsPicked || $("gsPaste").value.trim());
+}
+
+async function gsLoad() {
+  const mine = gsOpenId;
+  gsListFailed = false;
+  gsNotify("", "");
+  $("gsListWrap").hidden = false;
+  $("gsEmpty").hidden = true;
+  $("gsPasteLabel").textContent = "Or paste the sheet link or ID";
+  $("gsList").replaceChildren(gsState("Loading your sheets...", true));
+  $("gsCount").textContent = "";
+  const reply = await send({ action: "listSpreadsheets" });
+  if (mine !== gsOpenId) return;
+  if (!reply.success) {
+    // The picker is a convenience: pasting a link always works.
+    gsListFailed = true;
+    $("gsListWrap").hidden = true;
+    $("gsPasteLabel").textContent = "Paste the sheet link or ID";
+    if (reply.code === "signin") gsNotify("error", "Signed out.", { label: "Sign in", data: { signin: "" } });
+    else {
+      const allow = reply.code === "scope";
+      gsNotify("warn", "Couldn't list your sheets. Paste a link instead.", { label: allow ? "Allow access" : "Try again", data: { act: allow ? "allow" : "list" } });
+    }
+    return $("gsPaste").focus();
+  }
+  gsFiles = reply.files;
+  gsTruncated = reply.truncated;
+  $("gsListWrap").hidden = !gsFiles.length;
+  $("gsEmpty").hidden = !!gsFiles.length;
+  gsRenderList();
+}
+
+function openGs(opener) {
+  gsOpener = opener;
+  gsOpenId++;
+  gsRun++;
+  gsStopTimers();
+  gsFiles = [];
+  gsPicked = "";
+  gsMeta = gsDraft = null;
+  gsSaving = false;
+  gsForm.reset();
+  gsWait(false);
+  gsPane("gsChoose");
+  $("gsDialog").showModal();
+  gsLoad();
+}
+
+// A read or match that failed: back to Choose, with the reason and what to do about it.
+function gsFail(reply) {
+  gsStopTimers();
+  gsWait(false);
+  gsPane("gsChoose");
+  const known = Object.hasOwn(GS_ERRORS, reply.code);
+  const retry = ["network", "timeout", "rate"].includes(reply.code) || !known;
+  const text = known ? GS_ERRORS[reply.code] : `Couldn't read that sheet. ${reply.error ?? ""}`.trim();
+  const action = retry ? { label: "Retry", quiet: true, data: { act: "retry" } } : reply.code === "signin" ? { label: "Sign in", data: { signin: "" } } : null;
+  gsNotify("error", text, action);
+  ($("gsNotice").querySelector("button") ?? $("gsList").querySelector(":checked") ?? $("gsPaste")).focus();
+}
+
+async function gsContinue() {
+  if ($("gsGo").dataset.state === "loading") return;
+  const picked = gsFiles.find((f) => f.id === gsPicked);
+  const ref = gsPicked ? { id: gsPicked } : parseSheetRef($("gsPaste").value);
+  if (ref.error) {
+    gsNotify("error", ref.error);
+    return $("gsPaste").focus();
+  }
+  const have = sheets.find((s) => s.id === ref.id);
+  if (have) return gsNotify("info", `“${have.name}” is already added.`, { label: "Show it", quiet: true, data: { act: "show", id: have.id } });
+  gsNotify("", "");
+  const run = ++gsRun;
+  gsWait(true, "Reading...");
+  $("gsReadMsg").textContent = picked ? `Reading “${clip(picked.name, 32)}”...` : "Reading your sheet...";
+  gsPaneTimer = setTimeout(() => run === gsRun && gsPane("gsRead"), 250); // no flash when it is quick
+  const meta = await send({ action: "readSpreadsheetMeta", id: ref.id });
+  if (run !== gsRun) return;
+  if (!meta.success) return gsFail(meta);
+  gsMeta = meta;
+  gsMatch(false, run);
+}
+
+// The AI step, or titles alone (skipAi: the user chose that). "Try AI again" runs it again on what was read.
+async function gsMatch(skipAi, run = ++gsRun) {
+  clearTimeout(gsAiTimer);
+  $("gsSkipAi").hidden = true;
+  const ai = hasKey && !skipAi;
+  $("gsReadMsg").textContent = ai ? "Matching columns with AI..." : "Matching columns...";
+  if (ai) {
+    gsAiTimer = setTimeout(() => {
+      $("gsReadMsg").textContent = "Still working. AI can take up to 15 seconds.";
+      $("gsSkipAi").hidden = false;
+    }, 5000);
+  }
+  const { id, title, tabs, skipped } = gsMeta;
+  const reply = await send({ action: "mapSheet", data: { id, title, tabs, skipped, skipAi } });
+  if (run !== gsRun) return;
+  if (!reply.success) return gsFail(reply);
+  gsStopTimers();
+  gsDraft = reply.draft;
+  gsWait(false);
+  gsPane("gsMap");
+  gsShowMap();
+}
+
+/* Map */
+
+const gsCols = (tab) => gsDraft.tabs.find((t) => t.name === tab)?.columns ?? [];
+const gsTabOf = (scope) => $(scope === "inv" ? "gsInvTab" : "gsOrdTab");
+
+// Every select of a scope: the columns of the tab chosen, set to the matched one.
+function gsFill(scope, fields) {
+  const cols = gsCols(gsTabOf(scope).value);
+  for (const r of GS_ROWS.filter((x) => x.scope === scope)) {
+    const sel = gsForm.elements[r.name];
+    const f = fields[r.key] ?? { letter: "", conf: "none" };
+    sel.replaceChildren(new Option(r.required ? "Choose a column" : "Not used", ""), ...cols.map((c) => new Option(clip(`${c.letter} · ${c.header || "(no header)"}`), c.letter)));
+    sel.value = f.letter;
+    setTag($(`gs-c-${r.name}`), f.conf, r.required);
+  }
+}
+
+// The tab chosen in one tab select is not offered in the other.
+function gsLockTabs() {
+  for (const scope of ["inv", "ord"]) {
+    for (const o of gsTabOf(scope).options) o.disabled = !!o.value && o.value === gsTabOf(scope === "inv" ? "ord" : "inv").value;
+  }
+}
+
+// Checks what the form can't say by itself and keeps the notice, the counts and Add sheet in step.
+// Returns the required columns still missing, per scope.
+function gsValidate() {
+  const ordOn = !!$("gsOrdTab").value;
+  const miss = { inv: [], ord: [] };
+  for (const r of GS_ROWS) {
+    const sel = gsForm.elements[r.name];
+    const on = r.scope === "inv" || ordOn;
+    sel.required = !!r.required && on;
+    const dupe = on && sel.value && GS_ROWS.some((o) => o !== r && o.scope === r.scope && gsForm.elements[o.name].value === sel.value);
+    const empty = sel.required && !sel.value;
+    sel.setCustomValidity(empty ? `Choose a column for ${r.label}.` : dupe ? "Each field needs its own column." : "");
+    if (empty) miss[r.scope].push(r.label);
+  }
+  $("gsInvTab").setCustomValidity($("gsInvTab").value ? "" : "Choose the Inventory tab.");
+  checkName($("gsName"));
+  $("gsOrdRowWrap").hidden = $("gsOrdCols").hidden = !ordOn;
+  $("gsOrdRow").required = ordOn;
+  const optional = COLUMNS.filter((c) => c.optional);
+  $("gsInvCount").textContent = `${optional.filter((c) => gsForm.elements[c.key].value).length} of ${optional.length} set`;
+  $("gsOrdCount").textContent = `${ORDER_COLS.filter((c) => gsForm.elements[`oc_${c.key}`].value).length} of ${ORDER_COLS.length} set`;
+
+  const list = (m) => (m.length > 1 ? `${m.slice(0, -1).join(", ")} and ${m.at(-1)}` : m[0]);
+  const parts = [["Inventory", miss.inv], ["Orders", miss.ord]].filter(([, m]) => m.length);
+  const text = parts.length ? `Pick a column for ${parts.map(([scope, m]) => list(m) + (parts.length > 1 ? ` (${scope})` : "")).join(", ")} to continue.` : "";
+  setNotice($("gsMissing"), text);
+  const go = $("gsGo");
+  go.setAttribute("aria-disabled", String(!!text));
+  if (text) go.setAttribute("aria-describedby", "gsMissing");
+  else go.removeAttribute("aria-describedby");
+  if (!text && gsWasMissing) $("gsLive").textContent = "All required columns are set.";
+  gsWasMissing = !!text;
+  return miss;
+}
+
+function gsShowMap() {
+  const d = gsDraft;
+  gsWasMissing = false;
+  $("gsInvTab").replaceChildren(new Option("Choose a tab", ""), ...d.tabs.map((t) => new Option(clip(t.name), t.name)));
+  $("gsOrdTab").replaceChildren(new Option("Not used", ""), ...d.tabs.map((t) => new Option(clip(t.name), t.name)));
+  $("gsInvTab").value = d.inv.tab;
+  $("gsOrdTab").value = d.ord.tab;
+  $("gsInvRow").value = d.inv.startRow;
+  $("gsOrdRow").value = d.ord.startRow;
+  $("gsName").value = d.title.slice(0, 40);
+  $("gsRegion").value = d.region;
+  $("gsSaveNotice").hidden = true;
+  setTag($("gsInvTabC"), d.inv.tabConf, true);
+  setTag($("gsOrdTabC"), d.ord.tabConf, false);
+  gsLockTabs();
+  gsFill("inv", d.inv.fields);
+  gsFill("ord", d.ord.fields);
+
+  const ai = d.method === "ai";
+  const method = ai ? "Mapped with AI" : "Mapped by matching headers";
+  $("gsMethod").dataset.tone = ai ? "blue" : "grey";
+  $("gsMethod").innerHTML = (ai ? svgIcon(ICONS.sparkle, 12) : "") + method;
+  $("gsAiInfo").hidden = !ai;
+  $("gsReason").textContent = GS_REASONS[d.reason] ?? "";
+  $("gsReason").hidden = !$("gsReason").textContent;
+  $("gsRetryAi").hidden = !GS_RETRY.includes(d.reason);
+  const sk = d.skipped;
+  $("gsSkipped").hidden = !sk.length;
+  $("gsSkipped").textContent = `Skipped ${sk.length} empty ${sk.length === 1 ? "tab" : "tabs"}: ${sk.slice(0, 3).join(", ")}${sk.length > 3 ? ` and ${sk.length - 3} more` : ""}.`;
+  $("gsInvMore").open = false;
+
+  const miss = gsValidate();
+  $("gsOrdCols").open = !!d.ord.tab && miss.ord.length > 0;
+  const rows = GS_ROWS.filter((r) => r.scope === "inv" || d.ord.tab);
+  const found = rows.filter((r) => gsForm.elements[r.name].value).length;
+  const need = miss.inv.length + miss.ord.length;
+  $("gsLive").textContent = `${method}. ${found} of ${rows.length} columns matched.${need ? ` ${need} required ${need === 1 ? "column needs" : "columns need"} a match.` : ""}`;
+  $("gsName").focus();
+}
+
+// A tab changed: its columns are matched again by title (no AI) and the selects that moved flash.
+function gsTabChanged(scope) {
+  const name = gsTabOf(scope).value;
+  const els = GS_ROWS.filter((r) => r.scope === scope).map((r) => gsForm.elements[r.name]);
+  const before = els.map((el) => el.value);
+  gsFill(scope, name ? matchTab({ headers: gsCols(name).map((c) => c.header) }, scope === "inv" ? "inventory" : "orders") : {});
+  const changed = els.filter((el, i) => el.value !== before[i]);
+  for (const el of changed) el.dataset.flash = "";
+  setTimeout(() => changed.forEach((el) => el.removeAttribute("data-flash")), 600);
+  const row = gsMeta.tabs.find((t) => t.title === name)?.startRow;
+  if (row) $(scope === "inv" ? "gsInvRow" : "gsOrdRow").value = row;
+  setTag($(scope === "inv" ? "gsInvTabC" : "gsOrdTabC"), name ? "yours" : "none", scope === "inv");
+  gsLockTabs();
+  const miss = gsValidate();
+  if (scope === "ord") $("gsOrdCols").open = !!name && miss.ord.length > 0;
+  $("gsLive").textContent = `${scope === "inv" ? "Inventory" : "Orders"} tab changed. Columns matched again.`;
+}
+
+async function gsSave() {
+  const id = gsDraft.id;
+  setNotice($("gsSaveNotice"), "");
+  if (sheets.some((s) => s.id === id)) return setNotice($("gsSaveNotice"), "That sheet is already added.");
+  const sheet = { id, ...read(gsForm, GS_KEYS) };
+  if (sheet.oTab) sheet.oCols = Object.fromEntries(ORDER_COLS.map((c) => [c.key, gsForm.elements[`oc_${c.key}`].value]));
+  else {
+    delete sheet.oTab;
+    delete sheet.oRow;
+  }
+  gsSaving = true;
+  $("gsMap").disabled = true;
+  $("gsCancel").setAttribute("aria-disabled", "true");
+  gsWait(true, "Adding...");
+  const err = await persist([...sheets, sheet], id);
+  if (err) {
+    gsSaving = false;
+    $("gsMap").disabled = false;
+    $("gsCancel").removeAttribute("aria-disabled");
+    gsWait(false);
+    setNotice($("gsSaveNotice"), `Couldn't save: ${err.message}`);
+    return $("gsGo").focus();
+  }
+  render();
+  gsAfter = () => chipOf(id)?.querySelector(".select");
+  $("gsDialog").close();
+  toast(`Added “${sheet.name}”.`, { action: { label: "Open sheet", onClick: () => window.open(sheetUrl(id), "_blank", "noopener") } });
+}
+
+/* Wiring */
+
+const gsRowEl = ({ name, label, optional }) => {
+  const tr = document.createElement("tr");
+  tr.setAttribute("role", "row");
+  tr.innerHTML =
+    `<th role="rowheader" scope="row"><label for="gs-${name}">${label}${optional ? ' <span class="muted">(optional)</span>' : ""}</label></th>` +
+    `<td role="cell"><select id="gs-${name}" name="${name}" aria-describedby="gs-c-${name}"></select></td>` +
+    `<td role="cell" class="conf"><span id="gs-c-${name}" class="tag"></span></td>`;
+  return tr;
+};
+$("gsInvRows").replaceChildren(...GS_ROWS.filter((r) => r.scope === "inv" && r.required).map(gsRowEl));
+$("gsInvMoreRows").replaceChildren(...GS_ROWS.filter((r) => r.scope === "inv" && !r.required).map(gsRowEl));
+$("gsOrdRows").replaceChildren(...GS_ROWS.filter((r) => r.scope === "ord").map((r) => gsRowEl({ ...r, optional: !r.required })));
+$("gsRegion").replaceChildren(new Option("Not set", ""), ...regionOptions());
+
+gsForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (gsSaving) return;
+  if (!$("gsMap").hidden) gsSave();
+  else if (!$("gsChoose").hidden) gsContinue();
+});
+
+gsForm.addEventListener("input", () => $("gsMap").hidden || gsValidate());
+
+gsForm.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.name === "gsPick") {
+    gsPicked = el.value;
+    $("gsPaste").value = "";
+    gsNotify("", "");
+    $("gsGo").disabled = false;
+  } else if (el.matches("table.map select")) {
+    const r = GS_ROWS.find((x) => x.name === el.name);
+    setTag($(`gs-c-${r.name}`), el.value ? "yours" : "none", r.required);
+    $("gsRetryAi").hidden = true;
+    gsValidate();
+  } else if (el === $("gsInvTab") || el === $("gsOrdTab")) {
+    $("gsRetryAi").hidden = true;
+    gsTabChanged(el === $("gsInvTab") ? "inv" : "ord");
+  }
+});
+
+// A message can't point at a field inside a closed section, so open the section first.
+gsForm.addEventListener(
+  "invalid",
+  (e) => {
+    const section = e.target.closest("details");
+    if (section) section.open = true;
+  },
+  true,
+);
+
+$("gsSearch").addEventListener("input", gsRenderList);
+$("gsPaste").addEventListener("input", () => {
+  if ($("gsPaste").value) {
+    gsPicked = "";
+    const radio = $("gsList").querySelector(":checked");
+    if (radio) radio.checked = false;
+  }
+  $("gsGo").disabled = !(gsPicked || $("gsPaste").value.trim());
+});
+
+$("gsNotice").addEventListener("click", async (e) => {
+  const { act, id } = e.target.closest("[data-act]")?.dataset ?? {};
+  if (act === "retry") gsContinue();
+  if (act === "list") gsLoad();
+  if (act === "allow") {
+    await send({ action: "signIn" });
+    gsLoad();
+  }
+  if (act === "show") {
+    gsAfter = () => chipOf(id)?.querySelector(".select");
+    $("gsDialog").close();
+  }
+});
+
+$("gsSkipAi").addEventListener("click", () => gsMatch(true));
+$("gsRetryAi").addEventListener("click", () => {
+  gsPane("gsRead");
+  gsMatch(false);
+});
+
+$("gsBack").addEventListener("click", () => {
+  gsRun++;
+  gsDraft = null;
+  gsPane("gsChoose");
+  ($("gsList").querySelector(":checked") ?? $("gsPaste")).focus();
+});
+
+$("gsCancel").addEventListener("click", () => gsSaving || $("gsDialog").close());
+$("gsDialog").addEventListener("cancel", (e) => gsSaving && e.preventDefault());
+$("gsDialog").addEventListener("close", () => {
+  gsOpenId++;
+  gsRun++;
+  gsStopTimers();
+  (gsAfter?.() ?? gsOpener)?.focus();
+  gsAfter = null;
+});
+
+/* AI tab: the Gemini key. It lives in storage.local only: never synced, never exported, never shown back. */
+
+const keyInput = $("geminiKey");
+let hasKey = false;
+
+function renderKey(has) {
+  hasKey = has;
+  keyInput.placeholder = has ? "Saved. Paste a new key to replace it." : "Paste your Gemini API key";
+  $("keyState").innerHTML = has
+    ? 'Key saved on this device. <button type="button" class="link-btn">Remove key</button>'
+    : 'No key saved. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get one from Google AI Studio</a>.';
+}
+
+// A pasted key often carries a space or a newline at its end: it is trimmed when saved.
+keyInput.addEventListener("input", () => {
+  const v = keyInput.value.trim();
+  keyInput.setCustomValidity(!v || /^\S{20,200}$/.test(v) ? "" : "That doesn't look like an API key.");
+});
+
+$("keyForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await chrome.storage.local.set({ geminiKey: keyInput.value.trim() });
+  } catch {
+    return toast("Couldn't save your key.", { kind: "error", action: { label: "Retry", onClick: () => $("keyForm").requestSubmit() } });
+  }
+  keyInput.value = "";
+  renderKey(true);
+  flash("Saved");
+  toast("Key saved.");
+});
+
+$("keyState").addEventListener("click", async (e) => {
+  if (!e.target.closest(".link-btn")) return;
+  await chrome.storage.local.remove("geminiKey");
+  renderKey(false);
+  toast("Key removed.");
+  keyInput.focus();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => area === "local" && changes.geminiKey && renderKey(Boolean(changes.geminiKey.newValue)));
+chrome.storage.local.get({ geminiKey: "" }).then(({ geminiKey }) => renderKey(Boolean(String(geminiKey).trim())));
 
 /* Settings backup */
 

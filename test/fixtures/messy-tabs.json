@@ -1,0 +1,29 @@
+[
+  {
+    "title": "Products Catalog",
+    "headers": [
+      "  SKU  ",
+      "Item Title",
+      "Source URL",
+      "   Cost price (GBP)   ",
+      "",
+      "Selling Price",
+      "Net Margin %",
+      "Listing Status",
+      "Picture"
+    ],
+    "sample": [
+      [
+        "SKU-99",
+        "Synthetic Portable LED Desk Lamp",
+        "https://example.com/source/item-77",
+        "6.50",
+        "",
+        "15.99",
+        "0.35",
+        "Draft",
+        "https://example.com/images/lamp.png"
+      ]
+    ]
+  }
+]

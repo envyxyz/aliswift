@@ -27,6 +27,7 @@ You can keep several sheets, each with its own column layout and pricing rules. 
 
 - **One click** from the green button on the product page, or from the toolbar popup
 - **Auto sheets**: AliSwift creates a Google Sheet for you, set up for eBay UK or eBay US with fee, profit and margin formulas, status lists and an Orders tab
+- **Import from Google Sheets**: pick one of your own sheets (or paste a link) and AliSwift reads its tabs and column titles and fills in the sheet settings. It matches titles by itself, or with AI if you add your own Gemini key in Settings, then shows every match for you to check or change. It only reads your sheet
 - **Multiple sheets**, each with its own columns, tab name and pricing
 - **SKUs** added with each product, matching the numbering of the sheet it creates
 - **Settings backup**: export and import your sheets and settings as a file
@@ -36,7 +37,7 @@ You can keep several sheets, each with its own column layout and pricing rules. 
 - **Title cleanup**: cap the word count and drop noise words like "wholesale" or "lot"
 - **Safe writes**: titles go into the sheet as plain text, so a seller cannot sneak a spreadsheet formula into your sheet
 - **Light and dark** theme that follows your system
-- **Private**: no tracking, no analytics, nothing leaves your browser except the write to your own sheet ([details](PRIVACY.md))
+- **Private**: no tracking, no analytics, nothing leaves your browser except the write to your own sheet, and AI column matching if you add your own Gemini key ([details](PRIVACY.md))
 
 ## Screenshots
 
