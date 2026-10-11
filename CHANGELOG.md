@@ -12,7 +12,7 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 - The new sheet has a fee settings strip (hidden), per-product fee, net profit and margin formulas, a live exchange rate with an optional backup rate, status drop-downs, a QTY column on Orders and a Dashboard with totals. Cancelled orders are left out of the totals. Every fee line is rounded to the penny, as eBay invoices it. The international fee and tax on fees are defaults to check against a real order: they are editable cells with a note.
 - **SKUs.** A sheet with a SKU column gets the SKU the template would show for the new row ("Added as SKU-31" on the button and in the popup). If that SKU is taken, the highest number plus one is used.
 - Edit sheet gains Marketplace, optional SKU, Status, Image, Profit and Margin columns with a SKU prefix, an Orders tab with its column map, and a "Use AliSwift template layout" button that fills all of them for a sheet you made by hand.
-- **Settings backup.** Export settings saves your sheets and settings to a file; Import settings replaces them from a file, after a confirmation that shows the counts. Nothing from local storage (no keys, no cached data) is included.
+- **Settings backup.** Export settings saves your sheets and settings to a file; Import settings replaces them from a file, after a confirmation that shows the counts. The products in your on-device library are included, and an import only adds them. Nothing else from local storage (no keys, no cached data) is.
 - If the setup of a new sheet fails, the dialog offers "Retry setup" on the same file instead of leaving half a sheet behind.
 
 ### Changed

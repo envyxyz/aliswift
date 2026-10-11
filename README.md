@@ -81,7 +81,7 @@ Then do steps 2 to 4 above and pick the cloned folder. There is nothing to build
 4. Click the pencil next to the sheet and check the column letters match your sheet. Defaults: keywords in B, link in C, cost price in D, sell price in E. **Use AliSwift template layout** fills every field for a sheet shaped like the Auto one.
 5. Open the **Pricing** tab and pick formula or margin pricing. Settings save as you change them.
 
-**Moving to another computer.** On the **General** tab, **Export settings** saves your sheets and settings to `aliswift-settings.json`. **Import settings** loads that file. Your sheets themselves live in Google Sheets and are not part of the file.
+**Moving to another computer.** On the **General** tab, **Export settings** saves your sheets and settings to `aliswift-settings.json`. **Import settings** loads that file. It also carries the products saved to your on-device library; an import adds them and never removes any. Your sheets themselves live in Google Sheets and are not part of the file.
 
 **Updating from an older build.** The sign-in key was rotated, so the extension ID changed and Chrome treats the new build as a new extension with empty settings. Export your settings before updating, then import them and sign in again. Your sheets are not affected.
 

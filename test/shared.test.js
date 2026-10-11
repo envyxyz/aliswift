@@ -23,6 +23,8 @@ const {
   libAdd,
   libSetStatus,
   libTake,
+  libMerge,
+  LIBRARY_MAX,
   libToProducts,
   findRow,
   expandMerges,
@@ -443,4 +445,40 @@ test("cleanPatch passes only known fields and refuses to clear a cell", () => {
   for (const bad of [{}, undefined, { status: "Gone" }, { tracking: "" }, { notes: "   " }, { status: "Shipped", tracking: "" }]) {
     assert.throws(() => cleanPatch(bad), Error, JSON.stringify(bad));
   }
+});
+
+test("findOrderRows: a blank order number names no order, only key.row reaches a row without one, an empty row is never an order", () => {
+  const rows = [
+    { row: 2, no: "12-1", sku: "SKU-01" },
+    { row: 3, no: "", sku: "SKU-02" }, // a SKU but no number
+    { row: 4, no: undefined, sku: undefined }, // completely empty
+    { row: 5, no: "12-2", sku: "SKU-01" },
+  ];
+  for (const blank of ["", "  ", undefined, null]) assert.deepEqual(findOrderRows(rows, blank), [], String(blank));
+  assert.deepEqual(findOrderRows(rows, "", { sku: "SKU-02" }), []); // a SKU alone does not make it addressable
+  assert.deepEqual(findOrderRows(rows, "", { row: 3 }), [3]);
+  assert.deepEqual(findOrderRows(rows, "", { row: 4 }), []);
+  assert.deepEqual(findOrderRows(rows, "12-1", { row: 3 }), []);
+});
+
+const savedItem = (n, extra) => ({ id: `id${n}`, sku: `L-0${n}`, title: `item ${n}`, link: `https://a/${n}`, price: 2, salePrice: null, image: "", currency: "PKR", status: "Not Listed", savedAt: n, ...extra });
+
+test("validateImport carries the library, cleaned, and refuses a damaged or oversized one; no library key means none returned", () => {
+  const sync = { sheets: [], activeSheetId: "" };
+  const ok = validateImport(backup(sync, { library: [savedItem(1, { image: "http://x/a.jpg", status: "Gone", evil: 1 }), savedItem(2, { status: "Listed" })] }));
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.library, [savedItem(1), savedItem(2, { status: "Listed" })]); // http image, bad status and unknown key are dropped
+  assert.equal("library" in validateImport(backup(sync)), false);
+  for (const library of ["x", {}, [null], [savedItem(1, { id: "" })], [savedItem(1, { sku: 5 })], [savedItem(1), savedItem(2, { id: "id1" })]]) {
+    assert.equal(validateImport(backup(sync, { library })).reason, "structure", JSON.stringify(library));
+  }
+  assert.equal(validateImport(backup(sync, { library: Array.from({ length: LIBRARY_MAX + 1 }, (_, i) => savedItem(i)) })).reason, "size");
+});
+
+test("libMerge only adds: an id already here is skipped, a taken SKU gets the next free one", () => {
+  const here = [savedItem(1), savedItem(2)];
+  const merged = libMerge(here, [savedItem(2, { title: "changed" }), savedItem(1, { id: "other", title: "from file" }), savedItem(3, { sku: "L-08" })]);
+  assert.deepEqual(merged.map((x) => [x.id, x.sku, x.title]), [["id1", "L-01", "item 1"], ["id2", "L-02", "item 2"], ["other", "L-03", "from file"], ["id3", "L-08", "item 3"]]);
+  assert.equal(here.length, 2, "the library on this device was not changed");
+  assert.deepEqual(libMerge([], [savedItem(1), savedItem(2)]).map((x) => x.sku), ["L-01", "L-02"]);
 });

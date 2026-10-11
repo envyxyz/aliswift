@@ -20,6 +20,7 @@ const handlers = {
   addOrder: { pagesOnly: true, run: (request) => addOrder(request.sheetId, request.order) },
   updateOrder: { pagesOnly: true, run: (request) => updateOrder(request) },
   moveLocal: { pagesOnly: true, run: (request) => moveLocal(request.sheetId) },
+  importLibrary: { pagesOnly: true, run: (request) => importLibrary(request.library) },
   listSpreadsheets: { pagesOnly: true, run: () => listSpreadsheets() },
   readSpreadsheetMeta: { pagesOnly: true, run: (request) => readSpreadsheetMeta(request.id) },
   mapSheet: { pagesOnly: true, run: (request) => mapSheet(request.data) },
@@ -427,7 +428,7 @@ async function listOrders(sheetId) {
     orders.push({
       row: sheet.oRow + i, orderNumber, sku, product: names.get(sku.toLowerCase()) ?? "", date: fromSheetDate(c.date[i]),
       qty: Number(c.qty[i]) > 0 ? Number(c.qty[i]) : 1, sell: num(c.sell[i]), cost: num(c.cost[i]), profit: num(c.profit[i]),
-      status: text(c.status[i]), tracking: text(c.track[i]), notes: text(c.notes[i]),
+      status: text(c.status[i]) || "Pending", tracking: text(c.track[i]), notes: text(c.notes[i]),
     });
   }
   return { success: true, orders };
@@ -503,8 +504,12 @@ async function moveLocal(sheetId) {
         rate = rates[rec.currency];
       }
       if (!rate) needRate++;
-      // ponytail: the .99 rounding and extraCost are not re-applied on a converted move.
-      else items.push(rate === 1 ? rec : { ...rec, price: rec.price == null ? null : round2(rec.price / rate), salePrice: rec.salePrice == null ? null : round2(rec.salePrice / rate) });
+      else {
+        const at = (v) => (v == null ? null : round2(v / rate));
+        const item = rate === 1 ? rec : { ...rec, price: at(rec.price), salePrice: at(rec.salePrice) };
+        // A library save keeps the page's price as shown (no sell price): the sheet's own rules price it here, in its currency.
+        items.push(rec.salePrice == null && item.price != null ? { ...item, ...priceProduct(item.price, 0, sheet) } : item);
+      }
     }
 
     const { fresh, dupes, skus } = await writeRows(sheet, items, true);
@@ -520,6 +525,18 @@ async function moveLocal(sheetId) {
       await chrome.storage.local.remove(kept.map(([k]) => k));
     }
     return { success: true, moved: fresh.length, skipped: dupes.length, needRate };
+  });
+}
+
+// Adds the products of an imported backup to the library. Never replaces or removes any.
+function importLibrary(incoming) {
+  const items = cleanLibrary(incoming);
+  if (!items) throw new Error("That library isn't valid.");
+  return enqueue(async () => {
+    const { library } = await chrome.storage.local.get({ library: [] });
+    const lib = libMerge(library, items);
+    await chrome.storage.local.set({ library: lib });
+    return { success: true, added: lib.length - library.length };
   });
 }
 
