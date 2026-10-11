@@ -387,6 +387,7 @@ async function listProducts(sheetId) {
 // Remove is this with "Discontinued", restore with "Not Listed". There is no delete anywhere.
 async function setStatus(sheetId, key, status) {
   if (!PRODUCT_STATUSES.includes(status)) throw new Error("Unknown status.");
+  if (!key || !(key.sku || key.link || key.title)) throw new Error("Say which product to change.");
   if (sheetId === LOCAL) {
     return enqueue(async () => {
       const { library } = await chrome.storage.local.get({ library: [] });
@@ -688,7 +689,8 @@ function readCode(error) {
 
 // The user's own spreadsheets, newest first, up to 100 ("truncated" when there are more). Needs the Drive
 // metadata scope: names, ids and dates only, never a file's content. A reply code is "scope" (refused: the scope
-// isn't granted), "signin" or "network".
+// isn't granted), "api-disabled" (the Drive API is off in the app's Google Cloud project, so asking for the scope
+// again would not help), "signin" or "network".
 async function listSpreadsheets() {
   const query = {
     q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
@@ -706,16 +708,22 @@ async function listSpreadsheets() {
     };
   } catch (error) {
     const code = readCode(error);
-    throw importError(code === "signin" ? "signin" : code === null && error.status === 403 ? "scope" : "network", error.message);
+    const refused = code === null && error.status === 403 ? (/has not been used|is disabled|SERVICE_DISABLED/i.test(error.message) ? "api-disabled" : "scope") : "";
+    throw importError(code === "signin" ? "signin" : refused || "network", error.message);
   }
 }
 
 // The tabs of one spreadsheet and the first rows of each (up to 20 tabs, A to Z, 4 rows): { title, tabs, skipped }
-// with each tab as prepareTabs makes it. A reply code is forbidden, xlsx (an Excel file opened in Sheets),
+// with each tab as prepareTabs makes it, plus `formulas`: the columns whose first data rows hold formulas (read
+// again as typed), which AliSwift must not write over. A reply code is forbidden, xlsx (an Excel file opened in Sheets),
 // noheaders (no tab has column titles), network, timeout, rate, signin or other.
 async function readSpreadsheetMeta(id) {
   if (!SHEET_ID.test(id ?? "")) throw importError("other", "That doesn't look like a Google Sheets link or ID.");
   const signal = AbortSignal.timeout(IMPORT_TIMEOUT);
+  const failure = (error) => {
+    const code = readCode(error) ?? ([403, 404].includes(error.status) ? "forbidden" : /not supported for this document/i.test(error.message) ? "xlsx" : "other");
+    return importError(code, error.message);
+  };
   let title;
   let raw;
   try {
@@ -726,11 +734,17 @@ async function readSpreadsheetMeta(id) {
     const { valueRanges = [] } = names.length ? await sheetsFetch(`/${id}/values:batchGet?${ranges}`, { signal }) : {};
     raw = names.map((name, i) => ({ title: name, rows: valueRanges[i]?.values ?? [] }));
   } catch (error) {
-    const code = readCode(error) ?? ([403, 404].includes(error.status) ? "forbidden" : /not supported for this document/i.test(error.message) ? "xlsx" : "other");
-    throw importError(code, error.message);
+    throw failure(error);
   }
   const { tabs, skipped } = prepareTabs(raw);
   if (!tabs.length) throw importError("noheaders", "No tab has column titles.");
+  try {
+    const ranges = tabs.map((t) => `ranges=${encodeURIComponent(`${quote(t.title)}!A${t.startRow}:Z${t.startRow + MAX_SAMPLES - 1}`)}`).join("&");
+    const { valueRanges = [] } = await sheetsFetch(`/${id}/values:batchGet?valueRenderOption=FORMULA&${ranges}`, { signal: AbortSignal.timeout(IMPORT_TIMEOUT) });
+    tabs.forEach((t, i) => (t.formulas = formulaCols(valueRanges[i]?.values)));
+  } catch (error) {
+    throw failure(error);
+  }
   return { success: true, id, title, tabs, skipped };
 }
 
@@ -750,7 +764,8 @@ async function mapSheet(data) {
       if (!Object.keys(mapping.inv.fields).length) throw importError("bad-output", "Nothing usable in the answer.");
       ai = mapping;
     } catch (error) {
-      reason = GEMINI_CODES.includes(error.code) ? error.code : "bad-output";
+      // A 404 is a model name Gemini doesn't know; the reply keeps code "bad-output" for the listing page.
+      reason = error.status === 404 ? "bad-model" : GEMINI_CODES.includes(error.code) ? error.code : "bad-output";
     }
   }
   const draft = buildDraft({

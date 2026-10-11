@@ -447,11 +447,12 @@
                 <button type="button" class="info" aria-label="About AI matching" aria-describedby="tip-gs-ai">
                   <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
                 </button>
-                <span id="tip-gs-ai" role="tooltip" class="tip">AI saw your tab names, column titles and up to 3 sample rows per tab, without columns that look like personal data (names, addresses, emails, notes). It used your own Gemini key.</span>
+                <span id="tip-gs-ai" role="tooltip" class="tip">AI saw your tab names, column titles and up to 3 sample rows per tab. AliSwift tries to leave out columns that look personal (names, addresses, emails, notes) and sends sample values only for columns it recognises. It used your own Gemini key.</span>
               </span>
               <span id="gsReason" class="note" hidden></span>
               <button type="button" class="link-btn" id="gsRetryAi" hidden>Try AI again</button>
             </div>
+            <p id="gsFormulaNote" class="note" hidden>Columns that hold formulas are never written over: optional ones stay unused, and a sell price isn't added to the sheet.</p>
             <div id="gsMissing" class="notice" data-tone="warn" role="status" hidden>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" /></svg>
               <div></div>

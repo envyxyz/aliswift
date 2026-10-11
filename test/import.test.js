@@ -17,7 +17,7 @@ const KEY = "AIzaSyFAKE-KEY-0123456789abcdefghij";
 const ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms";
 const OPTIONS = "chrome-extension://abc/options/options.html";
 
-function setup({ local = {}, sync = {}, tokens = ["token"], failure = "OAuth2 not granted or revoked.", drive, meta, values, gemini = [] } = {}) {
+function setup({ local = {}, sync = {}, tokens = ["token"], failure = "OAuth2 not granted or revoked.", drive, meta, values, formulas, gemini = [] } = {}) {
   const calls = [];
   const store = { ...local };
   const synced = { ...sync };
@@ -43,6 +43,7 @@ function setup({ local = {}, sync = {}, tokens = ["token"], failure = "OAuth2 no
   const route = (url) => {
     if (url.startsWith("https://www.googleapis.com/drive/")) return drive;
     if (url.startsWith("https://generativelanguage.googleapis.com/")) return queue.shift();
+    if (url.includes("valueRenderOption=FORMULA")) return formulas ?? { json: { valueRanges: [] } };
     return url.includes("/values:batchGet") ? values : meta;
   };
   const ctx = vm.createContext({
@@ -130,7 +131,8 @@ test("listSpreadsheets says why it failed: scope, sign-in or network", async () 
     return r.code;
   };
   assert.equal(await code({ drive: failure(403, "Request had insufficient authentication scopes.") }), "scope");
-  assert.equal(await code({ drive: failure(403, "Google Drive API has not been used in project 1 before or it is disabled.") }), "scope");
+  // The Drive API switched off in the app's Cloud project is not a scope problem: asking again would loop.
+  assert.equal(await code({ drive: failure(403, "Google Drive API has not been used in project 1 before or it is disabled. Enable it by visiting x.") }), "api-disabled");
   assert.equal(await code({ tokens: [null] }), "signin");
   assert.equal(await code({ local: { authOff: true } }), "signin");
   assert.equal(await code({ drive: { throw: new TypeError("Failed to fetch") } }), "network");
@@ -150,8 +152,12 @@ test("readSpreadsheetMeta reads the tab names, then the first 4 rows of each, an
   assert.equal(meta.title, "My store");
   assert.deepEqual(meta.skipped, ["Dashboard"]);
   assert.deepEqual(meta.tabs.map((x) => [x.title, x.startRow, x.headers.length]), [["Inventory", 3, 15], ["Orders", 2, 12]]);
-  assert.equal(t.calls.length, 2);
+  assert.equal(t.calls.length, 3);
   assert.ok(t.calls.every((c) => c.method === "GET" && c.body === undefined && c.timed));
+  // The third call reads the first data rows again as typed, so formulas can be told from values.
+  assert.ok(t.calls[2].url.startsWith(`https://sheets.googleapis.com/v4/spreadsheets/${ID}/values:batchGet?valueRenderOption=FORMULA&`));
+  assert.ok(t.calls[2].url.includes("ranges='Inventory'!A3:Z5&ranges='Orders'!A2:Z4"));
+  assert.deepEqual(meta.tabs.map((x) => x.formulas), [[], []]);
   assert.equal(t.calls[0].url, `https://sheets.googleapis.com/v4/spreadsheets/${ID}?fields=properties.title,sheets.properties(title,sheetType)`);
   assert.ok(t.calls[1].url.startsWith(`https://sheets.googleapis.com/v4/spreadsheets/${ID}/values:batchGet?`));
   assert.ok(t.calls[1].url.includes("ranges='Inventory'!A1:Z4&ranges='Orders'!A1:Z4"));
@@ -274,7 +280,7 @@ const AI_FAILURES = [
   ["an answer that is not JSON", [answer("sorry, I cannot help")], "bad-output", 1],
   ["an empty answer", [{ json: {} }], "bad-output", 1],
   ["a blocked answer", [{ json: { promptFeedback: { blockReason: "SAFETY" } } }], "bad-output", 1],
-  ["an unknown model (404)", [failure(404, "models/x is not found")], "bad-output", 1],
+  ["an unknown model (404)", [failure(404, "models/x is not found")], "bad-model", 1],
   ["a rejected request (400)", [failure(400, "Invalid JSON payload received.")], "bad-output", 1],
   ["JSON that is not an object", [answer([1, 2])], "bad-output", 1],
   ["a tab that does not exist", [answer({ inventoryTab: "Nope", inventory: { skuCol: { column: "A", header: "SKU" } } })], "bad-output", 1],
@@ -350,7 +356,7 @@ test("personal columns, cells and the spreadsheet's name never reach Gemini", as
   const [tab] = JSON.parse(sent).tabs;
   assert.equal(tab.title, "Customer Orders");
   assert.deepEqual(tab.columns, [{ letter: "A", header: "Order ID" }, { letter: "B", header: "Product Name" }, { letter: "I", header: "Total" }]);
-  assert.deepEqual(tab.sample[0], { A: "ORD-5501", B: "Synthetic Ceramic Mug", I: "12.00" });
+  assert.deepEqual(tab.sample[0], { A: "ORD-5501", B: "Synthetic Ceramic Mug" }); // "Total" is not a title it knows: no sample cells
 });
 
 test("the Gemini helper never puts the key in a message, in a URL or in a reply", async () => {
@@ -368,6 +374,15 @@ test("the Gemini helper never puts the key in a message, in a URL or in a reply"
   const free = setup({ local: { geminiKey: KEY }, gemini: [answer({ ok: 1 })] });
   assert.deepEqual(plain(await free.ctx.callGemini({ user: "u" })), { ok: 1 });
   assert.equal(JSON.parse(free.gemini()[0].body).generationConfig.responseMimeType, undefined);
+});
+
+test("the AI tab refuses a blank key, and the dialog's reduced-motion rule comes after the animations it turns off", () => {
+  const js = read("options/options.js");
+  assert.match(js, /const key = keyInput\.value\.trim\(\);\s*if \(!key\)/); // a blank key never overwrites the saved one
+  // Same specificity: the later rule wins, so the reduced-motion block must come last.
+  const css = read("options/options.css");
+  const reduced = css.indexOf("@media (prefers-reduced-motion: reduce) {\n  :is(input, select)[data-flash]");
+  assert.ok(reduced > css.lastIndexOf(".gs-pane {") && reduced > css.lastIndexOf(".gs-spinner {"));
 });
 
 test("the key is saved on this device only: never in a backup, never synced, never exported", () => {
@@ -407,6 +422,28 @@ test("the import code path contains no write: no method, no body, no values:upda
   assert.deepEqual([...gem.matchAll(/https?:\/\/[^\s"'`/]+/g)].map((m) => m[0]), ["https://generativelanguage.googleapis.com"]);
 });
 
+// A sheet like AliSwift's own, with formulas in the first data row as the Sheets API gives them back (FORMULA).
+test("a column that holds formulas is left unmapped, so nothing is written over it; the template's own formulas are not a clash", async () => {
+  const formulas = { json: { valueRanges: [
+    { values: [['=IF($B3="","","SKU-"&TEXT(ROW()-2,"00"))', "", "", "", "=D3*1.7", "", "", "", "", "=E3-D3", "", "", '="Listed"', "", ""]] }, // SKU, sell price, profit, status
+    { values: [["", "", "", "", "", "=VLOOKUP(B2,Inventory!A:E,5)", "=VLOOKUP(B2,Inventory!A:D,4)", "=F2-G2", "", "", "", '="note"']] }, // sell, cost, profit, notes
+  ] } };
+  const { t, meta } = await read_({ formulas });
+  assert.deepEqual(meta.tabs.map((x) => x.formulas), [["A", "E", "J", "M"], ["F", "G", "H", "L"]]);
+  const d = (await t.ask(mapRequest(meta, { skipAi: true }))).draft;
+  assert.deepEqual(d.inv.fields.skuCol, { letter: "A", conf: "matched" }); // the template's SKU formula is written over on purpose
+  assert.deepEqual(d.inv.fields.salePriceCol, { letter: "E", conf: "matched", formula: "E" }); // kept, but the page turns the sell price off
+  assert.deepEqual(d.inv.fields.statusCol, { letter: "", conf: "none", formula: "M" });
+  assert.deepEqual(d.inv.fields.profitCol, { letter: "J", conf: "matched" }); // only read
+  assert.deepEqual(d.ord.fields.sell, { letter: "F", conf: "matched" });
+  assert.deepEqual(d.ord.fields.profit, { letter: "H", conf: "matched" });
+  assert.deepEqual(d.ord.fields.notes, { letter: "", conf: "none", formula: "L" });
+  assert.deepEqual(d.tabs.map((x) => x.formulas), [["A", "E", "J", "M"], ["F", "G", "H", "L"]]);
+  // A failed read of the formulas fails the import: without it nothing would stop a write over one.
+  const bad = await setup({ ...sheetsReplies(), formulas: failure(500, "Internal error") }).ask({ action: "readSpreadsheetMeta", id: ID });
+  assert.deepEqual([bad.success, bad.code], [false, "other"]);
+});
+
 test("the options page asks the service worker only to list, read, match and sign in, and saves through the same call as Add sheet", () => {
   const section = code(read("options/options.js"), "/* Import from Google Sheets", "/* Settings backup */");
   assert.deepEqual([...new Set([...section.matchAll(/action: "(\w+)"/g)].map((m) => m[1]))].sort(), ["listSpreadsheets", "mapSheet", "readSpreadsheetMeta", "signIn"]);
@@ -421,7 +458,7 @@ test("a whole import, listing to mapping, sends only GETs to Drive and Sheets an
   await t.ask(mapRequest(meta));
   await t.ask(mapRequest(meta, { skipAi: true }));
   const google = t.calls.filter((c) => /^https:\/\/(?:www|sheets)\.googleapis\.com\//.test(c.url));
-  assert.equal(google.length, 3);
+  assert.equal(google.length, 4); // the list, the tabs, the first rows, the first rows as typed
   for (const c of google) {
     assert.equal(c.method, "GET", c.url);
     assert.equal(c.body, undefined, c.url);
