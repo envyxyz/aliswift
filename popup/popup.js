@@ -140,6 +140,7 @@ async function init() {
 }
 
 $("settingsBtn").addEventListener("click", () => chrome.runtime.openOptionsPage());
+$("dashBtn").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard/dashboard.html") }));
 $("lockAct").addEventListener("click", () => signedIn && chrome.runtime.openOptionsPage()); // Sign in is the account button's job
 $("fxSettings").addEventListener("click", (e) => {
   e.preventDefault();

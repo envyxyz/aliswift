@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AliSwift dashboard</title>
+  <link rel="stylesheet" href="../lib/ui.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="dash-head">
+    <h1 class="dash-brand">
+      <svg class="logo" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+      AliSwift
+    </h1>
+    <div class="dash-sheet">
+      <label class="sr-only" for="sheetPicker">Sheet</label>
+      <select id="sheetPicker"></select>
+    </div>
+    <div class="dash-tools">
+      <button id="refreshBtn" class="icon-btn" type="button" aria-label="Refresh" title="Refresh">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+        </svg>
+      </button>
+      <a id="sheetLink" class="icon-btn" target="_blank" rel="noopener" aria-label="Open sheet in Google Sheets" title="Open sheet in Google Sheets">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+        </svg>
+      </a>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+      </button>
+      <div class="profile" id="profile"></div>
+    </div>
+  </header>
+
+  <main class="dash-main">
+    <div class="tabs" role="tablist" aria-label="Dashboard views">
+      <button role="tab" id="tab-products" aria-controls="panel-products" aria-selected="true" tabindex="0">Products</button>
+      <button role="tab" id="tab-orders" aria-controls="panel-orders" aria-selected="false" tabindex="-1">Orders</button>
+      <span id="tip-orders" role="tooltip" class="tip" hidden>Orders live in your Google Sheet. Sign in to use them.</span>
+    </div>
+
+    <!-- Offline notice -->
+    <div id="offline" class="notice" data-tone="warn" role="status" hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+      </svg>
+      <div>
+        <p id="offlineMsg">Showing saved copy from 14:32.</p>
+        <p class="muted">Couldn't reach Google Sheets.</p>
+      </div>
+      <button type="button" class="btn btn-quiet btn-sm" id="offlineRetry">Try again</button>
+    </div>
+
+    <!-- Library mode banner (when signed out or viewing local library) -->
+    <div id="libraryBanner" class="notice" role="status" hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
+      </svg>
+      <div id="libraryBannerText">
+        <p><strong>Your on-device library.</strong></p>
+        <p class="muted" id="libraryBannerSub">Products saved while signed out stay here on this computer.</p>
+      </div>
+      <button type="button" class="btn btn-quiet btn-sm" id="libraryBannerAction">Sign in</button>
+    </div>
+
+    <!-- Panel Products -->
+    <div role="tabpanel" id="panel-products" aria-labelledby="tab-products" class="panel">
+      <div class="toolbar">
+        <input type="search" id="pSearch" class="search" placeholder="Search name or SKU" aria-label="Search products">
+        <div class="segmented" id="pStatusGroup" data-scroll role="radiogroup" aria-label="Product status">
+          <label><input type="radio" name="pStatus" value="active" checked><span>Active <small id="cntActive">0</small></span></label>
+          <label><input type="radio" name="pStatus" value="Not Listed"><span>Not listed <small id="cntNotListed">0</small></span></label>
+          <label><input type="radio" name="pStatus" value="Draft"><span>Draft <small id="cntDraft">0</small></span></label>
+          <label><input type="radio" name="pStatus" value="Listed"><span>Listed <small id="cntListed">0</small></span></label>
+          <label><input type="radio" name="pStatus" value="Removed"><span>Removed <small id="cntRemoved">0</small></span></label>
+        </div>
+        <label class="inline"><input type="checkbox" id="pListing"> Has listing</label>
+        <select id="pSort" class="sort" aria-label="Sort products">
+          <option value="new">Newest first</option>
+          <option value="name">Name, A to Z</option>
+          <option value="price">Sell price, high to low</option>
+          <option value="margin">Margin, high to low</option>
+        </select>
+      </div>
+
+      <div class="results">
+        <p id="pCount">0 products</p>
+        <button type="button" class="btn btn-quiet btn-sm" id="pClear" hidden>Clear filters</button>
+      </div>
+
+      <div id="productsContainer">
+        <!-- Filled dynamically: skeleton cards, grid, or empty state -->
+      </div>
+    </div>
+
+    <!-- Panel Orders -->
+    <div role="tabpanel" id="panel-orders" aria-labelledby="tab-orders" class="panel" hidden>
+      <div class="toolbar">
+        <input type="search" id="oSearch" class="search" placeholder="Search order, SKU, product or note" aria-label="Search orders">
+        <div class="segmented" id="oStatusGroup" data-scroll role="radiogroup" aria-label="Order status">
+          <label><input type="radio" name="oStatus" value="all" checked><span>All <small id="cntAllOrders">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Pending"><span>Pending <small id="cntPending">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Ordered"><span>Ordered <small id="cntOrdered">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Shipped"><span>Shipped <small id="cntShipped">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Delivered"><span>Delivered <small id="cntDelivered">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Cancelled"><span>Cancelled <small id="cntCancelled">0</small></span></label>
+          <label><input type="radio" name="oStatus" value="Disputed"><span>Disputed <small id="cntDisputed">0</small></span></label>
+        </div>
+        <button type="button" class="btn btn-sm" id="addOrderBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          Add order
+        </button>
+      </div>
+
+      <div class="results">
+        <p id="oCount">0 orders</p>
+        <p class="totals" id="oTotals">
+          <span>Orders <b id="totOrders">0</b></span>
+          <span>Units <b id="totUnits">0</b></span>
+          <span>Revenue <b id="totRevenue">£0.00</b></span>
+          <span>Profit <b id="totProfit">£0.00</b></span>
+          <span>Margin <b id="totMargin">–</b></span>
+          <span class="title-row" data-align="end">
+            <button type="button" class="info" aria-label="About totals" aria-describedby="tip-totals">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="8" cy="5" r=".9" fill="currentColor"/>
+              </svg>
+            </button>
+            <span id="tip-totals" role="tooltip" class="tip">Totals cover the orders shown. Cancelled orders are left out.</span>
+          </span>
+        </p>
+        <button type="button" class="btn btn-quiet btn-sm" id="oClear" hidden>Clear filters</button>
+      </div>
+
+      <div id="ordersContainer">
+        <!-- Filled dynamically: skeleton rows, table, or empty state -->
+      </div>
+    </div>
+  </main>
+
+  <!-- Row Edit Order Dialog -->
+  <dialog id="orderDialog" aria-labelledby="ordTitle">
+    <form id="orderForm" method="dialog">
+      <header class="dialog-head" data-close>
+        <div>
+          <h2 id="ordTitle">Order #12-34567</h2>
+          <p class="dialog-sub" id="ordSub">SKU-31 · Product Name</p>
+        </div>
+        <button type="button" class="icon-btn" id="ordCloseX" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <div id="ordNotice" class="notice" data-tone="error" role="alert" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+          <div id="ordNoticeMsg"></div>
+        </div>
+        <div>
+          <label for="ordStatus">Status</label>
+          <select id="ordStatus">
+            <option value="Pending">Pending</option>
+            <option value="Ordered">Ordered</option>
+            <option value="Shipped">Shipped</option>
+            <option value="Delivered">Delivered</option>
+            <option value="Cancelled">Cancelled</option>
+            <option value="Disputed">Disputed</option>
+          </select>
+        </div>
+        <div>
+          <label for="ordTrack">Tracking number</label>
+          <input id="ordTrack" autocomplete="off" placeholder="e.g. RR123456789GB">
+        </div>
+        <div>
+          <label for="ordNotes">Notes</label>
+          <textarea id="ordNotes" rows="3" placeholder="Buyer notes or supplier details"></textarea>
+        </div>
+        <p class="muted" id="ordSummary">Quantity 1 · Sell £0.00 · Profit £0.00</p>
+      </div>
+      <footer class="dialog-foot">
+        <div class="actions">
+          <button type="button" class="btn btn-quiet" id="ordCancel">Cancel</button>
+          <button type="submit" class="btn" id="ordSubmit">Save</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Add Order Dialog -->
+  <dialog id="addOrderDialog" aria-labelledby="aoTitle" style="--dialog-w:460px">
+    <form id="addOrderForm" autocomplete="off">
+      <header class="dialog-head">
+        <h2 id="aoTitle">Add order</h2>
+      </header>
+      <div class="dialog-body">
+        <div id="aoNotice" class="notice" data-tone="error" role="alert" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+          <div id="aoNoticeMsg"></div>
+        </div>
+        <div>
+          <label for="aoSku">Product</label>
+          <input id="aoSku" list="aoList" placeholder="SKU or product name" required autocomplete="off">
+          <datalist id="aoList"></datalist>
+          <p id="aoCaption" class="muted" role="status"></p>
+        </div>
+        <div class="fields-row">
+          <div>
+            <label for="aoNo">Order number</label>
+            <input id="aoNo" required placeholder="12-34567-89012">
+          </div>
+          <div>
+            <label for="aoDate">Date</label>
+            <input id="aoDate" type="date" required>
+          </div>
+        </div>
+        <div class="fields-row">
+          <div>
+            <label for="aoQty">Quantity</label>
+            <input id="aoQty" type="number" min="1" step="1" value="1" required>
+          </div>
+          <div>
+            <label for="aoSell" id="aoSellLabel">Sell total (£)</label>
+            <input id="aoSell" type="number" min="0" step="0.01" inputmode="decimal" required placeholder="0.00">
+          </div>
+        </div>
+        <div>
+          <label for="aoNote">Note <span class="muted">(optional)</span></label>
+          <input id="aoNote" placeholder="Buyer username or note">
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <div class="actions">
+          <button type="button" class="btn btn-quiet" id="aoCancel">Cancel</button>
+          <button type="submit" class="btn" id="aoSubmit">Add order</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Listing dialog: one listing per product, written by Gemini. Everything inside is filled with textContent. -->
+  <dialog id="listingDialog" aria-labelledby="lsTitle" style="--dialog-w:640px">
+    <form id="listingForm">
+      <header class="dialog-head" data-close>
+        <div>
+          <h2 id="lsTitle">Listing</h2>
+          <p class="dialog-sub" id="lsSub"></p>
+        </div>
+        <button type="button" class="icon-btn" id="lsCloseX" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </header>
+      <div class="dialog-body" id="lsBody">
+        <div id="lsError" class="notice" data-tone="error" role="alert" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+          <div>
+            <p id="lsErrorMsg"></p>
+            <p id="lsErrorDetail"></p>
+          </div>
+          <a class="btn btn-quiet btn-sm" id="lsSettings" href="../options/options.html#ai" target="_blank" rel="noopener" hidden>Open settings</a>
+          <button type="button" class="btn btn-quiet btn-sm" id="lsRetry">Try again</button>
+        </div>
+        <div id="lsBusy" class="notice" role="status" hidden>
+          <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+          <div id="lsBusyMsg">Writing your listing...</div>
+        </div>
+        <div id="lsLimited" class="notice" role="note" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+          </svg>
+          <div>Written from the product name and image only, so check the details before you list.</div>
+        </div>
+        <div id="lsWarn" class="notice" data-tone="warn" role="note" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          </svg>
+          <div id="lsWarnText"></div>
+        </div>
+        <div id="lsContent" hidden>
+          <section class="score" aria-labelledby="h-score">
+            <div class="score-line">
+              <h3 id="h-score">Listing score</h3>
+              <span class="tag" id="lsScore" hidden></span>
+            </div>
+            <p class="muted" id="lsSummary"></p>
+            <div id="lsFlags"></div>
+          </section>
+          <section>
+            <div class="field-head">
+              <label for="lsTitleIn">Title</label>
+              <span class="counter" id="lsCount" aria-hidden="true">0/80</span>
+            </div>
+            <div class="input-row">
+              <input id="lsTitleIn" maxlength="80" autocomplete="off" aria-describedby="lsCountSr">
+              <span id="lsCopyTitleSlot"></span>
+            </div>
+            <span class="sr-only" id="lsCountSr"></span>
+          </section>
+          <section id="lsSpecs" aria-labelledby="h-specs">
+            <h3 id="h-specs">Item specifics</h3>
+            <div class="kv-list" id="lsSpecList"></div>
+          </section>
+          <section id="lsVariants" aria-labelledby="h-variants">
+            <div class="field-head"><h3 id="h-variants">Variants</h3></div>
+            <div class="kv-list" id="lsVariantList"></div>
+          </section>
+          <section>
+            <div class="field-head">
+              <label for="lsDesc">Description</label>
+              <span id="lsCopyDescSlot"></span>
+            </div>
+            <textarea id="lsDesc" rows="8"></textarea>
+          </section>
+        </div>
+      </div>
+      <footer class="dialog-foot">
+        <div class="ls-confirm" id="lsConfirm" hidden>
+          <p role="alert">Replace your edits with a new version?</p>
+          <button type="button" class="btn btn-quiet" id="lsKeep">Keep my edits</button>
+          <button type="button" class="btn" id="lsRegenGo">Regenerate</button>
+        </div>
+        <div class="actions ls-actions" id="lsActions">
+          <button type="button" class="btn btn-quiet" id="lsRegen">Regenerate</button>
+          <button type="button" class="btn btn-quiet" id="lsCopyAll">Copy all</button>
+          <button type="button" class="btn" id="lsDone">Done</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Move to Sheet Dialog (P4) -->
+  <dialog id="moveDialog" aria-labelledby="moveTitle">
+    <form id="moveForm">
+      <header class="dialog-head">
+        <h2 id="moveTitle">Move to a sheet</h2>
+      </header>
+      <div class="dialog-body">
+        <div>
+          <label for="moveSheet">Sheet</label>
+          <select id="moveSheet"></select>
+        </div>
+        <p class="note" id="moveNote">Moves products. Any already in the sheet are skipped.</p>
+        <div id="moveRates"></div>
+      </div>
+      <footer class="dialog-foot">
+        <div class="actions">
+          <button type="button" class="btn btn-quiet" id="moveCancel">Cancel</button>
+          <button type="submit" class="btn" id="moveSubmit">Move products</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Live Announcements & Toasts -->
+  <div class="toasts" aria-live="polite"></div>
+  <p class="sr-only" role="status" id="live"></p>
+
+  <!-- Scripts -->
+  <script src="../lib/shared.js"></script>
+  <script src="../lib/ui.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
