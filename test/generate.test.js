@@ -117,11 +117,11 @@ test("item specifics keep one per name and at most 40; variants at most 30; a ti
   assert.equal(L.htmlToText("Under < 5kg and > 3kg<br>Next"), "Under < 5kg and > 3kg\nNext"); // a comparison is not a tag
 });
 
-test("toEbayHtml escapes the text, makes each line a paragraph and bolds the four section headings", () => {
-  const html = L.toEbayHtml("Fits <script>x</script> & more.\n\nMaterial & features:\n- Steel\n  Size details \nshipping\nPerfect for\nGifts");
+test("toEbayHtml escapes the text, makes each line a div (a blank one a div with a break) and bolds the four section headings", () => {
+  const html = L.toEbayHtml("Fits <script>x</script> & more.\n\n\nMaterial & features:\n- Steel\n  Size details \nshipping\nPerfect for\nGifts\n\n");
   assert.equal(
     html,
-    "<p>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</p><p><b>Material &amp; features:</b></p><p>- Steel</p><p><b>Size details</b></p><p><b>shipping</b></p><p><b>Perfect for</b></p><p>Gifts</p>",
+    "<div>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</div><div><br></div><div><b>Material &amp; features:</b></div><div>- Steel</div><div><b>Size details</b></div><div><b>shipping</b></div><div><b>Perfect for</b></div><div>Gifts</div>",
   );
   assert.equal(L.toEbayHtml(null), "");
 });

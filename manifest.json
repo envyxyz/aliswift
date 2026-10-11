@@ -40,6 +40,22 @@
       ],
       "js": ["lib/shared.js", "content.js"],
       "css": ["content.css"]
+    },
+    {
+      "matches": [
+        "https://www.ebay.com/lstng*",
+        "https://www.ebay.co.uk/lstng*",
+        "https://www.ebay.com/sl/*",
+        "https://www.ebay.co.uk/sl/*"
+      ],
+      "js": ["lib/ebayform.js", "content-ebay.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/ui.css", "ebay.css"],
+      "matches": ["https://www.ebay.com/*", "https://www.ebay.co.uk/*"],
+      "use_dynamic_url": true
     }
   ],
   "oauth2": {
