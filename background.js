@@ -1,7 +1,11 @@
 importScripts("lib/shared.js", "lib/template.js");
 
+// The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
+chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+
 // Every handler resolves to { success: true, ... } or { success: false, error }. pagesOnly handlers
 // reject anything but AliSwift's own pages: a content script's sender.url is the web page it runs on.
+// A sheetId of "local" means the on-device library (no sheet, no sign-in).
 const handlers = {
   appendToSheet: { run: (request) => appendRow(request.data) },
   createSheet: { pagesOnly: true, run: (request) => createSheet(request.data) },
@@ -10,6 +14,12 @@ const handlers = {
   signOut: { pagesOnly: true, run: () => signOut() },
   rate: { run: (request) => getRate(request.data) },
   setRate: { pagesOnly: true, run: (request) => setRate(request.data) },
+  listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
+  setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
+  listOrders: { pagesOnly: true, run: (request) => listOrders(request.sheetId) },
+  addOrder: { pagesOnly: true, run: (request) => addOrder(request.sheetId, request.order) },
+  updateOrder: { pagesOnly: true, run: (request) => updateOrder(request) },
+  moveLocal: { pagesOnly: true, run: (request) => moveLocal(request.sheetId) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer.
@@ -29,12 +39,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-// One add at a time: two adds racing would pick the same next row.
+// One write at a time: two adds racing would pick the same next row or SKU, and every library change
+// rewrites the whole array. A failed job never blocks the ones behind it.
 let queue = Promise.resolve();
-function appendRow(data) {
-  const run = queue.then(() => writeRow(data));
-  queue = run;
+function enqueue(job) {
+  const run = queue.then(job);
+  queue = run.catch(() => {});
   return run;
+}
+
+// `dest: "local"` saves to the library; anything else goes to the sheet. Nothing here ever turns a failed
+// sheet save into a library save: the page that asked decides.
+function appendRow(data) {
+  return enqueue(() => (data?.dest === "local" ? saveLocal(data) : writeRow(data)));
 }
 
 // Silent unless `interactive`, which only signIn() passes: a sign-in window never opens on its own.
@@ -211,55 +228,294 @@ async function createSheet(data) {
   return { success: false, error: failure.message, orphanId: id };
 }
 
+const LOCAL = "local";
+const quote = (tab) => `'${tab.replace(/'/g, "''")}'`;
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const text = (v) => String(v ?? "").trim();
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// The configured sheet with this id, merged over the defaults. Writes only ever reach sheets the user added.
+async function sheetById(sheetId) {
+  const { sheets } = await chrome.storage.sync.get({ sheets: [] });
+  const sheet = sheets.find((s) => s.id === sheetId);
+  if (!sheet) throw new Error("That sheet isn't in your AliSwift settings.");
+  return { ...SHEET_DEFAULTS, ...sheet };
+}
+
+// Prices in another currency than the sheet's never get written. `currency` is what the numbers are in.
+// Unknown on either side (no marketplace set) means nothing to compare.
+function guardCurrency(sheet, currency) {
+  const sheetCurrency = REGIONS[sheet.region]?.currency;
+  if (currency && sheetCurrency && currency !== sheetCurrency) {
+    throw Object.assign(new Error(`Prices are in ${currency} but this sheet is ${sheetCurrency}. Nothing was saved.`), { code: "currency" });
+  }
+}
+
+// Reads { name: column letter } fields from `from` down: { name: [cell, ...] }, cell i being row from + i.
+// Unformatted, so numbers come back as numbers and dates as serials. A field with no column reads as [].
+async function readFields(id, tab, fields, from) {
+  const names = Object.keys(fields).filter((k) => fields[k]);
+  const out = Object.fromEntries(Object.keys(fields).map((k) => [k, []]));
+  if (!names.length) return out;
+  const ranges = names.map((k) => `ranges=${encodeURIComponent(`${quote(tab)}!${fields[k]}${from}:${fields[k]}`)}`).join("&");
+  const { valueRanges = [] } = await sheetsFetch(`/${id}/values:batchGet?${ranges}&majorDimension=COLUMNS&valueRenderOption=UNFORMATTED_VALUE`);
+  names.forEach((k, i) => (out[k] = valueRanges[i]?.values?.[0] ?? []));
+  return out;
+}
+
+// RAW so text stays text: a title like "=IMPORTDATA(...)" can't run as a formula. Cells are [A1 cell, value];
+// an empty value is skipped, so a write never blanks a cell the user filled in.
+async function putCells(id, tab, cells) {
+  const data = cells.filter(([, value]) => value !== "" && value != null).map(([cell, value]) => ({ range: `${quote(tab)}!${cell}`, values: [[value]] }));
+  if (!data.length) return;
+  await sheetsFetch(`/${id}/values:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ valueInputOption: "RAW", data }) });
+}
+
+/* Saving */
+
 async function writeRow(data) {
   try {
-    const { title, price, salePrice, link, currency } = data;
     const sheet = await getActiveSheet();
     if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
-
-    // The one place every save passes: prices in another currency than the sheet's never get written.
-    // `currency` is what the numbers are in. Unknown on either side (no marketplace set) means nothing to compare.
-    const sheetCurrency = REGIONS[sheet.region]?.currency;
-    if (currency && sheetCurrency && currency !== sheetCurrency) {
-      throw Object.assign(new Error(`Prices are in ${currency} but this sheet is ${sheetCurrency}. Nothing was saved.`), { code: "currency" });
-    }
-
-    const tab = `'${sheet.sheetTab.replace(/'/g, "''")}'`;
-
-    // The next row and the SKU come from one read of the SKU and keywords columns.
-    const read = [sheet.skuCol, sheet.keywordsCol].filter(Boolean);
-    const ranges = read.map((c) => `ranges=${encodeURIComponent(`${tab}!${c}:${c}`)}`).join("&");
-    const { valueRanges = [] } = await sheetsFetch(`/${sheet.id}/values:batchGet?${ranges}`);
-    const column = (c) => valueRanges[read.indexOf(c)]?.values ?? [];
-    const row = nextRow(column(sheet.skuCol), column(sheet.keywordsCol), sheet.startRow);
-    const sku = sheet.skuCol
-      ? nextSku(column(sheet.skuCol).map((r) => r[0]), sheet.skuPrefix, row, sheet.startRow)
-      : "";
-
-    // Empty values are skipped so we never blank out a cell the user filled in.
-    // ponytail: auto sheets have 1000 rows; past that Google's error is shown. Upgrade: appendDimension, then repeatCell.
-    const cells = [
-      [sheet.keywordsCol, title],
-      [sheet.priceCol, toNumber(price)],
-      [sheet.salePriceCol, toNumber(salePrice)],
-      [sheet.linkCol, link],
-      [sheet.skuCol, sku],
-    ].filter(([col, value]) => col && value !== "");
-
-    // RAW: text is stored as text, so a title like "=IMPORTDATA(...)" can't run as a formula.
-    await sheetsFetch(`/${sheet.id}/values:batchUpdate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        valueInputOption: "RAW",
-        data: cells.map(([col, value]) => ({
-          range: `${tab}!${col}${row}`,
-          values: [[value]],
-        })),
-      }),
-    });
-    return { success: true, ...(sku && { sku }) };
+    guardCurrency(sheet, data.currency); // the one place every save to a sheet passes
+    const { skus } = await writeRows(sheet, [data]);
+    return { success: true, ...(skus[0] && { sku: skus[0] }) };
   } catch (error) {
     return fail(error);
   }
+}
+
+// Writes items below the last used row: one read, one write, whatever the count. The next row and the SKUs
+// come from the SKU and keywords columns only (input columns, so pre-filled formulas never count as data).
+// With skipExisting, an item whose link and title are already in the sheet is left out and returned as `dupes`.
+// ponytail: auto sheets have 1000 rows; past that Google's error is shown. Upgrade: appendDimension, then repeatCell.
+async function writeRows(sheet, items, skipExisting = false) {
+  const read = [sheet.skuCol, sheet.keywordsCol, ...(skipExisting ? [sheet.linkCol] : [])].filter(Boolean);
+  const ranges = read.map((c) => `ranges=${encodeURIComponent(`${quote(sheet.sheetTab)}!${c}:${c}`)}`).join("&");
+  const { valueRanges = [] } = await sheetsFetch(`/${sheet.id}/values:batchGet?${ranges}`);
+  const column = (c) => valueRanges[read.indexOf(c)]?.values ?? [];
+
+  const seen = new Set(skipExisting ? column(sheet.linkCol).map((r, i) => `${text(r[0])}\n${text(column(sheet.keywordsCol)[i]?.[0])}`) : []);
+  const fresh = skipExisting ? items.filter((x) => !seen.has(`${text(x.link)}\n${text(x.title)}`) && seen.add(`${text(x.link)}\n${text(x.title)}`)) : items;
+  const dupes = items.filter((x) => !fresh.includes(x));
+  if (!fresh.length) return { fresh, dupes, skus: [] };
+
+  const row = nextRow(column(sheet.skuCol), column(sheet.keywordsCol), sheet.startRow);
+  const skus = [];
+  const cells = fresh.flatMap((x, i) => {
+    const r = row + i;
+    const sku = sheet.skuCol ? nextSku([...column(sheet.skuCol).map((c) => c[0]), ...skus], sheet.skuPrefix, r, sheet.startRow) : "";
+    skus.push(sku);
+    return [
+      [sheet.keywordsCol, x.title],
+      [sheet.priceCol, toNumber(x.price)],
+      [sheet.salePriceCol, toNumber(x.salePrice)],
+      [sheet.linkCol, x.link],
+      [sheet.skuCol, sku],
+      [sheet.imageCol, httpsUrl(x.image)],
+    ]
+      .filter(([col]) => col)
+      .map(([col, value]) => [`${col}${r}`, value]);
+  });
+  await putCells(sheet.id, sheet.sheetTab, cells);
+  return { fresh, dupes, skus };
+}
+
+async function saveLocal(data) {
+  try {
+    const { library } = await chrome.storage.local.get({ library: [] });
+    const { lib, item } = libAdd(library, cleanSave(data), Date.now(), crypto.randomUUID());
+    await chrome.storage.local.set({ library: lib });
+    return { success: true, local: true, sku: item.sku };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/* Products */
+
+// The sheet's products: { products, sharedBy } where sharedBy[row] is the number of rows that share a merged
+// status. Rows with no SKU, name or link are skipped. Row numbers are real sheet rows.
+async function readProducts(sheet) {
+  const cols = {
+    sku: sheet.skuCol, title: sheet.keywordsCol, link: sheet.linkCol, price: sheet.priceCol, salePrice: sheet.salePriceCol,
+    status: sheet.statusCol, image: sheet.imageCol, profit: sheet.profitCol, margin: sheet.marginCol,
+  };
+  const c = await readFields(sheet.id, sheet.sheetTab, cols, sheet.startRow);
+  let shared = [];
+  if (sheet.statusCol) {
+    const file = await sheetsFetch(`/${sheet.id}?fields=${encodeURIComponent("sheets(properties(title),merges)")}`);
+    const tab = file.sheets?.find((s) => s.properties?.title === sheet.sheetTab);
+    ({ values: c.status, shared } = expandMerges(c.status, tab?.merges, sheet.statusCol.charCodeAt(0) - 65, sheet.startRow));
+  }
+  const products = [];
+  const sharedBy = {};
+  for (let i = 0; i < Math.max(...Object.values(c).map((l) => l.length)); i++) {
+    const [sku, title, link] = [c.sku[i], c.title[i], c.link[i]].map(text);
+    if (!sku && !title && !link) continue;
+    const row = sheet.startRow + i;
+    if (shared[i]) sharedBy[row] = shared[i];
+    products.push({
+      row, sku, title, link,
+      price: num(c.price[i]), salePrice: num(c.salePrice[i]), image: httpsUrl(c.image[i]),
+      status: text(c.status[i]) || "Not Listed", statusShared: Boolean(shared[i]),
+      profit: num(c.profit[i]), margin: num(c.margin[i]),
+    });
+  }
+  return { products, sharedBy };
+}
+
+async function listProducts(sheetId) {
+  if (sheetId === LOCAL) return { success: true, products: libToProducts((await chrome.storage.local.get({ library: [] })).library) };
+  return { success: true, products: (await readProducts(await sheetById(sheetId))).products };
+}
+
+// Remove is this with "Discontinued", restore with "Not Listed". There is no delete anywhere.
+async function setStatus(sheetId, key, status) {
+  if (!PRODUCT_STATUSES.includes(status)) throw new Error("Unknown status.");
+  if (sheetId === LOCAL) {
+    return enqueue(async () => {
+      const { library } = await chrome.storage.local.get({ library: [] });
+      const row = findRow(libToProducts(library), key);
+      if (row < 0) throw new Error("That product isn't in your library any more. Refresh and try again.");
+      await chrome.storage.local.set({ library: libSetStatus(library, library[row - 1].id, status) });
+      return { success: true };
+    });
+  }
+  const sheet = await sheetById(sheetId);
+  if (!sheet.statusCol) throw new Error("This sheet has no Status column. Add one in the sheet's settings.");
+  return enqueue(async () => {
+    // The row is found again here, inside the queue: the sheet may have been sorted since the dashboard read it.
+    const { products, sharedBy } = await readProducts(sheet);
+    const row = findRow(products, key);
+    if (row < 0) throw new Error("That product isn't in the sheet any more. Refresh and try again.");
+    if (sharedBy[row]) throw new Error(`This status is shared by ${sharedBy[row]} variant rows. Change it in the sheet.`);
+    await putCells(sheet.id, sheet.sheetTab, [[`${sheet.statusCol}${row}`, status]]);
+    return { success: true };
+  });
+}
+
+/* Orders */
+
+async function ordersOf(sheetId) {
+  const sheet = await sheetById(sheetId);
+  if (!sheet.oTab) throw new Error("This sheet has no Orders tab set up.");
+  return { sheet, cols: { ...SHEET_DEFAULTS.oCols, ...sheet.oCols } };
+}
+
+// The Orders tab's order-number and SKU columns from row 1 down (f), and the order rows among them ({ row, no, sku }).
+async function readOrderKeys(sheet, cols) {
+  if (!cols.no || !cols.sku) throw new Error("This sheet's Orders tab needs an Order Number and a SKU column.");
+  const f = await readFields(sheet.id, sheet.oTab, { no: cols.no, sku: cols.sku }, 1);
+  const rows = Array.from({ length: Math.max(f.no.length, f.sku.length) }, (_, i) => ({ row: i + 1, no: f.no[i], sku: f.sku[i] }));
+  return { f, rows: rows.filter((r) => r.row >= sheet.oRow) };
+}
+
+async function listOrders(sheetId) {
+  const { sheet, cols } = await ordersOf(sheetId);
+  const c = await readFields(sheet.id, sheet.oTab, cols, sheet.oRow);
+  // The product's name is a formula on the Orders tab with no column of its own here, so it comes from Inventory by SKU.
+  const inv = sheet.skuCol && sheet.keywordsCol ? await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, name: sheet.keywordsCol }, sheet.startRow) : { sku: [], name: [] };
+  const names = new Map(inv.sku.map((s, i) => [text(s).toLowerCase(), text(inv.name[i])]));
+  const orders = [];
+  for (let i = 0; i < Math.max(...Object.values(c).map((l) => l.length)); i++) {
+    const [orderNumber, sku] = [c.no[i], c.sku[i]].map(text);
+    if (!orderNumber && !sku) continue;
+    orders.push({
+      row: sheet.oRow + i, orderNumber, sku, product: names.get(sku.toLowerCase()) ?? "", date: fromSheetDate(c.date[i]),
+      qty: Number(c.qty[i]) > 0 ? Number(c.qty[i]) : 1, sell: num(c.sell[i]), cost: num(c.cost[i]), profit: num(c.profit[i]),
+      status: text(c.status[i]), tracking: text(c.track[i]), notes: text(c.notes[i]),
+    });
+  }
+  return { success: true, orders };
+}
+
+// The sell and cost totals are written as numbers, so a later price change never rewrites a past order. They
+// replace the template's lookup formulas in this new row only. Name and profit stay the row's own formulas.
+async function addOrder(sheetId, order) {
+  const { sheet, cols } = await ordersOf(sheetId);
+  const o = cleanOrder(order);
+  guardCurrency(sheet, order?.currency);
+  return enqueue(async () => {
+    const { f, rows } = await readOrderKeys(sheet, cols);
+    if (findOrderRows(rows, o.orderNumber, { sku: o.sku }).length) {
+      throw Object.assign(new Error(`Order ${o.orderNumber} for ${o.sku} is already in the sheet.`), { code: "duplicate" });
+    }
+    const row = nextRow(f.no.map((v) => [v]), f.sku.map((v) => [v]), sheet.oRow);
+
+    let unit = {};
+    if (sheet.skuCol) {
+      const inv = await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, cost: sheet.priceCol, sell: sheet.salePriceCol }, sheet.startRow);
+      const i = inv.sku.findIndex((s) => text(s).toLowerCase() === o.sku.toLowerCase());
+      if (i >= 0) unit = { cost: num(inv.cost[i]), sell: num(inv.sell[i]) };
+    }
+    const sell = o.sell ?? (unit.sell == null ? null : round2(unit.sell * o.qty));
+    const cost = unit.cost == null ? null : round2(unit.cost * o.qty);
+    await putCells(sheet.id, sheet.oTab, [
+      [cols.no, o.orderNumber], [cols.sku, o.sku], [cols.date, o.serial], [cols.qty, o.qty], [cols.sell, sell],
+      [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking], [cols.notes, o.notes],
+    ].filter(([col]) => col).map(([col, value]) => [`${col}${row}`, value]));
+    return { success: true, row, ...(cost == null && { warning: "SKU not found in your sheet, so cost is blank." }) };
+  });
+}
+
+// Writes only the fields in the patch. The order is found again by number inside the queue; a multi-item order
+// has one row per item and the patch goes to all of them, unless `key` ({ sku, row }) names one.
+async function updateOrder({ sheetId, orderNumber, key, patch }) {
+  const { sheet, cols } = await ordersOf(sheetId);
+  const change = cleanPatch(patch);
+  return enqueue(async () => {
+    const { rows } = await readOrderKeys(sheet, cols);
+    const found = findOrderRows(rows, orderNumber, key ?? {});
+    if (!found.length) throw new Error("That order isn't in the sheet any more. Refresh and try again.");
+    const cells = Object.entries(change).flatMap(([field, value]) => {
+      const col = cols[field === "tracking" ? "track" : field];
+      if (!col) throw new Error(`This sheet's Orders tab has no ${field} column.`);
+      return found.map((r) => [`${col}${r}`, value]);
+    });
+    await putCells(sheet.id, sheet.oTab, cells);
+    return { success: true };
+  });
+}
+
+/* Library to sheet */
+
+// Moves the library's products into a sheet with one read and one write. A product already in the sheet (same
+// link and title) is only dropped from the library. One in another currency is converted with the same rate
+// lookup as a save; with no rate it stays in the library and is counted. Removed ones are not moved.
+// The library is cleaned up only after the sheet write succeeded, so a failure leaves it as it was and a
+// re-run after a crash finds the rows already in the sheet.
+async function moveLocal(sheetId) {
+  const sheet = await sheetById(sheetId);
+  return enqueue(async () => {
+    const { library } = await chrome.storage.local.get({ library: [] });
+    const to = REGIONS[sheet.region]?.currency ?? "";
+    const rates = {};
+    const items = [];
+    let needRate = 0;
+    for (const rec of library.filter((x) => x.status !== "Discontinued")) {
+      let rate = 1;
+      if (currencyKind(rec.currency, to) === "convert") {
+        if (!(rec.currency in rates)) rates[rec.currency] = (await getRate({ sheetId, from: rec.currency, to })).rate;
+        rate = rates[rec.currency];
+      }
+      if (!rate) needRate++;
+      // ponytail: the .99 rounding and extraCost are not re-applied on a converted move.
+      else items.push(rate === 1 ? rec : { ...rec, price: rec.price == null ? null : round2(rec.price / rate), salePrice: rec.salePrice == null ? null : round2(rec.salePrice / rate) });
+    }
+
+    const { fresh, dupes, skus } = await writeRows(sheet, items, true);
+    const gone = [...fresh, ...dupes].map((x) => x.id);
+    if (gone.length) await chrome.storage.local.set({ library: libTake(library, gone) });
+
+    // A generated listing follows its product to the new key. ponytail: a re-run after a crash skips this, the listing is then regenerated.
+    const old = fresh.map((x, i) => [`listing:${LOCAL}:${x.sku}`, `listing:${sheetId}:${skus[i]}`]).filter(([, key]) => !key.endsWith(":"));
+    const listings = await chrome.storage.local.get(Object.fromEntries(old.map(([k]) => [k, null])));
+    const kept = old.filter(([k]) => listings[k] != null);
+    if (kept.length) {
+      await chrome.storage.local.set(Object.fromEntries(kept.map(([k, key]) => [key, listings[k]])));
+      await chrome.storage.local.remove(kept.map(([k]) => k));
+    }
+    return { success: true, moved: fresh.length, skipped: dupes.length, needRate };
+  });
 }

@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const PRODUCT_URL = /^https:\/\/([\w-]+\.)?aliexpress\.(com|us)\/(item\/|.*\/buyNow)/;
-const LABEL = "Add to Sheet";
+// Saving goes to the active sheet, or to the on-device library when signed out or without a sheet.
+const WORDS = { sheet: { idle: "Add to Sheet", busy: "Adding..." }, local: { idle: "Save to library", busy: "Saving..." } };
 
 let tabId;
 let resetTimer;
@@ -9,10 +10,11 @@ let sheet; // the active sheet's settings, to price a rate typed here
 let editing = false; // the rate box is open
 let typed = false; // the rate was typed here and is saved when the product is added
 let rateBad = false; // what was typed is not a rate AliSwift accepts (see validRate)
+let signedIn = true; // false only when the account button knows the user is signed out
+let dest = "sheet"; // "sheet" or "local", see destination()
+const idle = () => WORDS[dest].idle;
 
 function show(view, message = "") {
-  $("signin").hidden = view !== "signin";
-  $("setup").hidden = view !== "setup";
   $("form").hidden = view !== "form";
   $("notice").hidden = view !== "notice";
   $("notice").textContent = message;
@@ -34,7 +36,7 @@ function setButton(state, text) {
 async function scrape() {
   let partial = null;
   for (let i = 0; i < 5; i++) {
-    const found = await chrome.tabs.sendMessage(tabId, { action: "scrape" }).catch(() => null);
+    const found = await chrome.tabs.sendMessage(tabId, { action: "scrape", dest }).catch(() => null);
     if (found?.title && found.price) return found;
     partial = found?.title ? found : partial;
     await new Promise((r) => setTimeout(r, 1000));
@@ -52,7 +54,7 @@ function renderPrices() {
   $("salePrice").value = row.salePrice;
   $("price").readOnly = $("salePrice").readOnly = noRate();
   $("priceCur").textContent = $("saleCur").textContent = row.currency ? `(${row.currency})` : "";
-  setButton(noRate() ? "disabled" : "", LABEL);
+  setButton(noRate() ? "disabled" : "", idle());
   if (noRate()) $("addBtn").setAttribute("aria-describedby", "fxWarn");
   else $("addBtn").removeAttribute("aria-describedby");
 }
@@ -65,14 +67,14 @@ function renderCurrency() {
     ? rateBad
       ? RATE_MESSAGE
       : `No ${fx.from} to ${fx.to} rate found. Enter one to continue.`
-    : kind === "unset"
+    : kind === "unset" && dest === "sheet"
       ? "This sheet's marketplace isn't set, so prices are saved as shown."
       : kind === "unknown"
         ? "Couldn't tell this page's currency. Check the prices."
         : "";
   $("fxWarn").hidden = !warn;
   $("fxWarnText").textContent = warn;
-  $("fxSettings").hidden = kind !== "unset";
+  $("fxSettings").hidden = !(kind === "unset" && dest === "sheet");
 
   $("fxNote").hidden = !rated;
   if (rated) {
@@ -97,7 +99,7 @@ function renderCurrency() {
 
 async function loadProduct() {
   show("form");
-  setButton("disabled", LABEL);
+  setButton("disabled", idle());
   setStatus("Reading product...");
   const found = await scrape();
   if (!found) return show("notice", "Couldn't read this page. Refresh it and try again.");
@@ -112,16 +114,22 @@ async function loadProduct() {
   setStatus("");
 }
 
+// The destination field: the sheet picker, or a fixed line with the one action that would unlock the sheet.
+function renderDest(sheets, activeSheetId) {
+  $("sheet").hidden = dest === "local";
+  $("dest").hidden = $("lockNote").hidden = dest === "sheet";
+  $("sheet").replaceChildren(...sheets.map((s) => new Option(s.name, s.id, false, s.id === (activeSheetId || sheets[0].id))));
+  $("lockAct").textContent = signedIn ? "Add a sheet" : "Sign in";
+  $("lockAct").toggleAttribute("data-signin", !signedIn);
+}
+
 async function init() {
   const { sheets, activeSheetId } = await chrome.storage.sync.get({
     sheets: [],
     activeSheetId: "",
   });
-  if (!sheets.length) return show("setup");
-
-  $("sheet").replaceChildren(
-    ...sheets.map((s) => new Option(s.name, s.id, false, s.id === (activeSheetId || sheets[0].id))),
-  );
+  dest = destination(signedIn, sheets[0]);
+  renderDest(sheets, activeSheetId);
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!PRODUCT_URL.test(tab?.url ?? "")) {
@@ -132,7 +140,7 @@ async function init() {
 }
 
 $("settingsBtn").addEventListener("click", () => chrome.runtime.openOptionsPage());
-$("setupBtn").addEventListener("click", () => chrome.runtime.openOptionsPage());
+$("lockAct").addEventListener("click", () => signedIn && chrome.runtime.openOptionsPage()); // Sign in is the account button's job
 $("fxSettings").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
@@ -168,7 +176,7 @@ $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(resetTimer);
   setStatus("");
-  setButton("loading", "Adding...");
+  setButton("loading", WORDS[dest].busy);
   const { fx } = row;
   if (typed && fx?.rate) {
     await chrome.runtime.sendMessage({ action: "setRate", data: { from: fx.from, to: fx.to, rate: fx.rate } }).catch(() => {});
@@ -182,24 +190,30 @@ $("form").addEventListener("submit", async (e) => {
         salePrice: $("salePrice").value,
         link: $("link").value,
         currency: row.currency,
+        image: row.image,
+        dest,
       },
     })
     .catch((err) => ({ error: err.message }));
 
   if (result?.success) {
-    setButton("success", result.sku ? `Added as ${result.sku}` : "Added");
+    const done = dest === "local" ? "Saved to library" : "Added";
+    setButton("success", result.sku ? `${done} as ${result.sku}` : done);
   } else {
-    setButton("", LABEL);
-    // ponytail: signed out shows the sign-in section until P3's library gives the popup somewhere to save.
-    // setAuth(false) tells the account button too, so signing in again fires authchange and the form returns.
+    setButton("", idle());
+    // Signed out since the popup opened: setAuth(false) tells the account button too, and the form comes back
+    // with the library as its destination. Signing in again fires authchange and brings the sheet back.
     if (result?.code === "signin") return setAuth(false);
     setStatus(result?.error ?? "Something went wrong.", true);
     return;
   }
-  resetTimer = setTimeout(() => setButton("", LABEL), 3000); // long enough to read the SKU
+  resetTimer = setTimeout(() => setButton("", idle()), 3000); // long enough to read the SKU
 });
 
 // The account button reports the sign-in state once it knows it, and again whenever it changes.
-// null means it couldn't tell (offline): carry on, a save will say if sign-in is needed.
+// null means it couldn't tell (offline): carry on as signed in, a save will say if sign-in is needed.
 const setAuth = profileButton($("profile"));
-document.addEventListener("authchange", (e) => (e.detail.signedIn === false ? show("signin") : init()));
+document.addEventListener("authchange", (e) => {
+  signedIn = e.detail.signedIn !== false;
+  init();
+});
