@@ -98,7 +98,7 @@ Choose **Import from Google Sheets** to pick a sheet from your Drive or paste it
 Once a Google Sheet is connected, click **Move to a sheet** on the dashboard library banner. AliSwift transfers products into your sheet, applies currency conversion rates, and safely skips duplicates.
 
 ### 6. Updating from an older build
-The extension signing key was rotated in the release after 0.5.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets and library items.
+The extension signing key was rotated in 0.6.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets and library items.
 
 ## Usage
 

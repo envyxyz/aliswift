@@ -4,6 +4,8 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
 ### Added
 
 - **Full-page dashboard**: A dedicated workspace (`dashboard/dashboard.html`) opened from the popup and Settings:
@@ -60,5 +62,6 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.6.0
 [0.5.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.5.0
