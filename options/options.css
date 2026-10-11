@@ -352,14 +352,6 @@ fieldset.bare {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :is(input, select)[data-flash],
-  .gs-pane,
-  .gs-spinner {
-    animation: none;
-  }
-}
-
 .confirm {
   display: grid;
   gap: 8px;
@@ -620,5 +612,15 @@ table.map {
   .pick:has(input:checked) {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+}
+
+/* Last, so it wins over the animations declared above with the same specificity. */
+@media (prefers-reduced-motion: reduce) {
+  :is(input, select)[data-flash],
+  .gs-pane,
+  .gs-spinner,
+  .confirm {
+    animation: none;
   }
 }

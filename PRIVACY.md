@@ -16,7 +16,7 @@ If you choose **Auto** when adding a sheet, AliSwift also creates a new spreadsh
 
 When you import a sheet, AliSwift lists the names and last-edited dates of your spreadsheets (never their content) so you can pick one, then reads the tab names and the first four rows of each tab. It does not write to the sheet.
 
-If you saved a Gemini key in Settings, AliSwift also sends Google's Gemini API the tab names, the column titles and up to three sample rows per tab. Columns whose title looks personal (buyer, name, address, email, phone, tracking, notes) and cells that look like an email, phone number or postcode are left out. The spreadsheet's own name is not sent. It uses your own key, so Google's terms for your key apply. Without a key, matching happens in your browser and nothing is sent.
+If you saved a Gemini key in Settings, AliSwift also sends Google's Gemini API the tab names, the column titles and up to three sample rows per tab. AliSwift tries to leave out columns whose title looks personal (buyer, client, name, address, email, phone, tracking, notes and similar) and cells that look like an email, phone number or postcode, and it sends sample values only from columns whose title it recognises (product, link, price, SKU, status and similar). It cannot promise to catch everything, so skip AI matching for a sheet that holds data you don't want to share with Google. The spreadsheet's own name is not sent. It uses your own key, so Google's terms for your key apply. Without a key, matching happens in your browser and nothing is sent.
 
 The Gemini key is stored on this device only (`chrome.storage.local`). It is never synced, never exported and never shown back.
 
@@ -26,7 +26,7 @@ Your sheet names, sheet IDs, column letters, SKU prefix, marketplace, Orders tab
 
 You can export these settings to a file on your computer and import them again. The file is made in your browser and goes nowhere else. It holds no Google token. It does hold the products you saved to your on-device library (title, link, price and image link).
 
-AliSwift does not store product data. It does not store your Google token either: Chrome manages the token.
+AliSwift has no server, so nothing you save is kept anywhere but your own Google Sheet and, for products saved while signed out, this device (Chrome's extension storage). It does not store your Google token either: Chrome manages the token.
 
 ## Permissions
 

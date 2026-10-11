@@ -202,22 +202,26 @@ test("cleanTabs makes a safe copy of whatever a page sends", () => {
 test("piiFilter drops personal columns, keeps every letter where it was, and redacts cells that look personal", () => {
   const [tab] = m.piiFilter(tabsOf("pii-tabs"));
   assert.deepEqual(tab.columns, [{ letter: "A", header: "Order ID" }, { letter: "B", header: "Product Name" }, { letter: "I", header: "Total" }]);
-  assert.deepEqual(tab.sample[0], { A: "ORD-5501", B: "Synthetic Ceramic Mug", I: "12.00" });
+  assert.deepEqual(tab.sample[0], { A: "ORD-5501", B: "Synthetic Ceramic Mug" }); // "Total" is not a title AliSwift knows: no sample cells
   const sent = JSON.stringify(tab);
   for (const secret of ["Buyer", "Synthetic Customer", "Downing", "synthetic.buyer", "example.com", "7700", "SW1A", "TRK5501", "porch", "Test User", "Baker", "Shipping", "Phone"]) {
     assert.ok(!sent.includes(secret), `${secret} reached the AI`);
   }
 
   // Column titles that name a person, a place or a contact, in every spelling the plan lists.
-  const personal = ["Buyer", "buyer name", "Username", "User name", "eBay ID", "Name", "Full Name", "Customer", "Recipient", "Ship To", "Address", "Street", "City", "Postcode", "Zip", "Email", "E-mail", "Phone", "Mobile", "WhatsApp", "Contact", "Notes", "Order Notes", "Comments", "Tracking Number", "PayPal"];
+  const personal = ["Buyer", "buyer name", "Username", "User name", "eBay ID", "Name", "Full Name", "Customer", "Recipient", "Ship To", "Address", "Street", "City", "Postcode", "Zip", "Email", "E-mail", "Phone", "Mobile", "WhatsApp", "Contact", "Notes", "Order Notes", "Comments", "Tracking Number", "PayPal", "Sold To", "Client", "Surname", "Deliver To", "Delivery Address", "Cell", "Remarks", "Memo", "Instructions", "Bill To", "First Name"];
   const safe = ["SKU", "Product Name", "Item Name", "Listing Title", "Brand", "Cost Price (GBP)", "Order Number", "Status", "QTY", "Supplier URL"];
   const kept = (headers) => m.piiFilter([{ title: "T", headers, sample: [], startRow: 2 }])[0].columns.map((c) => c.header);
   assert.deepEqual(kept(personal), []);
   assert.deepEqual(kept(safe), safe);
 
   // A cell with an email, a phone number or a postcode goes even under an innocent title; a link stays.
-  const cells = m.piiFilter([{ title: "D", headers: ["ID", "Misc"], sample: [["1", "write to a@b.co"], ["2", "+44 7700 900123"], ["3", "SW1A 2AA"], ["4", "https://www.aliexpress.com/item/1005006123456789.html"], ["5", "fine"], ["6", "x"]], startRow: 2 }]);
+  const cells = m.piiFilter([{ title: "D", headers: ["SKU", "Product Name"], sample: [["1", "write to a@b.co"], ["2", "+44 7700 900123"], ["3", "SW1A 2AA"], ["4", "https://www.aliexpress.com/item/1005006123456789.html"], ["5", "fine"], ["6", "x"]], startRow: 2 }]);
   assert.deepEqual(cells[0].sample.map((r) => r.B ?? null), [null, null, null]); // only 3 rows, all three dropped
+  // A title it doesn't know shows no cells at all, whatever they hold; a known one does.
+  const odd = m.piiFilter([{ title: "D", headers: ["Zork", "Product Name"], sample: [["Mr J. Smith", "Mug"]], startRow: 2 }]);
+  assert.deepEqual(odd[0].columns.map((c) => c.header), ["Zork", "Product Name"]);
+  assert.deepEqual(odd[0].sample, [{ B: "Mug" }]);
   const link = m.piiFilter([{ title: "D", headers: ["Link"], sample: [["https://www.aliexpress.com/item/1005006123456789.html"], ["fine"]], startRow: 2 }]);
   assert.deepEqual(link[0].sample, [{ A: "https://www.aliexpress.com/item/1005006123456789.html" }, { A: "fine" }]);
 });
@@ -320,10 +324,29 @@ test("buildDraft answers the contract the dialog renders", () => {
   const d = m.buildDraft({ id: "i".repeat(20), title: "Store", tabs: tabs3, skipped: ["Dashboard"], method: "headers", reason: "nokey", mapped: mapped(tabs3) });
   assert.deepEqual(Object.keys(d), ["id", "title", "method", "reason", "tabs", "skipped", "region", "inv", "ord"]);
   assert.deepEqual(Object.keys(d.inv), ["tab", "tabConf", "fields", "startRow"]);
-  assert.deepEqual(d.tabs[1], { name: "Orders", columns: [{ letter: "A", header: "Order Number" }, { letter: "B", header: "SKU" }, { letter: "C", header: "Qty" }, { letter: "D", header: "Status" }] });
+  assert.deepEqual(d.tabs[1], { name: "Orders", columns: [{ letter: "A", header: "Order Number" }, { letter: "B", header: "SKU" }, { letter: "C", header: "Qty" }, { letter: "D", header: "Status" }], formulas: [] });
   assert.equal(d.region, "");
   assert.equal(d.inv.startRow, 2);
   assert.equal(d.ord.startRow, 2);
+});
+
+test("formula columns: found as typed, never mapped for a field AliSwift writes, except what the template writes over", () => {
+  assert.deepEqual(m.formulaCols([["x", "=A1"], [" =SUM(A:A)", 5, "=1"], ["=a"], ["=late"]]), ["A", "B", "C"]); // only the first 3 rows
+  assert.deepEqual(m.formulaCols(null), []);
+  const f = { keywordsCol: { letter: "B", conf: "matched" }, salePriceCol: { letter: "E", conf: "matched" }, skuCol: { letter: "A", conf: "matched" }, profitCol: { letter: "J", conf: "matched" }, statusCol: { letter: "M", conf: "guessed" } };
+  const out = m.guardFormulas("inventory", f, ["A", "B", "E", "J", "M"]);
+  assert.deepEqual(out.keywordsCol, { letter: "", conf: "none", formula: "B" });
+  assert.deepEqual(out.salePriceCol, { letter: "E", conf: "matched", formula: "E" });
+  assert.deepEqual(out.skuCol, f.skuCol); // the template's own SKU formula
+  assert.deepEqual(out.profitCol, f.profitCol); // only read
+  assert.deepEqual(out.statusCol, { letter: "", conf: "none", formula: "M" });
+  // Another letter for SKU is not the template's: it is a clash.
+  assert.equal(m.formulaClash("inventory", "skuCol", "C", ["C"]), true);
+  assert.equal(m.formulaClash("orders", "sell", "F", ["F"]), false);
+  assert.equal(m.formulaClash("orders", "sell", "E", ["E"]), true);
+  assert.equal(m.formulaClash("orders", "no", "A", []), false);
+  // What a page sends back is cleaned.
+  assert.deepEqual(m.cleanTabs([{ title: "T", headers: ["a"], formulas: ["B", "bb", 3, "C"] }])[0].formulas, ["B", "C"]);
 });
 
 test("column letters stop at Z", () => {

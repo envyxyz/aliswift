@@ -654,7 +654,7 @@ const GS_ROWS = [
 ];
 const GS_KEYS = ["name", "sheetTab", "startRow", "region", ...COLUMNS.map((c) => c.key), "oTab", "oRow"];
 const GS_PANES = ["gsChoose", "gsRead", "gsMap"];
-const GS_TAGS = { matched: ["green", "success", "Matched"], guessed: ["amber", "warning", "Guessed"], yours: ["blue", "", "Your pick"] };
+const GS_TAGS = { matched: ["green", "success", "Matched"], guessed: ["amber", "warning", "Guessed"], yours: ["blue", "", "Your pick"], formula: ["amber", "warning", "Has formulas"] };
 const GS_NOTICE_ICON = { error: ICONS.error, warn: ICONS.warning, info: ICONS.info };
 const GS_REASONS = {
   nokey: "Add a Gemini key in the AI tab to map with AI.",
@@ -663,6 +663,7 @@ const GS_REASONS = {
   network: "Couldn't reach Gemini.",
   timeout: "Gemini took too long.",
   "bad-output": "Gemini's answer didn't pass checks.",
+  "bad-model": "Gemini doesn't know the model name. Check the model in the AI tab.",
 };
 const GS_RETRY = ["rate", "network", "timeout", "bad-output"];
 const GS_ERRORS = {
@@ -797,6 +798,7 @@ async function gsLoad() {
     $("gsListWrap").hidden = true;
     $("gsPasteLabel").textContent = "Paste the sheet link or ID";
     if (reply.code === "signin") gsNotify("error", "Signed out.", { label: "Sign in", data: { signin: "" } });
+    else if (reply.code === "api-disabled") gsNotify("warn", "Google Drive API isn't enabled for this app, so your sheets can't be listed. Paste a link instead.");
     else {
       const allow = reply.code === "scope";
       gsNotify("warn", "Couldn't list your sheets. Paste a link instead.", { label: allow ? "Allow access" : "Try again", data: { act: allow ? "allow" : "list" } });
@@ -869,7 +871,7 @@ async function gsMatch(skipAi, run = ++gsRun) {
   $("gsReadMsg").textContent = ai ? "Matching columns with AI..." : "Matching columns...";
   if (ai) {
     gsAiTimer = setTimeout(() => {
-      $("gsReadMsg").textContent = "Still working. AI can take up to 15 seconds.";
+      $("gsReadMsg").textContent = "Still working. AI can take about 30 seconds.";
       $("gsSkipAi").hidden = false;
     }, 5000);
   }
@@ -888,6 +890,9 @@ async function gsMatch(skipAi, run = ++gsRun) {
 
 const gsCols = (tab) => gsDraft.tabs.find((t) => t.name === tab)?.columns ?? [];
 const gsTabOf = (scope) => $(scope === "inv" ? "gsInvTab" : "gsOrdTab");
+const gsKind = (scope) => (scope === "inv" ? "inventory" : "orders");
+// Would AliSwift's write to this column replace a formula in the tab chosen? (The importmap.js rule.)
+const gsClash = (r, letter) => formulaClash(gsKind(r.scope), r.key, letter, gsDraft.tabs.find((t) => t.name === gsTabOf(r.scope).value)?.formulas ?? []);
 
 // Every select of a scope: the columns of the tab chosen, set to the matched one.
 function gsFill(scope, fields) {
@@ -897,7 +902,7 @@ function gsFill(scope, fields) {
     const f = fields[r.key] ?? { letter: "", conf: "none" };
     sel.replaceChildren(new Option(r.required ? "Choose a column" : "Not used", ""), ...cols.map((c) => new Option(clip(`${c.letter} · ${c.header || "(no header)"}`), c.letter)));
     sel.value = f.letter;
-    setTag($(`gs-c-${r.name}`), f.conf, r.required);
+    setTag($(`gs-c-${r.name}`), f.formula || gsClash(r, f.letter) ? "formula" : f.conf, r.required);
   }
 }
 
@@ -919,11 +924,15 @@ function gsValidate() {
     sel.required = !!r.required && on;
     const dupe = on && sel.value && GS_ROWS.some((o) => o !== r && o.scope === r.scope && gsForm.elements[o.name].value === sel.value);
     const empty = sel.required && !sel.value;
-    sel.setCustomValidity(empty ? `Choose a column for ${r.label}.` : dupe ? "Each field needs its own column." : "");
+    const formula = on && r.required && r.key !== "salePriceCol" && gsClash(r, sel.value); // optional ones are left unused when saved
+    sel.setCustomValidity(
+      empty ? `Choose a column for ${r.label}.` : formula ? `Column ${sel.value} holds formulas, and AliSwift writes values there. Choose another column.` : dupe ? "Each field needs its own column." : "",
+    );
     if (empty) miss[r.scope].push(r.label);
   }
   $("gsInvTab").setCustomValidity($("gsInvTab").value ? "" : "Choose the Inventory tab.");
   checkName($("gsName"));
+  $("gsFormulaNote").hidden = !GS_ROWS.some((r) => (r.scope === "inv" || ordOn) && $(`gs-c-${r.name}`).dataset.conf === "formula");
   $("gsOrdRowWrap").hidden = $("gsOrdCols").hidden = !ordOn;
   $("gsOrdRow").required = ordOn;
   const optional = COLUMNS.filter((c) => c.optional);
@@ -988,7 +997,8 @@ function gsTabChanged(scope) {
   const name = gsTabOf(scope).value;
   const els = GS_ROWS.filter((r) => r.scope === scope).map((r) => gsForm.elements[r.name]);
   const before = els.map((el) => el.value);
-  gsFill(scope, name ? matchTab({ headers: gsCols(name).map((c) => c.header) }, scope === "inv" ? "inventory" : "orders") : {});
+  const matched = name ? matchTab({ headers: gsCols(name).map((c) => c.header) }, gsKind(scope)) : {};
+  gsFill(scope, guardFormulas(gsKind(scope), matched, gsDraft.tabs.find((t) => t.name === name)?.formulas ?? []));
   const changed = els.filter((el, i) => el.value !== before[i]);
   for (const el of changed) el.dataset.flash = "";
   setTimeout(() => changed.forEach((el) => el.removeAttribute("data-flash")), 600);
@@ -1010,6 +1020,14 @@ async function gsSave() {
   else {
     delete sheet.oTab;
     delete sheet.oRow;
+  }
+  // AliSwift never writes over a formula: an optional column that holds them is left unused, and the sell price is
+  // not added to the sheet. (A required column that holds them is refused by gsValidate.)
+  for (const r of GS_ROWS.filter((x) => x.scope === "inv" || sheet.oTab)) {
+    if (!gsClash(r, gsForm.elements[r.name].value)) continue;
+    if (r.key === "salePriceCol") sheet.includeSalePrice = false;
+    else if (r.scope === "inv") sheet[r.key] = "";
+    else sheet.oCols[r.key] = "";
   }
   gsSaving = true;
   $("gsMap").disabled = true;
@@ -1064,7 +1082,7 @@ gsForm.addEventListener("change", (e) => {
     $("gsGo").disabled = false;
   } else if (el.matches("table.map select")) {
     const r = GS_ROWS.find((x) => x.name === el.name);
-    setTag($(`gs-c-${r.name}`), el.value ? "yours" : "none", r.required);
+    setTag($(`gs-c-${r.name}`), el.value ? (gsClash(r, el.value) ? "formula" : "yours") : "none", r.required);
     $("gsRetryAi").hidden = true;
     gsValidate();
   } else if (el === $("gsInvTab") || el === $("gsOrdTab")) {
@@ -1146,13 +1164,18 @@ function renderKey(has) {
 // A pasted key often carries a space or a newline at its end: it is trimmed when saved.
 keyInput.addEventListener("input", () => {
   const v = keyInput.value.trim();
-  keyInput.setCustomValidity(!v || /^\S{20,200}$/.test(v) ? "" : "That doesn't look like an API key.");
+  keyInput.setCustomValidity(!keyInput.value || /^\S{20,200}$/.test(v) ? "" : "That doesn't look like an API key.");
 });
 
 $("keyForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const key = keyInput.value.trim();
+  if (!key) {
+    keyInput.value = "";
+    return keyInput.focus();
+  }
   try {
-    await chrome.storage.local.set({ geminiKey: keyInput.value.trim() });
+    await chrome.storage.local.set({ geminiKey: key });
   } catch {
     return toast("Couldn't save your key.", { kind: "error", action: { label: "Retry", onClick: () => $("keyForm").requestSubmit() } });
   }
