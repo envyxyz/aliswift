@@ -97,6 +97,36 @@ form {
   border-top: 1px solid var(--border);
 }
 
+/* The AI tab's key sits in a form, so its next group is not a .group sibling. */
+#keyForm + .group {
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-reset {
+  margin-left: auto;
+}
+
+#aiInstructions {
+  width: 100%;
+  min-height: 240px;
+  padding: 8px 12px;
+  font: inherit;
+  line-height: 1.45;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  resize: vertical;
+}
+
+.counter {
+  margin: -4px 0 0;
+  font-size: var(--fs-xs);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .group-head {
   display: flex;
   flex-wrap: wrap;

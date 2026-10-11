@@ -12,7 +12,9 @@
     "https://*.aliexpress.us/*",
     "https://sheets.googleapis.com/*",
     "https://www.googleapis.com/drive/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://*.alicdn.com/*",
+    "https://*.aliexpress-media.com/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
