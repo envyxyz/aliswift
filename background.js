@@ -1,10 +1,11 @@
-importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js");
+importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js", "lib/fillplan.js");
 
 // The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
 // Every handler resolves to { success: true, ... } or { success: false, error }. pagesOnly handlers
 // reject anything but AliSwift's own pages: a content script's sender.url is the web page it runs on.
+// ebayOnly handlers answer only the panel on eBay's listing form (see onListingForm).
 // A sheetId of "local" means the on-device library (no sheet, no sign-in).
 const handlers = {
   appendToSheet: { run: (request) => appendRow(request.data) },
@@ -26,6 +27,11 @@ const handlers = {
   mapSheet: { pagesOnly: true, run: (request) => mapSheet(request.data) },
   generateListing: { pagesOnly: true, run: (request) => generateListing(request) },
   saveListing: { pagesOnly: true, run: (request) => saveListing(request) },
+  listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
+  ebayContext: { ebayOnly: true, run: () => ebayContext() },
+  planFill: { ebayOnly: true, run: (request) => planFill(request) },
+  ebayDone: { ebayOnly: true, run: () => chrome.storage.local.remove("ebayTarget").then(() => ({ success: true })) },
+  openPage: { ebayOnly: true, run: (request) => openPage(request.page) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
@@ -40,7 +46,7 @@ const fail = (error) => ({
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!Object.hasOwn(handlers, request?.action)) return;
   const handler = handlers[request.action];
-  if (handler.pagesOnly && !sender.url?.startsWith(chrome.runtime.getURL(""))) {
+  if ((handler.pagesOnly && !sender.url?.startsWith(chrome.runtime.getURL(""))) || (handler.ebayOnly && !onListingForm(sender.url))) {
     sendResponse({ success: false, error: "Not allowed." });
     return;
   }
@@ -777,4 +783,76 @@ async function mapSheet(data) {
     mapped: mapTabs(tabs, ai),
   });
   return { success: true, draft };
+}
+
+/* eBay listing form (P6). The panel on eBay's /lstng page asks this worker for the product picked on the dashboard and
+   for Gemini's help with the item specifics. It never reads or writes a sheet. */
+
+// A message from the panel: the listing form on eBay UK or US, not any other page or site.
+function onListingForm(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && Object.values(REGIONS).some((r) => r.ebay === u.hostname) && u.pathname.startsWith("/lstng");
+  } catch {
+    return false;
+  }
+}
+
+// The dashboard's "List on eBay": remembers which product the panel works on (with what it needs to fill the form, so
+// the form never waits for a sheet) and opens eBay's listing start page for the sheet's marketplace. The price is kept
+// only when it is in that marketplace's currency, so a price is never typed into the wrong site.
+async function listOnEbay({ sheetId, key, product } = {}) {
+  const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
+  const id = text(key).slice(0, 40);
+  const slot = `listing:${sheetId}:${id}`;
+  if (!id || !(await chrome.storage.local.get({ [slot]: null }))[slot]) throw new Error("Create a listing for this product first.");
+  const p = product && typeof product === "object" ? product : {};
+  const region = REGIONS[sheet?.region] ? sheet.region : p.currency === "USD" ? "US" : "UK";
+  const currency = REGIONS[sheet?.region] ? REGIONS[sheet.region].currency : text(p.currency);
+  const price = num(p.salePrice) > 0 && currency === REGIONS[region].currency ? num(p.salePrice) : null;
+  const ebayTarget = { sheetId, key: id, sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), price, region, at: Date.now() };
+  await chrome.storage.local.set({ ebayTarget });
+  await chrome.tabs.create({ url: `https://${REGIONS[region].ebay}/sl/prelist/suggest` });
+  return { success: true, region };
+}
+
+// The picked product and its saved listing, or {} when none was picked or its listing is gone.
+async function ebayPick() {
+  const { ebayTarget: target } = await chrome.storage.local.get({ ebayTarget: null });
+  if (!target) return {};
+  const slot = `listing:${target.sheetId}:${target.key}`;
+  return { target, listing: (await chrome.storage.local.get({ [slot]: null }))[slot]?.listing };
+}
+
+// What the panel shows and fills: { target: { sku, title, price, currency, host } | null, listing: { title, description,
+// html, specifics } | null }. The description comes as plain text (to copy) and as eBay's HTML (to fill); the listing's
+// own item specifics are what the panel offers to copy when the AI step fails.
+async function ebayContext() {
+  const { target, listing } = await ebayPick();
+  if (!target) return { success: true, target: null, listing: null };
+  const region = REGIONS[target.region] ?? REGIONS.UK;
+  return {
+    success: true,
+    target: { sku: target.sku, title: target.title, price: target.price == null ? "" : target.price.toFixed(2), currency: region.currency, host: region.ebay },
+    listing: listing ? { title: listing.title, description: listing.description, html: toEbayHtml(listing.description), specifics: listing.itemSpecifics ?? [] } : null,
+  };
+}
+
+// Gemini matches the form's empty item specifics to the saved listing. { fields, category } from the panel (cleaned
+// here) -> { success, answers: [{ name, value }] } of checked answers only. A failed reply has Gemini's `code`.
+async function planFill({ fields, category } = {}) {
+  const { target, listing } = await ebayPick();
+  if (!listing) throw new Error("Choose a product on the dashboard first.");
+  const list = cleanFields(fields);
+  if (!list.some(askable)) return { success: true, answers: [] };
+  const raw = await callGemini({ ...buildFillRequest(list, target, listing, category), timeoutMs: 45000 });
+  return { success: true, answers: validateFillPlan(raw, list) };
+}
+
+// The panel can't open extension pages itself.
+const PAGES = { dashboard: "dashboard/dashboard.html", settings: "options/options.html#ai" };
+async function openPage(page) {
+  if (!Object.hasOwn(PAGES, page)) throw new Error("Unknown page.");
+  await chrome.tabs.create({ url: chrome.runtime.getURL(PAGES[page]) });
+  return { success: true };
 }

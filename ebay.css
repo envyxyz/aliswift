@@ -1,0 +1,172 @@
+/* The AliSwift panel on eBay's listing form. Loaded into the panel's own shadow root after lib/ui.css, so eBay's CSS
+   can't reach it and it can't reach eBay's. Layout and copy: design-p2-6.md, surface 10. */
+
+:host {
+  all: initial;
+}
+
+.ali {
+  position: fixed;
+  z-index: 99999; /* one below eBay's own dialogs (100000), which then dim the panel */
+  top: 16px;
+  right: 16px;
+  width: 320px;
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color-scheme: light dark;
+  font: 14px/1.5 var(--font);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow), 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+
+.ali-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 48px;
+  padding: 8px 8px 8px 14px;
+}
+
+.ali-head .bolt {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.ali-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ali-prod,
+.ali-mini {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ali-mini {
+  display: none;
+}
+
+.ali-collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  transition: grid-template-rows var(--dur) var(--ease);
+}
+
+.ali-inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ali-body {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  padding: 0 14px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ali-foot {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ali-foot .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.ali-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.ali-summary svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.ali-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ali-rows .copy-value {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+}
+
+.ali-acts {
+  grid-area: action;
+  display: flex;
+  align-self: start;
+}
+
+.ali-hint {
+  grid-column: 1 / -1;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.ali[data-collapsed] {
+  width: auto;
+  max-width: 320px;
+}
+
+.ali[data-collapsed] .ali-collapsible {
+  grid-template-rows: 0fr;
+}
+
+.ali[data-collapsed] .ali-prod {
+  display: none;
+}
+
+.ali[data-collapsed] .ali-mini {
+  display: block;
+}
+
+.ali[data-collapsed] #ali-toggle svg {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 1179px) {
+  .ali {
+    top: auto;
+    bottom: 16px;
+    width: min(420px, calc(100vw - 32px));
+    max-height: min(70dvh, 520px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ali-collapsible {
+    transition: none;
+  }
+  .spin {
+    animation: none;
+  }
+}

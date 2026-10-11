@@ -2453,7 +2453,7 @@ function setListingBusy(on) {
 
 // Regenerate and Copy all need a listing to act on.
 function syncListingFooter() {
-  lsEl("lsRegen").hidden = lsEl("lsCopyAll").hidden = !ls.record;
+  lsEl("lsRegen").hidden = lsEl("lsCopyAll").hidden = lsEl("lsEbay").hidden = !ls.record;
 }
 
 function showListingError({ message, detail, retry, settings }) {
@@ -2682,6 +2682,14 @@ function setupListingDialog() {
   lsEl("lsRegenGo").onclick = () => {
     askReplace(false);
     generateListing(true);
+  };
+
+  // Remembers this product for the panel on eBay's listing form and opens eBay's listing start page.
+  lsEl("lsEbay").onclick = async () => {
+    if (!(await saveListingEdits())) return;
+    const res = await sendMessage({ action: "listOnEbay", sheetId: ls.sheetId, key: ls.key, product: listingProductOf(ls.product) });
+    if (res.success) toast("Opened eBay.", { kind: "neutral", detail: "On the listing page, press Fill form." });
+    else toast("Couldn't open eBay.", { kind: "error", detail: res.error });
   };
 
   lsEl("lsCopyAll").onclick = async (e) => {
