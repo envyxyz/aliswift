@@ -710,7 +710,7 @@ test("the dashboard only sends the messages it should, and never puts data into 
   const js = readFile("dashboard/dashboard.js");
   const actions = new Set([...js.matchAll(/action: "(\w+)"/g)].map((m) => m[1]));
   // Nothing here can delete a row or clear a cell: removing is setStatus, and the rest only reads or adds.
-  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "setRate", "generateListing", "saveListing", "listOnEbay"];
+  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "setRate", "generateListing", "saveListing", "listOnEbay", "fillPhotos"];
   for (const action of actions) assert.ok(allowed.includes(action), `unexpected message ${action}`);
   assert.ok(actions.has("generateListing") && actions.has("saveListing"));
   for (const [line] of js.matchAll(/^.*\.innerHTML.*$/gm)) assert.match(line, /\.innerHTML = "";?\s*$/, line); // only ever cleared

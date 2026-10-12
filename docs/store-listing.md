@@ -18,7 +18,9 @@ Save products directly into a custom or auto-configured Google Sheet, or store t
 - Full Dashboard: Review saved products in a visual gallery, inspect supplier links, adjust listing statuses, and track fulfillment orders in a filterable table.
 - AI Listing Generation: Generate search-optimized eBay titles (up to 80 characters), descriptions, and item specifics from product cards on the dashboard using your own Gemini key. Editable with one-click copy buttons for every field.
 - eBay Listing Panel: An injected side panel on eBay listing pages (`ebay.com` and `ebay.co.uk`) that fills deterministic fields (title, SKU, description, price) and uses Gemini to fill item specifics. Unfillable fields become copy buttons; never presses "List it" and never fills Condition.
-- Non-Destructive and Safe: AliSwift strictly appends new rows and updates selected status cells. It never deletes rows, clears cells, or overwrites formulas in your spreadsheets.
+- eBay Listing Photos: Optionally pass up to 12 AliExpress gallery photos to eBay's uploader when filling forms, or save them to your Downloads folder as a fallback.
+- Photos for Older Products: Automatically retrieves share photos from public AliExpress pages for previously saved items without a photo, updating dashboard cards and filling empty sheet cells.
+- Non-Destructive and Safe: AliSwift appends new rows, updates selected cells, and adds SKU or Image columns only if you say yes. It never deletes, clears, or overwrites.
 - Privacy First: Serverless architecture. No third-party servers, no analytics, no account registration. Product data is stored only on your device or in your own Sheet, never on our servers (we have none). Your Gemini key stays in storage.local on this device, is sent only to Google's Gemini API, and is not included in settings export.
 
 ## Single-Purpose Statement
@@ -52,6 +54,9 @@ Each requested permission and host permission in manifest.json is strictly requi
 
 8. `https://*.aliexpress-media.com/*`:
    Required to load product media assets from AliExpress media CDN for Gemini listing generation.
+
+9. `downloads` (optional):
+   Asked for only when you turn on image inclusion in settings; used to save product photos to your Downloads folder if eBay's uploader does not take them.
 
 ## Data Usage Disclosure Answers
 

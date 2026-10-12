@@ -319,6 +319,7 @@
     if (t.sku) row("sku", "Custom label", t.sku, "pending");
     row("description", "Description", l.description, "pending");
     row("price", `Price (${t.currency})`, t.price, "pending");
+    if (ctx.photos?.count) row("photos", "Photos", photoWords(ctx.photos.count), "pending");
   }
 
   function finish() {
@@ -339,6 +340,7 @@
         report: "AliSwift form report",
         page: `${location.hostname}${location.pathname}`,
         target: ctx?.target ? { host: ctx.target.host, currency: ctx.target.currency } : null,
+        photos: ctx?.photos ? { on: ctx.photos.on, count: ctx.photos.count } : null,
         found,
         rows: [...rows.values()].map((r) => [r.id, r.status]),
         controls: listControls(document).map(({ el, ...c }) => c),
@@ -455,6 +457,60 @@
     render();
   }
 
+  /* Photos (the setting "Include images"). They go to eBay's own uploader as files, the way a seller's choice in the file
+     picker does; when the form does not take them, the worker saves them to a folder in Downloads for the seller to drag in. */
+
+  const photoWords = (n) => `${n} ${n === 1 ? "photo" : "photos"}`;
+  const toFile = ({ mime, data, name }) => new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], name, { type: mime });
+
+  // A variant's photo has no place on the form of a single listing, so those are always saved, one folder per variant.
+  async function saveVariants(n) {
+    const saved = await send({ action: "ebayPhotosSave", variantsOnly: true });
+    const hint = saved.success
+      ? `Saved to Downloads\\${saved.folder}, one folder per variant.`
+      : saved.code === "permission" ? "Allow Downloads in AliSwift settings to save them to folders." : saved.error ?? "Couldn't save them.";
+    row("variants", "Variant photos", `${n} ${n === 1 ? "variant" : "variants"}`, saved.success ? "filled" : "needs", { hint });
+  }
+
+  async function addPhotos() {
+    const count = ctx.photos.count;
+    const variants = ctx.photos.variants ?? 0;
+    row("photos", "Photos", photoWords(count), "filling");
+    render();
+    const files = [];
+    for (let n = 0; n < count && !dismissed; n++) {
+      const res = await send({ action: "ebayPhoto", n });
+      if (res.success && res.image) files.push(toFile(res.image));
+    }
+    if (dismissed) return;
+    const input = await until(() => photoBox(document), 4000);
+    const zone = photoZone(document);
+    // The file box first, then a drop on the drop zone. A try counts when the form shows more photos than before.
+    const tries = [input && (() => giveFiles(input, files)), zone && (() => dropFiles(zone, files))].filter(Boolean);
+    let ok = false;
+    for (const give of files.length ? tries : []) {
+      const before = photoCount(document);
+      give();
+      ok = Boolean(await until(() => photoCount(document) > before, 12000));
+      if (ok) break;
+    }
+    found.photos = ok ? "attached" : "not attached";
+    if (ok) {
+      row("photos", "Photos", photoWords(files.length), "filled");
+      if (variants) await saveVariants(variants);
+      return;
+    }
+    const saved = await send({ action: "ebayPhotosSave" });
+    const more = variants ? ` The ${variants === 1 ? "variant's photo is" : "variants' photos are"} in folders named after ${variants === 1 ? "it" : "them"}.` : "";
+    const hint = saved.success
+      ? `The form didn't take them. ${saved.saved} saved to Downloads\\${saved.folder}: drag them into the photo box.${more}`
+      : saved.code === "permission"
+        ? "The form didn't take them, and Downloads isn't allowed, so they couldn't be saved. Allow it in AliSwift settings, or add them yourself."
+        : `The form didn't take them. ${saved.error ?? "Add them yourself."}`;
+    found.photos += saved.success ? ", saved to a folder" : ", not saved";
+    row("photos", "Photos", photoWords(count), "needs", { field: zone, hint });
+  }
+
   // Lazily drawn parts of the form (the price, the description) only exist once they have scrolled into view.
   async function reveal() {
     const top = scrollY;
@@ -467,7 +523,8 @@
   function failure(res) {
     if (res.code === "nokey" || res.code === "invalid-key") return { tone: "error", text: "AI isn't set up. Check your Gemini key in AliSwift settings.", settings: true };
     if (res.code === "rate") return { tone: "warn", text: "Gemini is busy or over its limit. Try again in a minute.", retry: true };
-    return { tone: "warn", text: "AI couldn't match this form. Your listing's own fields are filled; the rest are ready to copy.", retry: true };
+    const why = { timeout: "Gemini took too long.", network: "Couldn't reach Gemini." }[res.code] ?? (res.error ? `Gemini said: ${res.error}` : "");
+    return { tone: "warn", text: `AI couldn't match this form. ${why} Your listing's own fields are filled; the rest are ready to copy.`.replace("  ", " "), retry: true };
   }
 
   async function fillForm() {
@@ -498,6 +555,10 @@
       await wait(500);
       await fillSpecifics(category, tried);
     }
+    if (ctx.photos?.count && !dismissed && rows.get("photos")?.status !== "filled") {
+      phase = "filling";
+      await addPhotos();
+    }
     phase = "done";
     render();
   }
@@ -517,6 +578,7 @@
     const wire = open.map(({ el, block, ...f }) => f); // what leaves the page holds no element
     const plan = await send({ action: "planFill", fields: wire, category });
     if (!plan.success) {
+      found.aiError = [plan.code, plan.status, plan.model, plan.error].filter(Boolean).join(" | "); // for the report
       notice = failure(plan);
       for (const s of ctx.listing.specifics ?? []) row(`spec:${s.name}`, s.name, s.value, "copy");
       for (const f of open) if (f.required) row(f.name, f.label, "", "needs", { field: f.el, hint: "Required. Choose a value on eBay." });

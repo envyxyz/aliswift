@@ -17,8 +17,18 @@ const LABELS = { sheet: "Add to Sheet", local: "Save to library" };
 let dest = "sheet";
 let resetTimer;
 
+// A page left open while the extension reloads or updates is cut off from it: sendMessage then throws at once (a .catch on
+// its promise doesn't see that), so every ask goes through here and gets null.
+const ask = (message) => {
+  try {
+    return chrome.runtime.sendMessage(message).catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+};
+
 async function refreshDest() {
-  const state = await chrome.runtime.sendMessage({ action: "authState" }).catch(() => null);
+  const state = await ask({ action: "authState" });
   if (!state) return; // the worker didn't answer: keep what is known
   dest = destination(state.signedIn, await getActiveSheet());
   const btn = document.getElementById("aliswift-page-btn");
@@ -50,9 +60,48 @@ function getTitle(maxWords, excludeKeywords) {
     .join(" ");
 }
 
-// The product photo: the page's share image. ponytail: AliExpress's own gallery selectors are not verified, so only this is read.
+// The product photo: the page's share image (og:image / twitter:image / structured data) or primary gallery photo.
 function getImage() {
-  return httpsUrl(document.querySelector('meta[property="og:image"]')?.content, location.href);
+  const meta =
+    document.querySelector('meta[property="og:image"]')?.content ||
+    document.querySelector('meta[name="og:image"]')?.content ||
+    document.querySelector('meta[property="twitter:image"]')?.content ||
+    document.querySelector('meta[name="twitter:image"]')?.content ||
+    document.querySelector('link[rel="image_src"]')?.href;
+  const fromMeta = httpsUrl(meta, location.href);
+  if (fromMeta) return fullSizePhoto(fromMeta);
+
+  for (const s of document.querySelectorAll?.('script[type="application/ld+json"]') ?? []) {
+    try {
+      const data = JSON.parse(s.textContent || "");
+      const items = Array.isArray(data) ? data : [data];
+      for (const it of items) {
+        const raw = it?.image || (it?.["@type"] === "Product" && it?.image);
+        const list = Array.isArray(raw) ? raw : [raw];
+        for (const r of list) {
+          const u = httpsUrl(typeof r === "string" ? r : r?.url, location.href);
+          if (u) return fullSizePhoto(u);
+        }
+      }
+    } catch {}
+  }
+
+  const mainSel = '[class*="magnifier"] img, [class*="image-view"] img, [class*="slider--img"] img, [class*="slider--wrap"] img, [class*="gallery"] img, [data-pl="product-image"] img, [class*="sku-item--image"] img';
+  for (const img of document.querySelectorAll?.(mainSel) ?? []) {
+    const src = img.currentSrc || img.src || img.getAttribute?.("data-src") || img.getAttribute?.("src");
+    const u = httpsUrl(src, location.href);
+    if (u) return fullSizePhoto(u);
+  }
+
+  for (const img of document.querySelectorAll?.("img") ?? []) {
+    const src = img.currentSrc || img.src || img.getAttribute?.("data-src") || img.getAttribute?.("src");
+    if (src && /alicdn\.com|aliexpress-media\.com/i.test(src) && /\/kf\//.test(src)) {
+      const u = httpsUrl(src, location.href);
+      if (u) return fullSizePhoto(u);
+    }
+  }
+
+  return "";
 }
 
 function getLink() {
@@ -68,6 +117,13 @@ function getLink() {
 function getDetails() {
   const all = (sel) => [...(document.querySelectorAll?.(sel) ?? [])];
   const pick = (el, sel) => el.querySelector(sel)?.textContent ?? "";
+  // The options that have a photo of their own (a colour or a style), one per picture in a property block: its name is the
+  // picture's alt text, its property ("Color") the part of the block's title before the colon. Size and other text-only
+  // options have no picture, so they are not here. Nothing is clicked: the page keeps the seller's own choice.
+  const variants = all('[class*="sku-item--property"]').flatMap((prop) => {
+    const group = pick(prop, '[class*="sku-item--title"]').split(":")[0].trim();
+    return [...prop.querySelectorAll('[class*="sku-item--image"] img')].map((img) => ({ group, name: (img.alt || img.title || "").trim(), image: fullSizePhoto(img.src) }));
+  });
   const specs = all('[class*="specification--prop"]').slice(0, 50).map((p) => [pick(p, '[class*="specification--title"]'), pick(p, '[class*="specification--desc"]')]);
   const gallery = all('[class*="slider--img"] img, [class*="image-view"] img, [class*="slider--wrap"] img').map((img) => fullSizePhoto(img.src));
   return {
@@ -75,6 +131,7 @@ function getDetails() {
     specs,
     description: document.querySelector('meta[name="description"]')?.content ?? "",
     images: [...new Set([getImage(), ...gallery].filter(Boolean))],
+    variants,
   };
 }
 
@@ -102,7 +159,7 @@ async function aiPrices() {
   const candidates = priceCandidates();
   if (!candidates.length) return null;
   const title = document.querySelector('h1[data-pl="product-title"]')?.textContent ?? document.title;
-  const res = await chrome.runtime.sendMessage({ action: "aiMap", task: "product", items: { title, candidates } }).catch(() => null);
+  const res = await ask({ action: "aiMap", task: "product", items: { title, candidates } });
   const a = res?.success ? res.answer : null;
   const price = candidates[a?.price];
   if (!price || !(parsePrice(price.text) > 0)) return null;
@@ -143,7 +200,7 @@ async function scrapeRow(where = dest) {
     row.kind = currencyKind(from, to);
     let rate = 1;
     if (row.kind === "convert") {
-      const found = await chrome.runtime.sendMessage({ action: "rate", data: { sheetId: sheet.id, from, to } }).catch(() => null);
+      const found = await ask({ action: "rate", data: { sheetId: sheet.id, from, to } });
       rate = found?.rate || null;
       row.fx = { from, to, price, shipping, rate, source: found?.source, at: found?.at };
     }
@@ -211,13 +268,15 @@ async function run(kind) {
     else if (row.fx && !row.fx.rate) {
       result = { error: `Prices are ${row.fx.from}, sheet is ${row.fx.to}. Set a rate in the popup.` };
     } else {
+      const details = getDetails();
+      const finalImage = image || details.images?.[0] || details.variants?.[0]?.image || "";
       result = await chrome.runtime.sendMessage({
         action: kind === "list" ? "quickList" : "appendToSheet",
-        data: { title, price, salePrice, link, currency, image, dest: where, details: getDetails() },
+        data: { title, price, salePrice, link, currency, image: finalImage, dest: where, details },
       });
     }
   } catch (e) {
-    result = { error: e.message };
+    result = { error: /context invalidated/i.test(e.message) ? "AliSwift was updated. Reload this page and try again." : e.message };
   }
 
   let message;
@@ -305,6 +364,10 @@ document.addEventListener("visibilitychange", () => document.visibilityState ===
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action !== "scrape") return;
   // The popup saves what it shows, with the details the listing writer uses (read here, where the page is).
-  scrapeRow(request.dest).then((row) => sendResponse({ ...row, details: getDetails() }));
+  scrapeRow(request.dest).then((row) => {
+    const details = getDetails();
+    const image = row.image || details.images?.[0] || details.variants?.[0]?.image || "";
+    sendResponse({ ...row, image, details });
+  });
   return true;
 });

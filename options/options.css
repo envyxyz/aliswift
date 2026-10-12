@@ -237,6 +237,28 @@ footer a {
   --dialog-w: 560px;
 }
 
+#colsDialog {
+  --dialog-w: 480px;
+}
+
+/* What each missing column is for, in the "Add the missing columns?" dialog. */
+.cols-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cols-list li {
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 /* A fieldset used only to group or lock its children. */
 fieldset.bare {
   display: grid;

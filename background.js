@@ -24,7 +24,9 @@ const handlers = {
   addOrder: { pagesOnly: true, run: (request) => addOrder(request.sheetId, request.order) },
   updateOrder: { pagesOnly: true, run: (request) => updateOrder(request) },
   moveLocal: { pagesOnly: true, run: (request) => moveLocal(request.sheetId) },
-  importLibrary: { pagesOnly: true, run: (request) => importLibrary(request.library) },
+  importLibrary: { pagesOnly: true, run: (request) => importLibrary(request.library, request.photos) },
+  addColumns: { pagesOnly: true, run: (request) => addColumns(request.sheetId, request.columns) },
+  fillPhotos: { pagesOnly: true, run: (request) => fillPhotos(request.sheetId, request.links, request.retry) },
   listSpreadsheets: { pagesOnly: true, run: () => listSpreadsheets() },
   readSpreadsheetMeta: { pagesOnly: true, run: (request) => readSpreadsheetMeta(request.id) },
   mapSheet: { pagesOnly: true, run: (request) => mapSheet(request.data) },
@@ -33,6 +35,8 @@ const handlers = {
   listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
   ebayContext: { ebayOnly: true, run: () => ebayContext() },
   ebayProducts: { ebayOnly: true, run: () => ebayProducts() },
+  ebayPhoto: { ebayOnly: true, run: (request) => ebayPhoto(request.n) },
+  ebayPhotosSave: { ebayOnly: true, run: (request) => savePhotos(request.variantsOnly === true) },
   importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
   aiMap: { aiTask: true, run: (request, sender) => aiMap(request, sender) },
   ebaySelect: { ebayOnly: true, run: (request) => ebaySelect(request) },
@@ -84,8 +88,15 @@ function enqueue(job) {
 // `dest: "local"` saves to the library; anything else goes to the sheet. Nothing here ever turns a failed
 // sheet save into a library save: the page that asked decides.
 async function appendRow(data) {
-  const result = await enqueue(() => (data?.dest === "local" ? saveLocal(data) : writeRow(data)));
-  if (result.success) await saveDetails(data);
+  const local = data?.dest === "local";
+  if (!data?.image && data?.details) {
+    data.image = httpsUrl(data.details?.images?.[0]) || httpsUrl(data.details?.variants?.[0]?.image) || "";
+  }
+  const result = await enqueue(() => (local ? saveLocal(data) : writeRow(data)));
+  if (result.success) {
+    await saveDetails(data);
+    if (!local) await enqueue(() => rememberPhotos([data]));
+  }
   return result;
 }
 
@@ -396,6 +407,28 @@ async function readProducts(sheet) {
       profit: num(c.profit[i]), margin: num(c.margin[i]),
     });
   }
+  // A sheet with no Image column (or an empty cell) still shows the photo this device kept when the product was saved.
+  const bare = products.filter((p) => !p.image && p.link);
+  if (bare.length) {
+    const keys = bare.map((p) => `details:${itemIdOf(p.link)}`).filter((k) => k !== "details:");
+    const storage = await chrome.storage.local.get({ photos: {}, ...Object.fromEntries(keys.map((k) => [k, null])) });
+    const photos = storage.photos || {};
+    const newPhotos = {};
+    for (const p of bare) {
+      const id = itemIdOf(p.link);
+      const pk = photoKey(p.link);
+      let img = httpsUrl(photos[pk]);
+      if (!img && id && storage[`details:${id}`]) {
+        const d = storage[`details:${id}`];
+        img = httpsUrl(d?.images?.[0]) || httpsUrl(d?.variants?.[0]?.image);
+        if (img) newPhotos[pk] = img;
+      }
+      p.image = img;
+    }
+    if (Object.keys(newPhotos).length) {
+      await chrome.storage.local.set({ photos: cleanPhotos({ ...photos, ...newPhotos }) });
+    }
+  }
   return { products, sharedBy };
 }
 
@@ -549,6 +582,293 @@ async function importOrders({ orders } = {}) {
   });
 }
 
+/* Photos and columns: where a product's picture lives */
+
+// The photo of every product saved to a sheet is also kept on this device, by AliExpress item number (the link when it
+// has none). The dashboard shows it for a product whose sheet has no Image column, or no link in that row's cell, so a
+// sheet without the column still shows photos. It survives updates; a settings backup carries it too. The sheet's own
+// Image column is what survives everything, which is why addColumns below offers one.
+const photoKey = (link) => itemIdOf(link) || text(link).slice(0, 200);
+
+// ponytail: never fails the save it follows (it only repeats what the sheet got), and never trims below PHOTOS_MAX.
+async function rememberPhotos(items) {
+  try {
+    const add = cleanPhotos(Object.fromEntries(items.map((x) => [photoKey(x.link), x.image])));
+    if (!Object.keys(add).length) return;
+    const { photos } = await chrome.storage.local.get({ photos: {} });
+    await chrome.storage.local.set({ photos: cleanPhotos({ ...photos, ...add }) });
+  } catch {
+    // the photo is only missing from the fallback
+  }
+}
+
+/* Photos for products saved before AliSwift kept them. A link pasted into a chat shows the product's picture: the page names
+   it in its og:image tag, in the first bytes AliExpress sends, with no sign-in and no script (checked on live product pages,
+   served the same to a browser and to link-preview bots). So a product with a link and no photo gets that one. */
+
+// The share image of a product page's HTML: its og:image (else twitter:image, else the first photo of its gallery data), at
+// full size, or "" when the page names none on AliExpress's image hosts.
+function shareImage(html) {
+  const attr = (tag, name) => new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i").exec(tag)?.slice(1).find((v) => v !== undefined) ?? "";
+  const source = String(html ?? "");
+  const metas = [...source.matchAll(/<meta\b[^>]*>/gi)].map((m) => m[0]);
+  const named = (key) => metas.find((m) => attr(m, "(?:property|name)").toLowerCase() === key);
+  const gallery = /"imagePathList"\s*:\s*\[\s*"([^"]+)"/.exec(source)?.[1];
+  for (const raw of [attr(named("og:image") ?? "", "content"), attr(named("twitter:image") ?? "", "content"), gallery]) {
+    const clean = String(raw ?? "").replace(/&amp;/g, "&").replace(/\\/g, "").trim();
+    const url = fullSizePhoto(clean.startsWith("//") ? "https:" + clean : clean);
+    if (url && onPhotoHost(url)) return url;
+  }
+  return "";
+}
+
+// The share image of an AliExpress item, read from its public page without cookies. "" when the page loaded and names no
+// photo (the product is gone); null when the page could not be had (network error, or AliExpress's "punish" check page
+// that it serves to anyone fetching too fast), which says nothing about the product.
+async function fetchShareImage(id) {
+  try {
+    const res = await fetch(`https://www.aliexpress.com/item/${id}.html`, { credentials: "omit", signal: AbortSignal.timeout(12000) });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 500000);
+    return html.includes("_____tmd_____") ? null : shareImage(html);
+  } catch {
+    return null;
+  }
+}
+
+const MISS_MS = 3 * 24 * 3600 * 1000; // a page that loaded with no photo is not asked again for three days
+
+// For up to 60 product links (from the dashboard's list) that have no photo: reads each one's share image, three pages at a
+// time, keeps it on this device (the dashboard's fallback) and, where the sheet has an Image column with that row's cell
+// empty, writes it there too (an empty cell, nothing else), or into the library's record. Answers { photos: { link: url } }
+// for the links it found a photo for. A page with no photo is remembered as a miss for a few days; a page that could not be
+// had is not, and the first one stops the round (AliExpress is slowing us down).
+// `retry` lists links whose photo (the sheet's, or the one kept here) would not load: those are fetched again even if one is kept.
+async function fillPhotos(sheetId, links, retry) {
+  const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
+  const wanted = [...new Set((Array.isArray(links) ? links : []).slice(0, 200).map(text))].map((link) => ({ link, id: itemIdOf(link) })).filter((x) => x.id);
+  const again = new Set(Array.isArray(retry) ? retry.map(text) : []);
+  const now = Date.now();
+  const { photos, photoGone: photoMiss } = await chrome.storage.local.get({ photos: {}, photoGone: {} });
+  const todo = wanted.filter((x) => (again.has(x.link) || !photos[photoKey(x.link)]) && !(now - (photoMiss[x.id] ?? 0) < MISS_MS)).slice(0, 60);
+  const found = {};
+  const missed = [];
+  let blocked = false;
+  for (let i = 0; i < todo.length && !blocked; i += 2) {
+    await Promise.all(
+      todo.slice(i, i + 2).map(async (x) => {
+        const url = await fetchShareImage(x.id);
+        if (url) found[x.link] = url;
+        else if (url === null) blocked = true;
+        else missed.push(x.id);
+      }),
+    );
+  }
+  const keep = Object.fromEntries(Object.entries(photoMiss).filter(([, at]) => now - at < MISS_MS).concat(missed.map((id) => [id, now])).slice(-2000));
+  await enqueue(async () => {
+    if (sheet) await rememberPhotos(Object.entries(found).map(([link, image]) => ({ link, image })));
+    await chrome.storage.local.set({ photoGone: keep });
+    if (!Object.keys(found).length) return;
+    if (!sheet) {
+      const { library } = await chrome.storage.local.get({ library: [] });
+      await chrome.storage.local.set({ library: library.map((x) => (!x.image && found[x.link] ? { ...x, image: found[x.link] } : x)) });
+    } else if (sheet.imageCol) {
+      try {
+        const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol, image: sheet.imageCol }, sheet.startRow);
+        await putCells(sheet.id, sheet.sheetTab, c.link.flatMap((l, i) => (!text(c.image[i]) && found[text(l)] ? [[`${sheet.imageCol}${sheet.startRow + i}`, found[text(l)]]] : [])));
+      } catch {
+        // the sheet can't be written now (signed out, read-only): the photo is kept on this device all the same
+      }
+    }
+  });
+  return { success: true, photos: found, fetched: Object.keys(found).length, missed: missed.length };
+}
+
+// Listings are filed under a product's key: when the key changes (a library SKU becomes a sheet's, an item number
+// becomes a SKU), the listing follows it. `pairs` are [from, to]; a listing that is not there is skipped.
+async function moveListings(pairs) {
+  const found = await chrome.storage.local.get(Object.fromEntries(pairs.map(([from]) => [from, null])));
+  const kept = pairs.filter(([from]) => found[from] != null);
+  if (!kept.length) return;
+  await chrome.storage.local.set(Object.fromEntries(kept.map(([from, to]) => [to, found[from]])));
+  await chrome.storage.local.remove(kept.map(([from]) => from));
+}
+
+/* The setting "Include images when creating listings". The eBay panel gives the picked product's photos to eBay's own
+   uploader (this worker fetches them: the panel cannot read AliExpress's image host). When eBay's form does not take
+   them, the worker saves them with chrome.downloads, an optional permission the options page asks for when the setting is
+   switched on, to Downloads/<sheet name>/<SKU>/ for the seller to drag in. */
+
+const photosOn = async () => Boolean((await chrome.storage.sync.get({ includeImages: false })).includeImages);
+
+// Is this address a photo on one of AliExpress's image hosts?
+const onPhotoHost = (u) => {
+  try {
+    return IMAGE_HOSTS.test(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+};
+
+// The picked product's photos, as { urls, variants }. urls: the gallery kept with its save (else its one photo), at most
+// PHOTOS_PER_LISTING. variants: the options that have a photo of their own (colour, style), [{ group, name, image }], at
+// most VARIANTS_MAX. Only addresses on AliExpress's image hosts, at full size (the same rule as the photos Gemini sees).
+async function photoSet(target) {
+  const id = itemIdOf(target.link);
+  const details = id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null;
+  const urls = [...new Set((details?.images?.length ? details.images : [target.image]).map((u) => fullSizePhoto(u)).filter(onPhotoHost))].slice(0, PHOTOS_PER_LISTING);
+  const seen = new Set();
+  const variants = [];
+  for (const v of details?.variants ?? []) {
+    const image = fullSizePhoto(v?.image);
+    if (!text(v?.name) || !onPhotoHost(image) || seen.has(image)) continue;
+    seen.add(image);
+    variants.push({ group: text(v.group), name: text(v.name), image });
+  }
+  return { urls, variants: variants.slice(0, VARIANTS_MAX) };
+}
+
+// The setting is on and a product is picked: { target, urls, variants }. The photo handlers all need that.
+async function photoTarget() {
+  if (!(await photosOn())) throw new Error("Photos are off. Turn on Include images in AliSwift settings.");
+  const { target } = await ebayPick();
+  if (!target) throw new Error("Choose a product first.");
+  return { target, ...(await photoSet(target)) };
+}
+
+const PHOTO_EXT = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
+const photoName = (n, ext) => `img-${String(Number(n) + 1).padStart(2, "0")}${ext}`;
+
+// Photo number n as { mime, data (base64), name } for the panel to turn into a file; image: null when it can't be fetched.
+async function ebayPhoto(n) {
+  const { urls } = await photoTarget();
+  const url = urls[Number(n)];
+  const image = url ? await fetchImage(url) : null;
+  return { success: true, image: image && { ...image, name: photoName(n, PHOTO_EXT[image.mime]) } };
+}
+
+// A folder or file name that is safe on Windows, Mac and Linux, and cannot climb out of Downloads.
+const safeName = (s) => text(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 60) || "AliSwift";
+
+// One folder name per variant, after the variant: its name, with its group in front when two variants share a name
+// (Windows folders do not tell Black from black, so neither does this).
+function variantFolders(variants) {
+  const taken = new Set();
+  return variants.map((v) => {
+    let dir = safeName(v.name);
+    if (taken.has(dir.toLowerCase())) dir = safeName(`${v.group} - ${v.name}`);
+    for (let n = 2; taken.has(dir.toLowerCase()); n++) dir = `${safeName(v.name)} (${n})`;
+    taken.add(dir.toLowerCase());
+    return { dir, image: v.image };
+  });
+}
+
+// What kind of file a photo is, as its host says (AliExpress's image host sends WebP for an address ending ".jpg", and a
+// saved file must not lie about it), else as its address says, else JPEG.
+async function photoExt(url) {
+  try {
+    const res = await fetch(url, { method: "HEAD", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(6000) });
+    const ext = PHOTO_EXT[(res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()];
+    if (ext) return ext;
+  } catch {
+    // the address decides
+  }
+  const m = /\.(jpe?g|png|webp)(?:[?#_]|$)/i.exec(url)?.[1].toLowerCase();
+  return m ? `.${m === "jpeg" ? "jpg" : m}`: ".jpg";
+}
+
+// Saves the picked product's photos to Downloads/<sheet name>/<SKU>/img-01.jpg and so on, and each variant's photo to
+// Downloads/<sheet name>/<SKU>/<variant name>/img-01.jpg. variantsOnly: just the variants (the gallery was attached to
+// the form, a variant's photo has no place on it). Needs the downloads permission.
+async function savePhotos(variantsOnly = false) {
+  const { target, urls, variants } = await photoTarget();
+  if (!chrome.downloads?.download) throw Object.assign(new Error("Allow downloads in AliSwift's settings to save photos to a folder."), { code: "permission" });
+  const store = target.sheetId === LOCAL ? "Library" : (await sheetById(target.sheetId)).name;
+  const folder = `${safeName(store)}/${safeName(target.sku || target.key)}`;
+  const jobs = [
+    ...(variantsOnly ? [] : urls.map((url, i) => ({ url, dir: folder, n: i }))),
+    ...variantFolders(variants).map(({ dir, image }) => ({ url: image, dir: `${folder}/${dir}`, n: 0 })),
+  ];
+  let saved = 0;
+  const stop = keepAlive(); // asking the host what each photo is, and saving, can take longer than the worker's 30 seconds
+  try {
+    const exts = await Promise.all(jobs.map((j) => photoExt(j.url)));
+    for (const [i, { url, dir, n }] of jobs.entries()) {
+      try {
+        await chrome.downloads.download({ url, filename: `${dir}/${photoName(n, exts[i])}`, conflictAction: "uniquify" });
+        saved++;
+      } catch {
+        // one photo that will not download does not stop the others
+      }
+    }
+  } finally {
+    stop();
+  }
+  if (!saved) throw new Error("The photos couldn't be saved.");
+  return { success: true, folder: folder.replace("/", "\\"), saved, total: jobs.length, variants: variants.length };
+}
+
+const NEW_COLUMNS = { skuCol: "SKU", imageCol: "Image URL" };
+
+// Adds the SKU and/or Image URL column to a sheet's Inventory tab, after the last column that has a value (AliSwift reads
+// columns A to Z), with its title in the header row. Only after the seller said yes (options page: "Add missing
+// columns?"), and the only place AliSwift changes a sheet's layout. It writes only into the new, empty columns, and the
+// new letters are saved in the sheet's settings. The products already there get SKUs numbered as the template does (the
+// prefix and their place in the list) and the photo link this device kept, if any. A listing written before the product
+// had a SKU was filed under its AliExpress item number: it follows the product to its SKU.
+async function addColumns(sheetId, wanted) {
+  const keys = [...new Set(Array.isArray(wanted) ? wanted : [])].filter((k) => Object.hasOwn(NEW_COLUMNS, k));
+  if (!keys.length) throw new Error("Choose a column to add.");
+  const sheet = await sheetById(sheetId);
+  return enqueue(async () => {
+    const fields = encodeURIComponent("sheets.properties(sheetId,title,gridProperties(columnCount))");
+    const tab = (await sheetsFetch(`/${sheet.id}?fields=${fields}`)).sheets?.find((s) => s.properties?.title === sheet.sheetTab)?.properties;
+    if (!tab) throw new Error(`There is no tab called "${sheet.sheetTab}" in that spreadsheet.`);
+    const { values = [] } = await sheetsFetch(`/${sheet.id}/values/${encodeURIComponent(quote(sheet.sheetTab))}?valueRenderOption=UNFORMATTED_VALUE`);
+
+    const first = values.reduce((n, r) => Math.max(n, r.length), 0); // the first column after the last one that has a value
+    if (first + keys.length > MAX_COLS) throw new Error(`There is no room: AliSwift uses columns A to Z and this tab already uses ${first} of them.`);
+    const columns = Object.fromEntries(keys.map((k, i) => [k, indexToCol(first + i)]));
+    const width = tab.gridProperties?.columnCount ?? 0;
+    if (first + keys.length > width) {
+      const requests = [{ appendDimension: { sheetId: tab.sheetId, dimension: "COLUMNS", length: first + keys.length - width } }];
+      await sheetsFetch(`/${sheet.id}:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests }) });
+    }
+
+    const at = (row, letter) => text(values[row - 1]?.[colToIndex(letter)]);
+    const rows = [];
+    for (let r = sheet.startRow; r <= values.length; r++) if (at(r, sheet.keywordsCol) || at(r, sheet.linkCol)) rows.push(r);
+    const head = sheet.startRow - 1; // the header row, when there is one
+    const cells = head >= 1 ? Object.entries(columns).map(([k, letter]) => [`${letter}${head}`, NEW_COLUMNS[k]]) : [];
+    const sku = (r) => `${sheet.skuPrefix}${String(r - sheet.startRow + 1).padStart(2, "0")}`;
+    if (columns.skuCol) cells.push(...rows.map((r) => [`${columns.skuCol}${r}`, sku(r)]));
+    let photos = 0;
+    if (columns.imageCol) {
+      const kept = (await chrome.storage.local.get({ photos: {} })).photos;
+      for (const r of rows) {
+        const url = httpsUrl(kept[photoKey(at(r, sheet.linkCol))]);
+        if (!url) continue;
+        photos++;
+        cells.push([`${columns.imageCol}${r}`, url]);
+      }
+    }
+    await putCells(sheet.id, sheet.sheetTab, cells);
+
+    // The titles look like their neighbours'. Cosmetic, so a refusal (a merged header, say) is not an error.
+    const last = head >= 1 ? (values[head - 1] ?? []).findLastIndex((c) => text(c)) : -1;
+    if (last >= 0) {
+      const range = (from, to) => ({ sheetId: tab.sheetId, startRowIndex: head - 1, endRowIndex: head, startColumnIndex: from, endColumnIndex: to });
+      const requests = [{ copyPaste: { source: range(last, last + 1), destination: range(first, first + keys.length), pasteType: "PASTE_FORMAT" } }];
+      await sheetsFetch(`/${sheet.id}:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests }) }).catch(() => {});
+    }
+    if (columns.skuCol) await moveListings(rows.map((r) => [`listing:${sheet.id}:${itemIdOf(at(r, sheet.linkCol))}`, `listing:${sheet.id}:${sku(r)}`]).filter(([from]) => !from.endsWith(":")));
+
+    const { sheets } = await chrome.storage.sync.get({ sheets: [] });
+    await chrome.storage.sync.set({ sheets: sheets.map((s) => (s.id === sheet.id ? { ...s, ...columns } : s)) });
+    return { success: true, columns, skus: columns.skuCol ? rows.length : 0, photos };
+  });
+}
+
 /* Library to sheet */
 
 // Moves the library's products into a sheet with one read and one write. A product already in the sheet (same
@@ -580,29 +900,25 @@ async function moveLocal(sheetId) {
     }
 
     const { fresh, dupes, skus } = await writeRows(sheet, items, true);
+    await rememberPhotos(fresh);
     const gone = [...fresh, ...dupes].map((x) => x.id);
     if (gone.length) await chrome.storage.local.set({ library: libTake(library, gone) });
 
     // A generated listing follows its product to the new key. ponytail: a re-run after a crash skips this, the listing is then regenerated.
-    const old = fresh.map((x, i) => [`listing:${LOCAL}:${x.sku}`, `listing:${sheetId}:${skus[i]}`]).filter(([, key]) => !key.endsWith(":"));
-    const listings = await chrome.storage.local.get(Object.fromEntries(old.map(([k]) => [k, null])));
-    const kept = old.filter(([k]) => listings[k] != null);
-    if (kept.length) {
-      await chrome.storage.local.set(Object.fromEntries(kept.map(([k, key]) => [key, listings[k]])));
-      await chrome.storage.local.remove(kept.map(([k]) => k));
-    }
+    await moveListings(fresh.map((x, i) => [`listing:${LOCAL}:${x.sku}`, `listing:${sheetId}:${skus[i]}`]).filter(([, key]) => !key.endsWith(":")));
     return { success: true, moved: fresh.length, skipped: dupes.length, needRate };
   });
 }
 
-// Adds the products of an imported backup to the library. Never replaces or removes any.
-function importLibrary(incoming) {
+// Adds the products and photos of an imported backup to this device's. Never replaces or removes any.
+function importLibrary(incoming, incomingPhotos = {}) {
   const items = cleanLibrary(incoming);
-  if (!items) throw new Error("That library isn't valid.");
+  const pics = cleanPhotos(incomingPhotos);
+  if (!items || !pics) throw new Error("That library isn't valid.");
   return enqueue(async () => {
-    const { library } = await chrome.storage.local.get({ library: [] });
+    const { library, photos } = await chrome.storage.local.get({ library: [], photos: {} });
     const lib = libMerge(library, items);
-    await chrome.storage.local.set({ library: lib });
+    await chrome.storage.local.set({ library: lib, photos: cleanPhotos({ ...pics, ...photos }) });
     return { success: true, added: lib.length - library.length };
   });
 }
@@ -666,7 +982,9 @@ async function aiMap({ task, items } = {}, sender) {
 /* Listings (Gemini). One listing per product, kept under listing:<sheetId>:<key> in storage.local ("local" is the
    library's sheetId). Nothing here reads or writes a sheet. */
 
-const IMAGES_MAX = 4;
+const IMAGES_MAX = 4; // photos Gemini looks at
+const PHOTOS_PER_LISTING = 12; // photos kept with a save, and attached to an eBay listing
+const VARIANTS_MAX = 40; // variants with a photo of their own kept with a save
 // Photos are fetched here, not by the page, from AliExpress's own hosts only. 3 MB each keeps four of them, as
 // base64, under Gemini's 20 MB request limit.
 const IMAGE_HOSTS = /(^|\.)(alicdn\.com|aliexpress-media\.com|aliexpress\.com|aliexpress\.us)$/;
@@ -687,9 +1005,11 @@ function cleanDetails(d) {
     fullTitle: text(d.fullTitle).slice(0, 500),
     specs: (Array.isArray(d.specs) ? d.specs : []).slice(0, 50).filter(Array.isArray).map(([k, v]) => [text(k).slice(0, 100), text(v).slice(0, 200)]).filter(([k, v]) => k && v),
     description: text(d.description).slice(0, 4000),
-    images: (Array.isArray(d.images) ? d.images : []).slice(0, 20).map((u) => httpsUrl(u)).filter(Boolean).slice(0, IMAGES_MAX),
+    images: (Array.isArray(d.images) ? d.images : []).slice(0, 20).map((u) => httpsUrl(u)).filter(Boolean).slice(0, PHOTOS_PER_LISTING),
+    // The options that have a photo of their own (colour, style): { group, name, image }. Their photos are saved in a folder each.
+    variants: (Array.isArray(d.variants) ? d.variants : []).slice(0, 100).map((v) => ({ group: text(v?.group).slice(0, 40), name: text(v?.name).slice(0, 80), image: httpsUrl(v?.image) })).filter((v) => v.name && v.image).slice(0, VARIANTS_MAX),
   };
-  return out.fullTitle || out.specs.length || out.description || out.images.length ? { ...out, savedAt: Date.now() } : null;
+  return out.fullTitle || out.specs.length || out.description || out.images.length || out.variants.length ? { ...out, savedAt: Date.now() } : null;
 }
 
 // Keeps a saved product's details (details:<item number>) for its listing. Never fails the save it follows.
@@ -772,7 +1092,7 @@ async function generateListing({ sheetId, product, force } = {}) {
 
   // `product` is what the eBay panel's cards show (SKU, name, sell price), kept with the listing so the panel needs no
   // sheet read. The cost price is never kept here.
-  const meta = { sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), salePrice: num(p.salePrice), currency: text(currency).slice(0, 3), link: text(p.link).slice(0, 2000) };
+  const meta = { sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), salePrice: num(p.salePrice), currency: text(currency).slice(0, 3), link: text(p.link).slice(0, 2000), image: httpsUrl(p.image) };
   const record = { listing, limited: !details, model, createdAt: Date.now(), warnings, product: meta };
   await chrome.storage.local.set({ [slot]: record });
   return { success: true, key, ...record };
@@ -946,7 +1266,7 @@ async function pickTarget(sheetId, key, product) {
   const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const currency = REGIONS[sheet?.region] ? REGIONS[sheet.region].currency : text(p.currency);
   const price = num(p.salePrice) > 0 && currency === REGIONS[region].currency ? num(p.salePrice) : null;
-  const ebayTarget = { sheetId, key: id, sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), price, region, at: Date.now() };
+  const ebayTarget = { sheetId, key: id, sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), price, region, link: text(p.link).slice(0, 2000), image: httpsUrl(p.image), at: Date.now() };
   await chrome.storage.local.set({ ebayTarget });
   return region;
 }
@@ -973,8 +1293,10 @@ async function ebayContext() {
   const { target, listing } = await ebayPick();
   if (!target) return { success: true, target: null, listing: null };
   const region = REGIONS[target.region] ?? REGIONS.UK;
+  const on = await photosOn();
   return {
     success: true,
+    photos: { on, ...(on ? await photoSet(target).then((s) => ({ count: s.urls.length, variants: s.variants.length })) : { count: 0, variants: 0 }) },
     target: { sku: target.sku, title: target.title, price: target.price == null ? "" : target.price.toFixed(2), currency: region.currency, host: region.ebay },
     listing: listing ? { title: listing.title, description: listing.description, html: toEbayHtml(listing.description), specifics: listing.itemSpecifics ?? [] } : null,
   };

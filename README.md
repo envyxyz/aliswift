@@ -35,18 +35,20 @@ You can keep several sheets, each with its own column layout, pricing rules and 
 - **Dashboard**: a full-page view featuring a Products view (cards, search, filters, remove and restore) and an Orders view (table, status, totals, add and edit order), opened from the popup and Settings
 - **AI listing generation**: from a product card on the dashboard, "Create listing" uses your own Gemini key to write an eBay title (up to 80 characters), description and item specifics. Editable, with a copy button for each field
 - **eBay panel and form fill**: on eBay's listing form (every marketplace above), an injected side panel lists the products that have a listing as cards (SKU, name, price); click one to choose what to list. **Fill form** then sets the format to Buy It Now and fills title, custom label (SKU), description and price, and fills item specifics with Gemini. Anything it cannot fill reliably becomes a copy button, and **Copy report** gives a bug report that holds the form's box names and never what was typed. It never presses "List it" and never fills Condition
+- **Photos on eBay listings**: optional setting to pass AliExpress gallery photos directly to eBay's photo uploader when you click **Fill form**, with a fallback that saves them to your Downloads folder if the uploader does not take them
+- **Photos for older products**: when the dashboard lists products that have a link but no photo, the service worker fetches each product's public AliExpress page to find its share image, displays it on the card, and writes it into an empty Image cell in your sheet or local library record
 - **Orders from eBay**: on Seller Hub's order list, **Add all orders to sheet** takes you to All orders and adds every order the Orders tab does not have yet (matched by order number and SKU, so pressing it again, or on the next page of results, never adds one twice). Cost and sell price come from the Inventory row of the SKU
 - **AI when a page changes**: if AliExpress's price selectors, eBay's form boxes or Seller Hub's wording change, Gemini is shown what the page lists and points at the right piece, instead of the feature failing. It only picks from what the page listed, names and addresses in orders are hidden from it, and it needs your Gemini key
 - **Auto sheets**: AliSwift creates a ready-made Google Sheet in your Drive, set up for the marketplace you choose with fee, profit and margin formulas, status dropdowns, and an Orders tab
 - **Import from Google Sheets**: select an existing spreadsheet from your Drive or paste its link; AliSwift reads its tabs and headers and maps columns automatically (with AI column mapping if you provide your Gemini key)
 - **SKUs**: automatic SKU generation matching your sheet template numbering (for example, "Added as SKU-31" or "Saved to library as L-03")
-- **Settings backup**: export and import your sheets, settings and local library as a file
+- **Settings backup**: export and import your sheets, settings, local library, and photo links as a file
 - **Formula or margin pricing**: customize rules such as `costPrice * 1.7` or `(costPrice + 2) * 1.5`
 - **Landed cost**: combines item price, visible shipping cost, and optional extra buffer cost
 - **Currency handling**: converts supplier currencies using sheet exchange rates or manual entries
 - **.99 rounding**: rounds sell prices up to clean retail endings (4.77 becomes 4.99)
 - **Title cleanup**: caps word count and removes unwanted noise words
-- **Safe writes**: writes plain values to spreadsheets; never deletes rows or clears existing cells
+- **Safe writes**: writes plain values into the next free row of your sheet, and only adds missing columns when you explicitly confirm; never deletes rows, clears cells, or overwrites existing values
 - **Light and dark theme**: respects your system preferences
 - **Private**: no project-run backend, no tracking, and no analytics ([details](PRIVACY.md))
 
@@ -85,35 +87,33 @@ Then follow steps 2 to 4 above and select the cloned folder. There is no build s
 ### 1. Local library mode (no sign-in required)
 If you do not sign in, AliSwift runs in local library mode. The button reads **Save to library**. Products are stored safely on your device in local storage (`chrome.storage.local`). You can browse them on the dashboard, view their supplier links, and remove or restore them.
 
-### 2. Auto sheet creation
-Open settings (gear icon in popup), click **Add sheet**, keep **Auto** selected, choose your marketplace (eBay UK, US, Global, Germany, Australia or Canada) and enter your currency (for example GBP, USD, or PKR). Click **Create sheet**. AliSwift creates a spreadsheet in your Google Drive with Dashboard, Inventory and Orders tabs, and configures fee calculations automatically.
+### 2. Create sheet
+Open settings (gear icon in popup), click **Create sheet** (or **Create a sheet** in the empty state), choose your marketplace (eBay UK, US, Global, Germany, Australia or Canada) and enter your currency (for example GBP, USD, or PKR). Click **Create sheet**. AliSwift creates a spreadsheet in your Google Drive with Dashboard, Inventory and Orders tabs, and configures fee calculations automatically. The Inventory tab includes an Image URL column.
 
-### 3. Manual sheet setup
-If you have an existing spreadsheet:
-1. Open AliSwift settings, click **Add sheet**, and choose **Manual**.
-2. Paste the sheet URL and specify the tab name (for example `Inventory`).
-3. Set your column letters to match your sheet structure, or click **Use AliSwift template layout**.
-4. Adjust pricing rules on the **Pricing** tab.
+### 3. Import from Google Sheets
+Choose **Import from Google Sheets** to pick a sheet from your Drive or paste its link. Sign-in requests a single permission list that includes read-only Drive metadata (`drive.metadata.readonly`), which is required whether picking a sheet or pasting a link. AliSwift reads sheet headers and sample rows to identify columns. If you save your Gemini API key in the AI tab, Gemini proposes the column mapping automatically. Import sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns with personal data (such as names, addresses, phone numbers, or emails); always check the preview before confirming. Gemini requests allow up to 15 s per attempt and retry once, taking up to about 30 s. If the sheet has no SKU column or no Image column mapped, AliSwift asks whether to add the missing columns before adding the sheet. Choosing yes adds them after the last used column of the Inventory tab, numbers existing products with SKUs, and fills known photo links without touching any existing cells. You can also decline, or add them later using the Edit dialog.
 
-### 4. Import from Google Sheets
-Choose **Import from Google Sheets** to pick a sheet from your Drive or paste its link. Sign-in requests a single permission list that includes read-only Drive metadata (`drive.metadata.readonly`), which is required whether picking a sheet or pasting a link. AliSwift reads sheet headers and sample rows to identify columns. If you save your Gemini API key in the AI tab, Gemini proposes the column mapping automatically. Import sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns with personal data (such as names, addresses, phone numbers, or emails); always check the preview before confirming. Gemini requests allow up to 15 s per attempt and retry once, taking up to about 30 s.
-
-### 5. Moving local products to a sheet
+### 4. Moving local products to a sheet
 Once a Google Sheet is connected, click **Move to a sheet** on the dashboard library banner. AliSwift transfers products into your sheet, applies currency conversion rates, and safely skips duplicates.
 
-### 6. Updating from an older build
-The extension signing key was rotated in 0.6.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets and library items.
+### 5. Updating from an older build
+The extension signing key was rotated in 0.6.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets, library items, and photo links.
+
+### 6. Photos on your eBay listing
+In Settings under the General tab, you can turn on **Include images when creating listings from AliExpress** (off by default). The preference is saved in synced settings (`includeImages`) and included in the settings backup. Turning it on asks Chrome for the optional `downloads` permission. The extension does not need this permission to install or to attach photos; if refused, the setting still works, but the folder fallback is unavailable. When enabled, clicking **Fill form** in the eBay panel gets each photo from the service worker (up to 12 full-size gallery photos from AliExpress image hosts, at most 3 MB each, JPEG, PNG or WebP) and hands them to eBay's own photo uploader as files. Attaching relies on eBay's uploader, which is not an official API and was checked against a saved copy of the form. If the form does not take the photos (or its uploader changed), the worker saves them to your Downloads folder as `Downloads\<sheet name>\<SKU>\img-01.jpg`, `img-02.png` and so on (or `Downloads\Library\<SKU>\` for local library items) so you can drag them into the photo box.
+
+Options on AliExpress that have a picture of their own (such as a colour or style) are read when you save the product (Add to Sheet or Create Listing) without clicking anything on the page. Text-only options like sizes or phone models have no picture and are not read. Up to 40 variants are kept per product. When the Include images setting is on, each variant's photo (full size) is saved to its own sub-folder named after the variant (`Downloads\<sheet name>\<SKU>\<variant name>\img-01.jpg`, for example `Downloads\ObsidianRow\SKU-85\Clear Purple\img-01.webp`). Variant photos are always saved to these sub-folders when Fill form runs, even when gallery photos are attached to the eBay form, because the form of a single listing has no place for them. If gallery photos cannot be attached, they are saved in the SKU folder itself and variants in their sub-folders. Two variants with the same name get distinct folders (prefixed by the property name, or a number). The eBay panel shows a "Variant photos" row. The panel attaches only gallery photos to the form, not variants. Saved photo files use their actual image format (AliExpress sends WebP for some addresses ending in .jpg), so a file may end in `.webp`.
 
 ## Usage
 
 1. Open an AliExpress product page.
 2. Click **Add to Sheet** (or **Save to library**), or open the toolbar popup. To go further in one step, click **Create Listing**: it saves the product, writes the listing and opens eBay.
 3. The item is saved with its calculated sell price, image, and assigned SKU.
-4. On eBay, choose your category, then press **Fill form** in the AliSwift panel. You press List it yourself.
+4. On eBay, choose your category, then press **Fill form** in the AliSwift panel. If image inclusion is enabled, the panel hands the gallery photos from Create Listing to eBay's photo uploader, or saves them to Downloads if the form does not take them. You press List it yourself.
 5. When an order comes in, open Seller Hub's order list and press **Add all orders to sheet**.
-6. Open the **Dashboard** via the icon in the popup header to manage your products, generate eBay listings, and track customer orders.
+6. Open the **Dashboard** via the icon in the popup header to manage your products, generate eBay listings, and track customer orders. When the dashboard lists products that have no photo, it gets one from their public AliExpress page.
 
-AliSwift only writes into the next free row of your sheet. It never deletes rows or clears existing cells.
+AliSwift only writes new products into the next free row of your sheet. The only other write is adding missing SKU or Image columns when you answer yes, which writes only into new empty columns and never overwrites an existing value. It never deletes rows or clears existing cells.
 
 ## Pricing calculation
 
