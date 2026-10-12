@@ -186,6 +186,9 @@ function validateEdit() {
   const optional = COLUMNS.filter((c) => c.optional);
   const set = optional.filter((c) => editForm.elements[c.key].value.trim()).length;
   $("moreCount").textContent = `${set} of ${optional.length} set`;
+  const lack = lacking((k) => editForm.elements[k].value.trim());
+  $("colsOffer").hidden = !lack.length;
+  $("colsOfferText").textContent = `This sheet has no ${nameList(lack)} column. Without ${lack.length > 1 ? "them" : "it"}, AliSwift is less useful. AliSwift can add ${lack.length > 1 ? "them" : "it"} for you.`;
 }
 
 // Pricing and Title save as you change them. Each form checks only its own fields,
@@ -452,18 +455,6 @@ $("editDialog").addEventListener("close", () => {
 let adding = false; // a create request is in flight
 let orphanId = ""; // a file that was created but not set up, so Retry setup can finish it
 
-const mode = () => addForm.elements.addMode.value;
-
-function setMode() {
-  const auto = mode() === "auto";
-  $("autoFields").hidden = $("autoFields").disabled = !auto;
-  $("manualFields").hidden = $("manualFields").disabled = auto;
-  $("modeCaption").textContent = auto
-    ? "AliSwift creates a ready-made Google Sheet for you."
-    : "Connect a Google Sheet you already have.";
-  if (!orphanId) $("addSubmit").textContent = auto ? "Create sheet" : "Add";
-}
-
 // With the same currency on both sides there is no rate to look up.
 function syncRate() {
   const same = $("homeCur").value.trim().toUpperCase() === REGIONS[$("region").value].currency;
@@ -521,7 +512,6 @@ function openAdd() {
   setNotice($("addNotice"), "");
   setBusy(false, "Create sheet");
   $("homeCur").value = homeCurrency;
-  setMode();
   syncRate();
   validateAuto();
   $("addDialog").showModal();
@@ -568,39 +558,14 @@ async function createAuto() {
   chipOf(sheet.id)?.querySelector(".select").focus();
 }
 
-function addManual() {
-  const ref = $("sheetRef").value.trim();
-  const id = ref.match(/\/d\/([\w-]+)/)?.[1] ?? ref;
-  if (!/^[\w-]{10,}$/.test(id)) {
-    return setNotice($("addNotice"), "That doesn't look like a Google Sheets link or ID.");
-  }
-  if (sheets.some((s) => s.id === id)) {
-    return setNotice($("addNotice"), "That sheet is already added.");
-  }
-  sheets.push({
-    name: $("sheetName").value.trim(),
-    id,
-    sheetTab: $("newSheetTab").value.trim() || SHEET_DEFAULTS.sheetTab,
-  });
-  activeId = id;
-  render();
-  save();
-  $("addDialog").close();
-  chipOf(id).querySelector(".select").focus();
-}
-
 addForm.addEventListener("submit", (e) => {
   e.preventDefault();
   if (adding) return;
   setNotice($("addNotice"), "");
-  return mode() === "auto" ? createAuto() : addManual();
+  return createAuto();
 });
 
 addForm.addEventListener("change", (e) => {
-  if (e.target.name === "addMode") {
-    setNotice($("addNotice"), ""); // an error from the other mode does not apply here
-    setMode();
-  }
   if (e.target === $("region")) syncRate();
 });
 
@@ -642,8 +607,80 @@ $("cancelBtn").addEventListener("click", () => {
   if (!adding) $("addDialog").close();
 });
 
-/* Import from Google Sheets. It only reads the user's sheet: nothing below writes to it, and a new sheet is only
-   a settings entry here. The service worker does the reading and matching (lib/importmap.js). */
+/* Add missing columns. A sheet with no SKU or Image column works, but less well: no custom label to list under, no photos
+   on the dashboard. So the seller is asked, once, whether AliSwift may add them (the worker's addColumns). Nothing is
+   added without a Yes, and this is the only place this page changes a sheet's layout. */
+
+const MISSING = {
+  skuCol: ["SKU", "a short code for each product. It is your eBay custom label, and how an order finds its product."],
+  imageCol: ["Image", "the link to each product's photo, so the dashboard can show it. It stays in your sheet, so it survives reinstalling AliSwift."],
+};
+const lacking = (has) => Object.keys(MISSING).filter((k) => !has(k));
+const nameList = (keys) => keys.map((k) => MISSING[k][0]).join(" or ");
+
+// "yes", "no" or "back" (Go back, or Escape). `back` is for the import, where the seller can still pick a column themselves.
+function askColumns(keys, { prefix = SHEET_DEFAULTS.skuPrefix, back = true } = {}) {
+  const li = (k) => {
+    const item = document.createElement("li");
+    const note = k === "skuCol" ? ` Products already in the sheet are numbered ${prefix}01, ${prefix}02 and so on.` : "";
+    item.append(Object.assign(document.createElement("strong"), { textContent: MISSING[k][0] }), ` is ${MISSING[k][1]}${note}`);
+    return item;
+  };
+  const plural = keys.length > 1;
+  $("colsLead").textContent = `Your sheet has no ${nameList(keys)} column. Without ${plural ? "them" : "it"}, AliSwift is less useful:`;
+  $("colsList").replaceChildren(...keys.map(li));
+  $("colsIfYes").textContent = `If you say yes, AliSwift adds ${plural ? "them" : "it"} after the last column of the Inventory tab, with a title in the header row. Nothing else in your sheet changes.`;
+  $("colsIfNo").textContent = "If you say no, AliSwift still works. It keeps product photos on this device instead. They survive updates, and Export settings saves them, but removing the extension loses them.";
+  $("colsBack").hidden = !back;
+  const dialog = $("colsDialog");
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue || "back"), { once: true });
+    dialog.showModal();
+  });
+}
+
+// Asks the worker to add the columns to a sheet it already has in its settings, and keeps the letters it saved.
+async function addColumnsTo(id, keys) {
+  const res = await chrome.runtime.sendMessage({ action: "addColumns", sheetId: id, columns: keys }).catch((e) => ({ success: false, error: e.message }));
+  if (res?.success) {
+    sheets = sheets.map((s) => (s.id === id ? { ...s, ...res.columns } : s));
+    render();
+  }
+  return res ?? { success: false, error: "AliSwift didn't answer. Reload the extension and try again." };
+}
+
+const columnsAdded = (res) => Object.entries(res.columns).map(([k, letter]) => `${MISSING[k][0]} in ${letter}`).join(", ");
+
+// The same offer for a sheet added earlier, in its Edit dialog. The worker works from the saved settings, so the fields it
+// uses must be saved first.
+$("colsOfferBtn").addEventListener("click", async () => {
+  const btn = $("colsOfferBtn");
+  if (btn.getAttribute("aria-disabled") === "true") return;
+  const saved = { ...SHEET_DEFAULTS, ...sheets.find((s) => s.id === editingId) };
+  const changed = ["sheetTab", "startRow", "keywordsCol", "linkCol", "skuPrefix"].some((k) => String(editForm.elements[k].value).trim().toUpperCase() !== String(saved[k]).toUpperCase());
+  if (changed) return setNotice($("editNotice"), "Save your changes to the tab, first row, Keywords, Link and SKU prefix first, then add the columns.");
+  const keys = lacking((k) => editForm.elements[k].value.trim());
+  if ((await askColumns(keys, { prefix: saved.skuPrefix, back: false })) !== "yes") return btn.focus();
+  btn.dataset.state = "loading";
+  btn.setAttribute("aria-disabled", "true");
+  const res = await addColumnsTo(editingId, keys);
+  btn.dataset.state = "";
+  btn.removeAttribute("aria-disabled");
+  if (!res.success) {
+    setNotice($("editNotice"), `Couldn't add the columns. ${res.error}`);
+    return btn.focus();
+  }
+  setNotice($("editNotice"), "");
+  for (const [k, letter] of Object.entries(res.columns)) editForm.elements[k].value = letter;
+  validateEdit();
+  toast(`New columns: ${columnsAdded(res)}.`);
+  editForm.elements.name.focus();
+});
+
+/* Import from Google Sheets. It reads the user's sheet and changes nothing in it, except the columns the seller said
+   yes to above. A new sheet is otherwise only a settings entry here. The service worker does the reading and matching
+   (lib/importmap.js). */
 
 const gsForm = $("gsForm");
 const send = (message) => chrome.runtime.sendMessage(message).catch((e) => ({ success: false, error: e.message }));
@@ -1023,12 +1060,20 @@ async function gsSave() {
   }
   // AliSwift never writes over a formula: an optional column that holds them is left unused, and the sell price is
   // not added to the sheet. (A required column that holds them is refused by gsValidate.)
+  const cleared = new Set();
   for (const r of GS_ROWS.filter((x) => x.scope === "inv" || sheet.oTab)) {
     if (!gsClash(r, gsForm.elements[r.name].value)) continue;
     if (r.key === "salePriceCol") sheet.includeSalePrice = false;
-    else if (r.scope === "inv") sheet[r.key] = "";
-    else sheet.oCols[r.key] = "";
+    else if (r.scope === "inv") {
+      sheet[r.key] = "";
+      cleared.add(r.key);
+    } else sheet.oCols[r.key] = "";
   }
+  // A sheet with no SKU or Image column is asked before it is added whether AliSwift may add them. (A column that was
+  // only left out because it holds formulas is not missing.)
+  const missing = lacking((k) => sheet[k] || cleared.has(k));
+  const answer = missing.length ? await askColumns(missing) : "no";
+  if (answer === "back") return $("gsGo").focus();
   gsSaving = true;
   $("gsMap").disabled = true;
   $("gsCancel").setAttribute("aria-disabled", "true");
@@ -1043,9 +1088,19 @@ async function gsSave() {
     return $("gsGo").focus();
   }
   render();
+  let res = null;
+  if (answer === "yes") {
+    gsWait(true, "Adding columns...");
+    res = await addColumnsTo(id, missing);
+  }
   gsAfter = () => chipOf(id)?.querySelector(".select");
   $("gsDialog").close();
-  toast(`Added “${sheet.name}”.`, { action: { label: "Open sheet", onClick: () => window.open(sheetUrl(id), "_blank", "noopener") } });
+  const open = { label: "Open sheet", onClick: () => window.open(sheetUrl(id), "_blank", "noopener") };
+  if (res && !res.success) {
+    // The sheet is added and works; only the columns are missing, and the sheet's Edit dialog offers them again.
+    return toast(`Added “${sheet.name}”, but couldn't add the columns.`, { kind: "error", detail: res.error, action: open });
+  }
+  toast(res ? `Added “${sheet.name}”. New columns: ${columnsAdded(res)}.` : `Added “${sheet.name}”.`, { action: open });
 }
 
 /* Wiring */
@@ -1260,14 +1315,15 @@ const IMPORT_ERRORS = {
 const countOf = (n) => `${n} ${n === 1 ? "sheet" : "sheets"}`;
 let pendingImport = null;
 let pendingLibrary = [];
+let pendingPhotos = {};
 
 $("exportBtn").addEventListener("click", async () => {
   try {
     // sheets is always there, so a backup of an empty setup can be imported again.
     const sync = { sheets: [], activeSheetId: "", ...(await chrome.storage.sync.get(EXPORT_KEYS)) };
-    // The library lives on this device only, so the file is the only way it survives a reinstall.
-    const { library } = await chrome.storage.local.get({ library: [] });
-    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync, library };
+    // The library and the product photos live on this device only, so the file is the only way they survive a reinstall.
+    const { library, photos } = await chrome.storage.local.get({ library: [], photos: {} });
+    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync, library, photos };
     const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
     Object.assign(document.createElement("a"), { href: url, download: "aliswift-settings.json" }).click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -1299,6 +1355,7 @@ $("importFile").addEventListener("change", async (e) => {
   if (!result.ok) return setNotice($("importNotice"), IMPORT_ERRORS[result.reason]);
   pendingImport = result.sync;
   pendingLibrary = result.library ?? [];
+  pendingPhotos = result.photos ?? {};
   const [n, m] = [sheets.length, pendingImport.sheets.length];
   const from = m ? `${m} from the file` : "none from the file";
   $("impQ").textContent = n ? `Replace your ${countOf(n)} with ${from}?` : `Import ${countOf(m)} from the file?`;
@@ -1319,8 +1376,8 @@ $("impGo").addEventListener("click", async () => {
   let added = 0;
   try {
     // First, and only ever adding: a failure here leaves the sheets as they were.
-    if (pendingLibrary.length) {
-      const res = await chrome.runtime.sendMessage({ action: "importLibrary", library: pendingLibrary });
+    if (pendingLibrary.length || Object.keys(pendingPhotos).length) {
+      const res = await chrome.runtime.sendMessage({ action: "importLibrary", library: pendingLibrary, photos: pendingPhotos });
       if (!res?.success) throw new Error(res?.error ?? "No answer from the extension.");
       added = res.added;
     }
@@ -1338,6 +1395,10 @@ $("impGo").addEventListener("click", async () => {
   activeId = next.activeSheetId;
   if (next.homeCurrency) homeCurrency = next.homeCurrency;
   if ("showPageButton" in next) $("showPageButton").checked = next.showPageButton;
+  if ("includeImages" in next) {
+    $("includeImages").checked = next.includeImages;
+    imagesNoteFor(next.includeImages);
+  }
   render();
   flash("Saved");
   $("importDialog").close();
@@ -1369,6 +1430,33 @@ function savePageButton(on) {
   );
 }
 $("showPageButton").addEventListener("change", (e) => savePageButton(e.target.checked));
+
+// Include images: switching it on asks for the optional Downloads permission, in the same click so it counts as the seller's.
+// Without it the photos can still be attached to eBay's form; they just can't be saved to a folder when that fails.
+function showImagesNote(on, granted) {
+  $("imagesNote").textContent = !on
+    ? ""
+    : granted
+      ? "Create Listing on AliExpress then attaches up to 12 photos to the eBay form. If the form doesn't take them, AliSwift saves them to your Downloads folder, in a folder named after the sheet and then the SKU, for you to drag in."
+      : "Photos will be attached to the eBay form. Downloads wasn't allowed, so AliSwift can't save them to a folder when attaching fails. Switch this off and on to be asked again.";
+}
+
+async function saveIncludeImages(on) {
+  $("includeImages").checked = on;
+  let granted = true;
+  if (on) granted = await chrome.permissions.request({ permissions: ["downloads"] }).catch(() => false);
+  showImagesNote(on, granted);
+  return setSync(
+    { includeImages: on },
+    () => {
+      $("includeImages").checked = !on;
+      showImagesNote(!on, true);
+    },
+    () => saveIncludeImages(on),
+  );
+}
+$("includeImages").addEventListener("change", (e) => saveIncludeImages(e.target.checked));
+const imagesNoteFor = async (on) => showImagesNote(on, await chrome.permissions.contains({ permissions: ["downloads"] }).catch(() => false));
 
 $("tabs").addEventListener("click", (e) => {
   const t = e.target.closest('[role="tab"]');
@@ -1409,6 +1497,7 @@ profileButton($("profile"));
     sheets: [],
     activeSheetId: "",
     showPageButton: true,
+    includeImages: false,
     homeCurrency: "",
     aiModel: "",
     aiInstructions: "",
@@ -1417,6 +1506,8 @@ profileButton($("profile"));
   activeId = stored.activeSheetId;
   homeCurrency = stored.homeCurrency;
   $("showPageButton").checked = stored.showPageButton;
+  $("includeImages").checked = stored.includeImages;
+  imagesNoteFor(stored.includeImages);
   Object.assign(aiSaved, { aiModel: stored.aiModel, aiInstructions: stored.aiInstructions });
   showAi();
   render();

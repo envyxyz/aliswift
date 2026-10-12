@@ -732,23 +732,8 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
   media.className = "card-media";
 
   const safeImg = httpsUrl(product.image);
-  if (safeImg) {
-    const img = document.createElement("img");
-    img.src = safeImg;
-    img.alt = "";
-    img.loading = "lazy";
-    img.referrerPolicy = "no-referrer";
-    img.onload = () => {
-      img.dataset.loaded = "true";
-    };
-    img.onerror = () => {
-      img.remove();
-      media.prepend(createImagePlaceholder());
-    };
-    media.append(img);
-  } else {
-    media.append(createImagePlaceholder());
-  }
+  if (safeImg) media.append(createProductImage(safeImg, media, product.link));
+  else media.append(createImagePlaceholder());
 
   // Slot start: Status control
   const slotStart = document.createElement("div");
@@ -981,35 +966,6 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     costNote.className = "note";
     costNote.textContent = "cost";
     priceRow.append(costNote);
-  }
-
-  // Margin tag (only if margin is present and sheet has marginCol / not local)
-  const mTone = marginTone(product.margin);
-  if (mTone && !isLibraryMode) {
-    const tag = document.createElement("span");
-    tag.className = "tag";
-    tag.dataset.tone = mTone.tone;
-
-    const profitFormatted = formatCurrency(product.profit, currencyCode);
-    tag.title = `Profit ${profitFormatted}`;
-
-    const svg = createSvgPath("12", "12", mTone.path);
-    tag.append(svg);
-
-    const srPrefix = document.createElement("span");
-    srPrefix.className = "sr-only";
-    srPrefix.textContent = "Margin ";
-    tag.append(srPrefix);
-
-    const pctText = document.createTextNode(mTone.percent);
-    tag.append(pctText);
-
-    const srSuffix = document.createElement("span");
-    srSuffix.className = "sr-only";
-    srSuffix.textContent = `, ${mTone.word}`;
-    tag.append(srSuffix);
-
-    priceRow.append(tag);
   }
 
   body.append(priceRow);
@@ -1770,6 +1726,30 @@ function createSvgPath(w, h, d) {
   return svg;
 }
 
+// The photo of a card (the sheet's link comes first); when it won't load, the placeholder takes its place and the product's
+// share image is asked for (see backfillPhotos), which replaces the placeholder if the product's page has one.
+let brokenTimer;
+function createProductImage(src, media, link) {
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "";
+  img.loading = "lazy";
+  img.referrerPolicy = "no-referrer";
+  img.onload = () => {
+    img.dataset.loaded = "true";
+  };
+  img.onerror = () => {
+    img.remove();
+    media.prepend(createImagePlaceholder());
+    if (link && !photoAsked.has(link)) {
+      broken.add(link);
+      clearTimeout(brokenTimer); // one request for the cards that fail together
+      brokenTimer = setTimeout(() => photoToken && backfillPhotos(currentSheetId(), photoToken), 400);
+    }
+  };
+  return img;
+}
+
 function createImagePlaceholder() {
   const ph = document.createElement("div");
   ph.className = "card-ph";
@@ -1897,6 +1877,38 @@ async function sendMessage(msg) {
       resolve({ success: false, error: err.message });
     }
   });
+}
+
+// Products saved before AliSwift kept photos have none. The worker reads each one's share image from its AliExpress page
+// (the picture a chat shows when the link is pasted), keeps it, and answers the ones it found; their cards get the photo in
+// place, without redrawing the list. 60 products at a time, and a link is asked about once per visit to this page.
+// A card whose sheet photo would not load is in `broken`: its share image is asked for too (the sheet's cell is never changed).
+const photoAsked = new Set();
+const broken = new Set();
+let photoToken;
+
+function showPhoto(product) {
+  const card = [...document.querySelectorAll("#productsContainer .card")].find((c) => c.dataset.key === (product.sku || `row-${product.row}`));
+  const media = card?.querySelector(".card-media");
+  if (!media || media.querySelector("img")) return;
+  media.querySelector(".card-ph")?.remove();
+  media.prepend(createProductImage(product.image, media, product.link));
+}
+
+async function backfillPhotos(sheetId, token) {
+  const wants = (p) => p.link && (!httpsUrl(p.image) || broken.has(p.link)) && !photoAsked.has(p.link);
+  const links = [...new Set(currentProducts.filter(wants).map((p) => p.link))].slice(0, 60);
+  if (!links.length) return;
+  for (const link of links) photoAsked.add(link);
+  const res = await sendMessage({ action: "fillPhotos", sheetId, links, retry: links.filter((l) => broken.has(l)) });
+  if (!res.success || !productsGuard.isCurrent(token)) return;
+  const found = Object.fromEntries(Object.entries(res.photos ?? {}).filter(([, url]) => httpsUrl(url)));
+  if (Object.keys(found).length) {
+    currentProducts = currentProducts.map((p) => ((!httpsUrl(p.image) || broken.has(p.link)) && found[p.link] ? { ...p, image: found[p.link] } : p));
+    for (const p of currentProducts) if (found[p.link]) showPhoto(p);
+    if (sheetId !== "local" && chrome.storage?.local) chrome.storage.local.set({ [`cache:${sheetId}`]: { at: dataAt, products: currentProducts } });
+  }
+  backfillPhotos(sheetId, token); // the next 60, if there are more
 }
 
 async function callListProducts(sheetId) {
@@ -2800,6 +2812,8 @@ async function loadProductsData(cacheOnly = false) {
         },
       });
     }
+    photoToken = token;
+    backfillPhotos(sheetId, token);
   } else {
     // Failure handling
     if (currentProducts.length) {

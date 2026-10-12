@@ -21,7 +21,7 @@ test("parseSheetRef takes a link or a bare id and nothing else", () => {
   assert.deepEqual(m.parseSheetRef(`https://docs.google.com/spreadsheets/d/${id}/edit#gid=0`), { id });
   assert.deepEqual(m.parseSheetRef(` https://docs.google.com/spreadsheets/u/1/d/${id}/edit?usp=sharing `), { id });
   assert.deepEqual(m.parseSheetRef(id), { id });
-  assert.deepEqual(m.parseSheetRef("sheet-id-1234567890"), { id: "sheet-id-1234567890" }); // as long as addManual accepts
+  assert.deepEqual(m.parseSheetRef("sheet-id-1234567890"), { id: "sheet-id-1234567890" }); // a bare id is accepted too
   for (const bad of ["", "   ", "short", "not a sheet id", "https://google.com", "https://docs.google.com/document/d/" + id, `https://docs.google.com/spreadsheets/d/e/2PACX/${id}`, `https://docs.google.com/spreadsheets/d/${"a".repeat(101)}/edit`, null, undefined, 12345, {}]) {
     assert.ok(m.parseSheetRef(bad).error, String(bad));
   }

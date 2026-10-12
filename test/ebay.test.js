@@ -137,7 +137,7 @@ test("List on eBay remembers the product, opens the marketplace's listing start 
   const t = setup(withListing({ [`listing:${SHEET_US}:SKU-01`]: LISTING, "listing:local:L-01": LISTING }));
   const uk = await t.ask(listOn());
   assert.deepEqual(uk, { success: true, region: "UK" });
-  assert.deepEqual(plain(t.store.ebayTarget), { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Skull ring", price: 8.99, region: "UK", at: t.store.ebayTarget.at });
+  assert.deepEqual(plain(t.store.ebayTarget), { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Skull ring", price: 8.99, region: "UK", link: PRODUCT.link, image: "", at: t.store.ebayTarget.at });
   assert.deepEqual(t.tabs, ["https://www.ebay.co.uk/sl/prelist/suggest"]);
 
   assert.equal((await t.ask(listOn({ sheetId: SHEET_US, product: { ...PRODUCT, currency: "USD", salePrice: 11.5 } }))).region, "US");

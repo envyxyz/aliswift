@@ -22,6 +22,9 @@ The manifest `"key"` and OAuth client ID are public by design. Anyone can load a
 - **Orders reach Gemini masked.** Only the shapes AliSwift reads (order number, custom label, quantities, amounts, dates) are kept; every other piece of text, which is where a buyer's name or address would be, is replaced by a placeholder.
 - **The page never names a price.** When a card is chosen in the eBay panel, the price filled into the form comes from AliSwift's stored list, not from the page.
 - **Everything typed into a sheet is plain text** (`RAW`), so a title like `=IMPORTDATA(...)` cannot run as a formula, and nothing deletes or clears a cell.
+- **Adding missing columns is the one layout change.** It needs an explicit Yes in a dialog, goes through a service-worker handler only AliSwift's own pages may call, and writes with RAW values into empty cells. It never changes a cell that has a value and never deletes or clears anything.
+- **Photo handling and downloads are restricted.** The downloads permission is optional and requested only when the setting is switched on, only the service worker uses it, only URLs on AliExpress's image hosts are fetched or downloaded, folder and file names are sanitised so they cannot leave Downloads, and the two photo handlers answer only the listing form on eBay's own marketplaces.
+- **Photo backfill and variant folders are restricted.** The backfill fetches only `https://www.aliexpress.com/item/<digits>.html` with credentials omitted, accepts only addresses on AliExpress's image hosts, writes only into empty cells of the Image column, and answers only AliSwift's own pages. Variant folder names are sanitised like the sheet and SKU names.
 - **Extension pages have a content security policy:** `script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'`. No page loads remote code.
 
 ## What is in scope

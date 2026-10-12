@@ -152,7 +152,7 @@ test("the status lists are drop-downs that accept other values", () => {
   }
 });
 
-test("the fee strip, fee columns and image column are hidden", () => {
+test("the fee strip and fee columns are hidden; the Image URL column is in view, with its title", () => {
   const hidden = setup()
     .filter((r) => r.updateDimensionProperties?.properties.hiddenByUser)
     .map(({ updateDimensionProperties: { range: r } }) => [r.sheetId, r.dimension, r.startIndex, r.endIndex]);
@@ -160,8 +160,9 @@ test("the fee strip, fee columns and image column are hidden", () => {
     [10, "ROWS", 0, 4], // the Dashboard's exchange-rate block
     [20, "ROWS", 0, 1], // the fee strip
     [20, "COLUMNS", 6, 9], // G:I
-    [20, "COLUMNS", 14, 15], // O
   ]);
+  assert.equal(TEMPLATE.inventory.header.values[14], "Image URL"); // column O, the one the saved settings point at
+  assert.match(TEMPLATE.inventory.header.notes.O, /photo/);
 });
 
 test("with the same currency on both sides the repeated home-currency rows and columns are hidden", () => {
@@ -175,12 +176,11 @@ test("with the same currency on both sides the repeated home-currency rows and c
     [10, "ROWS", 12, 13], // Total Profit (home)
     [20, "ROWS", 0, 1],
     [20, "COLUMNS", 6, 9],
-    [20, "COLUMNS", 14, 15],
     [20, "COLUMNS", 10, 11], // Net Profit (home)
     [30, "COLUMNS", 8, 9], // Profit (home)
   ]);
   // The next sheet, with different currencies, is unaffected.
-  assert.equal(hiddenOf({}).length, 4);
+  assert.equal(hiddenOf({}).length, 3);
 });
 
 test("only the sheet ids Google returned are used, and rows are frozen as in the template", () => {

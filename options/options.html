@@ -56,7 +56,7 @@
               </button>
               <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
-                Add sheet
+                Create sheet
               </button>
             </div>
           </div>
@@ -67,7 +67,7 @@
             <h3>No sheets yet</h3>
             <p>Let AliSwift create a ready-made Google Sheet for you, or connect one you already have.</p>
             <div class="empty-actions">
-              <button id="emptyAddBtn" class="btn" type="button">Add a sheet</button>
+              <button id="emptyAddBtn" class="btn" type="button">Create a sheet</button>
               <button id="gsOpenEmpty" class="btn btn-quiet" type="button" aria-haspopup="dialog">Import from Google Sheets</button>
             </div>
           </div>
@@ -199,9 +199,11 @@
             <button type="button" class="info" aria-label="About the page button" aria-describedby="tip-general">
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
             </button>
-            <span id="tip-general" role="tooltip" class="tip">Shows or hides the Add to Sheet button on AliExpress product pages.</span>
+            <span id="tip-general" role="tooltip" class="tip">Shows or hides the Add to Sheet button on AliExpress product pages, and chooses whether Create Listing also brings the product's photos to eBay.</span>
           </div>
           <label class="inline"><input id="showPageButton" type="checkbox" /> Show the Add to Sheet button on AliExpress pages</label>
+          <label class="inline"><input id="includeImages" type="checkbox" /> Include images when creating listings from AliExpress</label>
+          <p id="imagesNote" class="note" role="status"></p>
         </div>
         <div class="group" role="group" aria-labelledby="h-backup">
           <div class="title-row">
@@ -284,6 +286,11 @@
               <button id="presetBtn" class="btn btn-quiet btn-sm" type="button" title="Fills every field to match AliSwift's own sheet layout. Nothing is saved until you press Save.">Use AliSwift template layout</button>
             </div>
             <div id="colList" class="col-list" data-scope="inventory"></div>
+            <div id="colsOffer" class="notice" data-tone="warn" role="status" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" /></svg>
+              <div id="colsOfferText"></div>
+              <button id="colsOfferBtn" class="btn btn-quiet btn-sm" type="button" aria-haspopup="dialog">Add columns</button>
+            </div>
             <details id="moreCols" class="disclosure">
               <summary>More columns <span id="moreCount" class="muted"></span></summary>
               <div id="moreList" class="col-list" data-scope="inventory">
@@ -337,14 +344,9 @@
 
     <dialog id="addDialog" aria-labelledby="addTitle">
       <form id="addForm" autocomplete="off">
-        <div class="dialog-head"><h2 id="addTitle">Add sheet</h2></div>
+        <div class="dialog-head"><h2 id="addTitle">Create sheet</h2></div>
         <div class="dialog-body">
           <fieldset id="addInputs" class="bare">
-            <div class="segmented" data-stretch role="radiogroup" aria-label="How to add a sheet">
-              <label><input type="radio" name="addMode" value="auto" checked /><span>Auto</span></label>
-              <label><input type="radio" name="addMode" value="manual" /><span>Manual</span></label>
-            </div>
-            <p id="modeCaption" class="muted">AliSwift creates a ready-made Google Sheet for you.</p>
             <div id="addNotice" class="notice" data-tone="error" role="alert" hidden>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
               <div></div>
@@ -381,18 +383,7 @@
                   <input id="rate" type="number" min="0" max="10000000" step="any" inputmode="decimal" placeholder="e.g. 374.37" autocomplete="off" />
                 </div>
               </div>
-              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs.</p>
-            </fieldset>
-
-            <fieldset id="manualFields" class="bare" hidden disabled>
-              <div>
-                <label for="sheetRef">Sheet link or ID</label>
-                <input id="sheetRef" placeholder="https://docs.google.com/spreadsheets/d/..." required autocomplete="off" />
-              </div>
-              <div>
-                <label for="newSheetTab">Sheet tab</label>
-                <input id="newSheetTab" placeholder="Sheet1" autocomplete="off" />
-              </div>
+              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs. To use a sheet you already have, close this and choose Import from Google Sheets.</p>
             </fieldset>
           </fieldset>
           <p id="addStatus" class="muted" role="status" hidden></p>
@@ -411,7 +402,7 @@
         <div class="dialog-head"><h2 id="gsTitle">Import from Google Sheets</h2></div>
         <div class="dialog-body">
           <fieldset id="gsChoose" class="bare gs-pane" role="none">
-            <p class="muted">Pick a sheet and AliSwift works out its tabs and columns. It only reads your sheet.</p>
+            <p class="muted">Pick a sheet and AliSwift works out its tabs and columns. It only reads your sheet. If it has no SKU or Image column, AliSwift asks before adding one.</p>
             <div id="gsNotice" class="notice" data-tone="error" role="alert" hidden>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="" /></svg>
               <div></div>
@@ -533,6 +524,25 @@
             <button id="gsBack" class="btn btn-quiet" type="button" hidden>Back</button>
             <button id="gsCancel" class="btn btn-quiet" type="button">Cancel</button>
             <button id="gsGo" class="btn" type="submit" disabled>Continue</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="colsDialog" aria-labelledby="colsTitle">
+      <form method="dialog">
+        <div class="dialog-head"><h2 id="colsTitle">Add the missing columns?</h2></div>
+        <div class="dialog-body">
+          <p id="colsLead"></p>
+          <ul id="colsList" class="cols-list"></ul>
+          <p id="colsIfYes"></p>
+          <p id="colsIfNo" class="muted"></p>
+        </div>
+        <div class="dialog-foot">
+          <div class="actions">
+            <button id="colsBack" class="btn btn-quiet" type="submit" value="back">Go back</button>
+            <button class="btn btn-quiet" type="submit" value="no" aria-describedby="colsIfNo">No</button>
+            <button class="btn" type="submit" value="yes" aria-describedby="colsIfYes" autofocus>Yes, add them</button>
           </div>
         </div>
       </form>

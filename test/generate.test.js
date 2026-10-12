@@ -177,7 +177,7 @@ test("a listing is written from the sheet's name and photo, filed by sheet and S
   assert.ok(Number.isFinite(r.createdAt));
   assert.deepEqual(plain(t.store[`listing:${SHEET}:SKU-01`]), { listing: r.listing, limited: true, model: "gemini-test", createdAt: r.createdAt, warnings: [],
     // what the eBay panel's cards show, kept beside the listing: the sell price, never the cost
-    product: { sku: "SKU-01", title: "Skull Ring", salePrice: 8.99, currency: "GBP", link: "https://www.aliexpress.com/item/1005001234567890.html" } });
+    product: { sku: "SKU-01", title: "Skull Ring", salePrice: 8.99, currency: "GBP", link: "https://www.aliexpress.com/item/1005001234567890.html", image: IMG } });
 
   const [call] = t.gem();
   assert.equal(call.url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent");
@@ -250,7 +250,8 @@ test("a save's details are kept, cleaned and capped, and the listing is then wri
   assert.equal(save.success, true);
   const kept = t.store["details:1005001234567890"];
   assert.deepEqual(plain([kept.fullTitle, kept.specs, kept.description.length]), ["Full original AliExpress title", [["Material", "Steel"], ["Color", "Silver"]], 4000]);
-  assert.deepEqual(plain(kept.images), [IMG, "https://ae01.alicdn.com/kf/b.png", "https://a/3", "https://a/4"]);
+  // Up to 12 photos are kept for the eBay form (Gemini looks at the first 4); the insecure and non-text ones are dropped.
+  assert.deepEqual(plain(kept.images), [IMG, "https://ae01.alicdn.com/kf/b.png", "https://a/3", "https://a/4", "https://a/5"]);
 
   const r = await t.ask({ action: "generateListing", sheetId: "local", product: { sku: "L-01", title: "Skull Ring", link: LINK, price: 3.5, salePrice: null, image: IMG, currency: "GBP" } });
   assert.equal(r.limited, false);

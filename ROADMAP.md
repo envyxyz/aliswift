@@ -2,6 +2,15 @@
 
 Planned work, in the order we intend to build it. Nothing here is promised by a date.
 
+## Next up: create the listing on eBay's form, not on the dashboard (agreed, not started)
+Today the dashboard's **Create listing** asks Gemini for a title, description and item specifics, saves them, and the eBay panel then fills the form from that saved listing. The change: the dashboard only holds the products, and the listing is made at the moment it is needed, on eBay's own form.
+- Dashboard: products are added and shown as now, but there is no listing step. The card's action is **List on eBay**, which opens eBay's listing start page with that product picked.
+- eBay panel (the AliSwift tab on the right of the listing form): it shows every product on the sheet (not only ones with a saved listing). The seller picks one and presses **Create listing**.
+- **Create listing** reads the form that is open (category, which item specifics and options it has) and writes the listing to fit it: title, description, and as many item specifics, condition, price and photos as can be filled properly and easily. Anything it can't fill reliably is left as a copy or "needs you" row, as now.
+- Reuse: the existing form reading and filling (`lib/ebayform.js`, `lib/fillplan.js`, the panel in `content-ebay.js`), listing generation (`generateListing` in `background.js`), photos (`ebayPhoto`, `savePhotos`) and the product list (`ebayProductList`).
+- To decide when building: whether the generated listing is still saved per product (so Fill form can be repeated without another Gemini call), and the one-call vs two-call split (listing text first, then item specifics against the form's real options).
+- Known problem to fix first: the item-specifics AI step failed on a real ring listing with a generic "AI couldn't match this form" (the panel now shows the real reason; the cause was not found yet, a timeout is the first suspect, the call waits 45 s).
+
 ## 1. Profit analytics on the dashboard (planned)
 Show what your Orders tab already tracks: revenue, profit and margin by week and month, best and worst products, and profit in your home currency.
 - Already in place: every auto-created sheet has an Orders tab and a Dashboard tab with these totals; cancelled orders are excluded.

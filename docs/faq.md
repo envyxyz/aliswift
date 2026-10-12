@@ -21,14 +21,23 @@ AliSwift supports multi-currency sourcing:
 - If your AliExpress supplier displays prices in a foreign currency (such as USD or PKR) and your sheet is set up in GBP, AliSwift uses the live exchange rate formula embedded in your sheet (or your custom manual rate) to convert supplier costs.
 - When saving to your local library, items store prices in the original currency shown on the page. Conversion occurs seamlessly when you move products to your Google Sheet.
 
-## 5. Why is AI used and is it required?
+## 5. Why are there no photos on my dashboard?
+The sheet has no Image column. Accept the "Add the missing columns?" offer or add an Image URL column and map it in the sheet's Edit dialog. Photos saved from now on are also kept on this device as a fallback.
+
+## 6. Why did my older products have no photo, and how do they get one now?
+Older versions of AliSwift did not save photo links. When the dashboard lists products that have a link but no photo, the service worker requests each product's public AliExpress page without cookies or sign-in, reads the page's share image address, keeps it on this device, and fills it into an empty Image cell in your sheet or library record.
+
+## 7. How do photos get onto my eBay listing?
+When the "Include images when creating listings from AliExpress" setting is turned on in the General tab, clicking **Fill form** in the eBay panel gets up to 12 gallery photos from AliExpress image hosts and gives them directly to eBay's photo uploader as files. If eBay's form does not take the photos, the service worker saves them to `Downloads\<sheet name>\<SKU>\` (or `Downloads\Library\<SKU>\` for local library items) so you can drag them into the photo box yourself. Variant photos are always saved into their own sub-folders under the SKU folder because eBay's single listing form has no place for them. The optional downloads permission is only used for this folder fallback, and the extension never uploads photos to any project server.
+
+## 8. Why is AI used and is it required?
 AI is completely optional. You can use all core features of AliSwift (scraping, pricing, saving to sheets, order management) without AI. AI is utilized for three high-value tasks:
 1. Automated Column Mapping: When connecting an existing spreadsheet with unfamiliar header names, Gemini analyzes tab titles and headers to suggest accurate column mappings automatically.
 2. Listing Generation: Generating search-optimized eBay listing titles, descriptions, and item specifics from product cards on the dashboard.
 3. eBay Form Fill: Automatically matching and filling item specifics on eBay listing pages.
 To use AI features, you provide your own free Gemini API key from Google AI Studio.
 
-## 6. What data is sent to Gemini?
+## 9. What data is sent to Gemini?
 When AI features are invoked, requests travel directly from your browser to Google's Gemini API using your personal key.
 - For AI column mapping, AliSwift sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns that look personal (names, addresses, phone numbers, and emails). Because the filter is a deny-list and can miss odd or unexpected headers, always check the mapping preview before confirming.
 - For listing generation, the product title, sell price (never your cost), the page's specifications and description, and up to four photos are sent.
@@ -36,18 +45,18 @@ When AI features are invoked, requests travel directly from your browser to Goog
 - For eBay form filling, field names and available option choices from the eBay page are sent.
 Each Gemini call has a 15 s timeout and retries once, so requests take up to about 30 s total. Your Gemini API key stays in storage.local on this device, is sent only to Google's Gemini API, and is not included in settings export.
 
-## 7. How do I undo an accidental product removal or change?
-AliSwift enforces a strict non-destructive policy. It never deletes rows from your spreadsheet.
+## 10. How do I undo an accidental product removal or change?
+AliSwift enforces a strict non-destructive policy. It only appends new product rows, updates selected status or tracking cells, and adds missing SKU or Image columns when you answer yes. It never deletes rows, clears cells, or overwrites existing values in your spreadsheet.
 When you remove a product on the dashboard, AliSwift simply updates its status cell to Discontinued. A confirmation toast appears with an Undo button for 8 seconds. Clicking Undo immediately restores the item to its previous status. You can also view all discontinued products at any time under the Removed filter tab on the dashboard and restore them whenever you wish.
 
-## 8. How can I back up or transfer my settings to another computer?
-In the Settings page under the General tab, click **Export settings**. AliSwift generates an `aliswift-settings.json` file containing all your sheet configurations, pricing formulas, and saved local library items. On your other computer, click **Import settings** to restore your setup. Your secret Gemini key (which stays on this device in `storage.local`) and Google OAuth tokens are excluded from the backup file for your security.
+## 11. How can I back up or transfer my settings to another computer?
+In the Settings page under the General tab, click **Export settings**. AliSwift generates an `aliswift-settings.json` file containing all your sheet configurations, pricing formulas, saved local library items, and photo links (photo links only, no image data). On your other computer, click **Import settings** to restore your setup. Your secret Gemini key (which stays on this device in `storage.local`) and Google OAuth tokens are excluded from the backup file for your security.
 
-## 9. Which supplier sites and selling platforms are supported?
+## 12. Which supplier sites and selling platforms are supported?
 - Sourcing: AliExpress (`aliexpress.com` and `aliexpress.us`) product detail pages and Buy Now pages.
 - Selling: Pre-configured templates and fee structures are optimized for eBay UK and eBay US. The resulting Google Sheets can also be used as inventory feeds for Shopify, WooCommerce, or other ecommerce platforms.
 
-## 10. What features are planned for future versions?
+## 13. What features are planned for future versions?
 Upcoming planned features detailed on our roadmap include:
 - Profit analytics on the dashboard and across regions.
 - Adding eBay orders automatically (CSV import first).

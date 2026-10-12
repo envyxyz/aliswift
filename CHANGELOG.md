@@ -4,6 +4,30 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-12
+
+### Added
+
+- **Missing columns prompt**: When a sheet is imported without an SKU column or Image column mapped, AliSwift asks whether to add them before saving the sheet (Yes, add them / No / Go back). Choosing Yes adds the missing columns after the last column with a value on the Inventory tab, formats headers like adjacent ones, assigns SKUs to existing products using the sheet's prefix, and fills known photo links into the Image URL column. The same offer is available via an **Add columns** notice in the sheet's Edit dialog. Columns are only added if they fit within columns A to Z, and AliSwift writes only into new empty columns without changing existing cells.
+- **On-device photo fallback**: Product photo links are saved to device storage (`chrome.storage.local`, key `photos`, up to the newest 5000) by AliExpress item number whenever products are saved to a sheet. The dashboard uses these links when a sheet has no Image column or when the cell is empty.
+- **Photo links in settings backup**: The settings backup file (`aliswift-settings.json`) now includes photo links (`photos`, links only, no image data). Export settings includes them and Import settings merges them without replacing existing entries.
+- **Include images when creating listings**: A new setting in Settings under the General tab (off by default, stored in synced settings as `includeImages` and included in settings backups). When enabled, clicking **Fill form** on eBay retrieves up to 12 full-size gallery photos from AliExpress image hosts via the service worker (JPEG, PNG or WebP, up to 3 MB each) and hands them to eBay's photo uploader as files. The panel displays a Photos row marked Filled once thumbnails appear.
+- **Downloads folder photo fallback and optional permission**: When eBay's form does not accept the photos or its uploader changes, the service worker saves the images to `Downloads\<sheet name>\<SKU>\` (or `Downloads\Library\<SKU>\` for local library items) as `img-01.jpg`, `img-02.png` and so on. The Photos row directs the seller to drag them into eBay's photo box. Enabling the setting requests Chrome's optional `downloads` permission; the permission is not needed to install or attach photos, and if refused, the setting still works without the folder fallback.
+- **Variant photos**: On AliExpress product pages, options that display a picture of their own (such as a colour or style) are read when saving (Add to Sheet or Create Listing) without clicking anything on the page, keeping up to 40 variants per product; text-only options without pictures are ignored. When Include images is enabled, clicking **Fill form** in the eBay panel saves each variant's full-size photo to its own sub-folder named after the variant (`Downloads\<sheet name>\<SKU>\<variant name>\img-01.jpg` or `.webp`, with distinct folders if variant names collide). Variant photos are always saved to their sub-folders because eBay's single listing form has no place for them, while the panel continues to attach only gallery photos to the form. A "Variant photos" row appears in the eBay panel.
+- **Photos for older products**: When the dashboard lists products that have a link but no photo, the service worker fetches each product's public AliExpress page (`https://www.aliexpress.com/item/<item number>.html`, three at a time, up to 60 per round, without cookies or sign-in) to read its share image (`og:image`) address. The photo is kept on the device, shown on the product card without redrawing the list, and written into an empty Image cell if the sheet has an Image column (or into the product's record for the local library). Pages that return no photo are not queried again for 3 days. Only addresses on AliExpress image hosts are accepted. If the sheet is read-only or signed out, the photo is still kept on the device and shown on the card.
+
+### Changed
+
+- **Broken card photos**: When a sheet photo will not load, the card asks for the product's AliExpress share image instead, and shows the image icon only if the product has none. AliExpress's check page or a network error is no longer remembered as "no photo"; it stops the round and is retried on the next visit.
+- **Dashboard cards no longer show the margin percentage tag.**
+- **Create sheet dialog**: The Add sheet dialog is now called Create sheet (buttons: **Create sheet** in the header, **Create a sheet** in the empty state, dialog title **Create sheet**). It now only creates new Google Sheets, with the Auto/Manual switch removed. Existing spreadsheets are connected through **Import from Google Sheets**, and column letters can be edited later in the sheet's Edit dialog (pencil icon).
+- **Visible Image URL column**: The auto-created sheet template now includes a visible 160 px wide Image URL column (column O) on the Inventory tab, with a header note explaining that AliSwift fills it with the product photo link and the dashboard displays the photo from it.
+- **Saved image file formats**: Saved photos now use their actual image format (such as `.webp` when AliExpress sends WebP data for an address ending in `.jpg`) rather than assuming the file extension from the URL.
+
+### Removed
+
+- **Manual sheet creation in dialog**: Removed the manual mode from the sheet creation dialog (entering a sheet ID and column letters). Existing spreadsheets are now connected using **Import from Google Sheets**.
+
 ## [0.7.0] - 2026-10-12
 
 ### Added
@@ -92,7 +116,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/envyxyz/aliswift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/envyxyz/aliswift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.6.0
 [0.5.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.5.0
