@@ -201,12 +201,18 @@ textarea:focus-visible {
 
 .card-media {
   position: relative;
+  flex: none;
   aspect-ratio: 4 / 3;
+  overflow: hidden;
   background: var(--bg);
   border-radius: var(--radius);
 }
 
+/* Out of flow: a photo's own shape must never stretch the box. In flow, height: 100% of an auto-height
+   aspect-ratio box resolves to the photo's natural height, so a square photo made its card taller than the rest. */
 .card-media img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -220,8 +226,8 @@ textarea:focus-visible {
 }
 
 .card-media .card-ph {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   color: var(--muted);

@@ -4,6 +4,36 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-12
+
+### Added
+
+- **Create Listing** button beside Add to Sheet on AliExpress product pages: saves the product, writes the AI listing and opens eBay in one press. Reuses the SKU and the kept listing of a product already saved from the same link.
+- The page and the popup now keep the product's full title, specifications and gallery photos with each save, so the listing is written from far more than the sheet's short name.
+- **Marketplaces**: eBay Global (USD), Germany, Australia and Canada, next to UK and US. Each has its currency, fee defaults, eBay site and listing language (German for eBay Germany). The eBay panel runs on all of their listing forms.
+- **eBay panel product cards**: the products that have a listing, newest first, with search. Clicking one makes it the product to list; the price always comes from AliSwift's own list.
+- **Add all orders to sheet** on Seller Hub's order list. Goes to All orders first, reads the page from its text, skips orders already in the Orders tab (order number and SKU) and says when more pages of results remain.
+- **AI fallbacks** (Gemini, your key) for when a page changes: the eBay form's boxes, Seller Hub's order rows and AliExpress's price. The AI only points at things the page listed, and order rows reach it with every name and address hidden.
+- **Copy report** in the eBay panel: the form's box names and what the pass did, never what was typed.
+
+### Changed
+
+- The eBay panel now sets the format to Buy It Now before it types the price (in an auction the same box is an optional price that must beat the starting bid), waits for boxes eBay draws late, checks each value again a moment after it was set, and types it the way a person does when setting it was not taken. The custom label switch and the description's HTML box are found by what a seller reads beside them when eBay renames them.
+- A listing keeps the product it was written for, so the panel needs no sheet read.
+- Chrome's worker is kept awake while Gemini is still answering (a listing with photos can take over 30 seconds).
+
+### Fixed
+
+- Dashboard cards: a square photo no longer makes its card taller than the others in its row (the photo box now keeps its 4:3 shape whatever the photo's own).
+- eBay panel: the description was reported as not filled when eBay's editor reformatted the spaces; it is now compared by its words.
+- Options dialog: fixed modal container layout to prevent outer scrolling and empty space below the action buttons.
+
+### Security
+
+- The two AliExpress page buttons and the orders button ignore clicks made by the page's own scripts (`isTrusted`), so a page can no longer press them to write to your sheet, call Gemini or open tabs.
+- The service worker answers saves, rates and Create Listing only to AliExpress product pages and AliSwift's own pages, order imports only to Seller Hub, and each AI task only to the page it is about. The eBay panel can no longer save a product.
+- The extension pages have an explicit content security policy (`script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'`).
+
 ## [0.6.0] - 2026-10-12
 
 ### Added
@@ -62,6 +92,7 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/envyxyz/aliswift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.6.0
 [0.5.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.5.0

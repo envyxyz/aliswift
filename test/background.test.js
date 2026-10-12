@@ -998,3 +998,70 @@ test("a page-button library save keeps the price as shown: cost is price plus sh
   const sheetRow = await scrape("sheet");
   assert.deepEqual([sheetRow.price, sheetRow.salePrice], ["19.50", "33.15"]); // the sheet path still prices: 17.5 + 2 extra, x 1.7
 });
+
+/* Orders from eBay's Seller Hub, and which page may ask for what */
+
+const ordersPage = "https://www.ebay.com/sh/ord/?filter=status:ALL_ORDERS";
+const listingForm = "https://www.ebay.com/lstng?draftId=1";
+const imported = [
+  { orderNumber: "12-1", date: "2026-10-08", items: [{ sku: "SKU-01", qty: 1 }, { sku: "SKU-02", qty: 2 }] }, // SKU-01 is already in the tab
+  { orderNumber: "12-9", date: "2026-10-10", items: [{ sku: "sku-01", qty: 3 }] },
+  { orderNumber: "12-9", date: "2026-10-10", items: [{ sku: "SKU-01", qty: 3 }] }, // the same line twice on the page
+  { orderNumber: "12-10", date: "", items: [{ sku: "SKU-77", qty: 1 }] }, // a SKU the sheet does not know
+  { orderNumber: "12-11", date: "2026-10-11", items: [{ sku: "", qty: 1 }] }, // listed outside AliSwift: no custom label
+];
+
+test("importOrders adds what is new in one read and one write, oldest first, and never an order that is already there", async () => {
+  const t = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  const reply = await ask(t.listener, { action: "importOrders", orders: imported }, ordersPage);
+  assert.deepEqual(reply, { success: true, added: 3, skipped: 2, rejected: 1, unknown: 1 });
+  assert.equal(t.calls.length, 3); // the tab's keys, the inventory, one write
+  assert.equal(t.calls[2].body.valueInputOption, "RAW");
+  assert.deepEqual(cellsOf(t.calls[2]), {
+    // oldest first: 12-1 (Oct 8), then 12-9 (Oct 10, its two lines were one), then 12-10 (no date)
+    "'Orders'!A7": "12-1", "'Orders'!B7": "SKU-02", "'Orders'!D7": 46303, "'Orders'!E7": 2, "'Orders'!F7": 9.98, "'Orders'!G7": 3, "'Orders'!J7": "Pending",
+    "'Orders'!A8": "12-9", "'Orders'!B8": "SKU-01", "'Orders'!D8": 46305, "'Orders'!E8": 3, "'Orders'!F8": 20.97, "'Orders'!G8": 6.45, "'Orders'!J8": "Pending",
+    "'Orders'!A9": "12-10", "'Orders'!B9": "SKU-77", "'Orders'!E9": 1, "'Orders'!J9": "Pending", // no cost, no sell price: the sheet has no such SKU
+  });
+  assertNothingDestroyed(t.calls);
+});
+
+test("importOrders, pressed again, finds everything already there and writes nothing; and it needs an Orders tab", async () => {
+  const again = setup(full, [orderKeys()]);
+  const lines = [{ orderNumber: "12-1", date: "2026-10-08", items: [{ sku: "SKU-01", qty: 1 }] }, { orderNumber: "12-2", items: [{ sku: "sku-02", qty: 1 }] }];
+  assert.deepEqual(await ask(again.listener, { action: "importOrders", orders: lines }, ordersPage), { success: true, added: 0, skipped: 2, rejected: 0, unknown: 0 });
+  assert.equal(again.calls.length, 1); // one read, no write
+
+  const none = setup({ ...full, oTab: "" }, []);
+  assert.equal((await ask(none.listener, { action: "importOrders", orders: lines }, ordersPage)).error, "This sheet has no Orders tab set up.");
+  assert.equal(none.calls.length, 0);
+  const junk = setup(full, []);
+  assert.deepEqual(await ask(junk.listener, { action: "importOrders", orders: "nope" }, ordersPage), { success: true, added: 0, skipped: 0, rejected: 0, unknown: 0 });
+  assert.equal(junk.calls.length, 0);
+});
+
+test("each page asks for its own things: orders only from Seller Hub's list, saving only from a product page or AliSwift's own, AI only for the task of the page it came from", async () => {
+  const t = setup(full, []);
+  const denied = { success: false, error: "Not allowed." };
+  const forms = [page, options, listingForm, "https://www.ebay.com.evil.example/sh/ord/", "http://www.ebay.com/sh/ord/", "https://www.ebay.com/itm/1", "https://www.ebay.co.uk.evil.example/sh/ord", undefined];
+  for (const url of forms) assert.deepEqual(await ask(t.listener, { action: "importOrders", orders: [] }, url), denied, `importOrders from ${url}`);
+  assert.equal((await ask(t.listener, { action: "importOrders", orders: [] }, "https://www.ebay.co.uk/sh/ord/")).success, true);
+  assert.equal((await ask(t.listener, { action: "importOrders", orders: [] }, "https://www.ebay.de/sh/ord/details?orderid=1")).success, true); // any of the sites in REGIONS
+
+  // The eBay pages never save a product, ask a rate or create a listing; a product page and AliSwift's pages may.
+  for (const request of [{ action: "appendToSheet", data: {} }, { action: "rate", data: {} }, { action: "quickList", data: {} }]) {
+    for (const url of [listingForm, ordersPage, "https://www.aliexpress.com.evil.example/item/1.html", "http://www.aliexpress.com/item/1.html"]) {
+      assert.deepEqual(await ask(t.listener, request, url), denied, `${request.action} from ${url}`);
+    }
+    for (const url of [page, options, "https://es.aliexpress.com/item/1.html", "https://www.aliexpress.us/item/1.html"]) {
+      assert.notDeepEqual(await ask(t.listener, request, url), denied, `${request.action} from ${url}`);
+    }
+  }
+
+  // The AI answers only for the page its task is about, and only for a task it knows.
+  for (const [task, from, notFrom] of [["controls", listingForm, [page, ordersPage, options]], ["orders", ordersPage, [page, listingForm, options]], ["product", page, [ordersPage, listingForm, options]]]) {
+    for (const url of notFrom) assert.deepEqual(await ask(t.listener, { action: "aiMap", task, items: [] }, url), { success: false, error: "Not allowed." }, `${task} from ${url}`);
+    assert.notEqual((await ask(t.listener, { action: "aiMap", task, items: [] }, from)).error, "Not allowed.", `${task} from ${from}`);
+  }
+  assert.equal((await ask(t.listener, { action: "aiMap", task: "constructor", items: [] }, ordersPage)).error, "Not allowed.");
+});

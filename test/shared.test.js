@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   SHEET_DEFAULTS,
   REGIONS,
+  regionForCurrency,
   TEMPLATE_LAYOUT,
   canonical,
   nextRow,
@@ -159,11 +160,15 @@ test("rateFromCell takes the cell only when its formula looks up this very pair"
   assert.equal(rateFromCell("=CURRENCY:", 5, "", ""), null); // empty codes match every formula
 });
 
+test("regionForCurrency picks the first marketplace that sells in a currency, and UK for any other", () => {
+  assert.deepEqual(["GBP", "USD", "EUR", "AUD", "CAD", "PKR", "", undefined].map(regionForCurrency), ["UK", "US", "DE", "AU", "CA", "UK", "UK", "UK"]);
+});
+
 test("a sheet with no marketplace is the default: no currency to compare, and an import may leave it unset", () => {
   assert.equal(SHEET_DEFAULTS.region, "");
   assert.equal(REGIONS[SHEET_DEFAULTS.region], undefined);
   const sheet = { ...SHEET_DEFAULTS, id: "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789", name: "Store" };
-  for (const region of ["", "UK", "US"]) {
+  for (const region of ["", ...Object.keys(REGIONS)]) {
     assert.equal(validateImport({ app: "aliswift", version: 1, sync: { sheets: [{ ...sheet, region }] } }).ok, true, region);
   }
   for (const region of ["XX", "uk", "constructor"]) {
@@ -308,8 +313,17 @@ test("validateImport rejects a payload too big for one synced item", () => {
 });
 
 test("the regions and the template layout hold what the rest of the code expects", () => {
-  assert.deepEqual(Object.keys(REGIONS), ["UK", "US"]);
+  assert.deepEqual(Object.keys(REGIONS), ["UK", "US", "GLOBAL", "DE", "AU", "CA"]);
   assert.deepEqual([REGIONS.UK.currency, REGIONS.UK.symbol, REGIONS.US.currency, REGIONS.US.symbol], ["GBP", "£", "USD", "$"]);
+  // Every region has what the sheet, the listing writer and the eBay panel read, and an eBay host the panel can run on.
+  for (const [key, r] of Object.entries(REGIONS)) {
+    assert.match(r.currency, /^[A-Z]{3}$/, key);
+    assert.match(r.ebay, /^www\.ebay\.[a-z.]+$/, key);
+    assert.ok(r.label && r.symbol && r.lang, key);
+  }
+  assert.equal(REGIONS.GLOBAL.ebay, REGIONS.US.ebay); // a global seller lists on eBay's US site, in USD
+  assert.equal(REGIONS.GLOBAL.currency, "USD");
+  assert.equal(REGIONS.DE.lang, "German");
   // Every key the preset fills in is a real setting.
   for (const key of Object.keys(TEMPLATE_LAYOUT)) assert.ok(key in SHEET_DEFAULTS, key);
 });

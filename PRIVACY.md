@@ -4,10 +4,11 @@ AliSwift has no project-run server, no database, and no analytics. Nothing is ev
 
 ## What AliSwift reads
 
-- **Product details on AliExpress**: title, item price, shipping cost, image link and URL. This happens only when you visit an AliExpress product page and open the extension popup or click the on-page save button.
+- **Product details on AliExpress**: title, item price, shipping cost, image link and URL, and the page's full title, specifications, summary and gallery photo links, kept with the product for its listing. This happens only when you visit an AliExpress product page and open the extension popup or click one of the on-page buttons (Add to Sheet, Create Listing). If the page's price boxes can't be read, the pieces of the page that hold a price can go to Gemini (see below).
 - **Your Google Sheets**: AliSwift reads column headers, existing SKUs, links, titles and exchange rate cells in the spreadsheets you explicitly configure.
 - **Your Google Drive metadata**: when you connect to Google, sign-in requests one scope list that includes read-only Drive metadata (`drive.metadata.readonly`). This allows AliSwift to list spreadsheet names and dates in the picker and verify pasted spreadsheet links. It never reads the contents of any file in your Drive except the sheet you choose to open.
-- **eBay listing pages**: the content script runs on eBay's listing form (`ebay.com` and `ebay.co.uk`, `/lstng`) and reads its field names and options to fill them. It does not read your eBay account or orders. Only field names and options go to Gemini, and only when you click fill, with your own key. The product details it fills come from the product you picked on the dashboard and stay on your device.
+- **eBay listing pages**: the content script runs on eBay's listing form (`/lstng`) on the marketplaces you can choose for a sheet (eBay UK, US, Germany, Australia and Canada sites) and reads its field names and options to fill them. Only field names and options go to Gemini, and only when you click fill, with your own key; if a box can't be found by its usual name, the names, labels and types of the form's boxes (never their contents) can go too. The product details it fills come from the product you picked in the panel and stay on your device.
+- **eBay Seller Hub order list**: on the order list (`/sh/ord`) of those sites, when you press **Add all orders to sheet**, AliSwift reads each order's number, the custom label (SKU) and quantity of each item, and the sold date, and writes them to the Orders tab of your sheet. Buyer names, usernames and addresses on the page are not read into anything AliSwift keeps or sends. If the page's wording changes and the usual reading finds no item, the row's text goes to Gemini with every piece other than an order number, custom label, quantity, amount or date replaced by a placeholder.
 
 ## Where your data goes
 
@@ -18,7 +19,7 @@ AliSwift has no project-run server, no database, and no analytics. Nothing is ev
 3. **Directly to Google's Gemini API (optional)**:
    If you enter your own Gemini API key in Settings for AI column mapping, listing generation, or eBay form filling, data travels directly from your browser to Google's Gemini API (`generativelanguage.googleapis.com`).
    - Your Gemini API key stays in `chrome.storage.local` on this device, is sent only to Google's Gemini API, and is not included in settings export.
-   - Gemini receives product text and the first product photo for listing generation.
+   - Gemini receives the product's text (its title, sell price, specifications and description) and up to four of its photos for listing generation. It never receives your cost price.
    - For sheet column mapping, AliSwift sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns that look personal (names, addresses, phone, email). Because this filter is a deny-list and can miss odd or unstructured headers, always check the preview before confirming.
    - Gemini requests allow up to 15 s per attempt and retry once, so calls take up to about 30 s total.
 

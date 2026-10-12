@@ -1,4 +1,15 @@
-/* The page button. `all: initial` keeps AliExpress styles from leaking in. */
+/* The page buttons. `all: initial` keeps AliExpress styles from leaking in. */
+.aliswift-bar {
+  all: initial;
+  display: block;
+  margin-top: 8px;
+}
+
+.aliswift-row {
+  display: flex;
+  gap: 8px;
+}
+
 .aliswift-btn {
   all: initial;
   box-sizing: border-box;
@@ -6,15 +17,39 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
-  margin-top: 8px;
-  padding: 12px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px 8px;
   background: #177a3c;
   color: #fff;
   font: 700 14px/1.2 "TT Norms Pro", system-ui, sans-serif;
   letter-spacing: 0.3px;
   text-align: center;
   cursor: pointer;
+}
+
+.aliswift-btn-list {
+  background: #1d1b20;
+}
+
+.aliswift-note {
+  all: initial;
+  display: block;
+  margin-top: 6px;
+  font: 12px/1.4 "TT Norms Pro", system-ui, sans-serif;
+  color: #3d3d3d;
+}
+
+.aliswift-note:empty {
+  display: none;
+}
+
+.aliswift-note[data-tone="error"] {
+  color: #c4281c;
+}
+
+.aliswift-note[data-tone="ok"] {
+  color: #177a3c;
 }
 
 .aliswift-btn:hover:not(:disabled) {

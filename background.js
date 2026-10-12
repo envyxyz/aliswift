@@ -1,19 +1,22 @@
-importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js", "lib/fillplan.js");
+importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js", "lib/fillplan.js", "lib/aimap.js");
 
 // The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
 // Every handler resolves to { success: true, ... } or { success: false, error }. pagesOnly handlers
 // reject anything but AliSwift's own pages: a content script's sender.url is the web page it runs on.
-// ebayOnly handlers answer only the panel on eBay's listing form (see onListingForm).
+// ebayOnly handlers answer only the panel on eBay's listing form (see onListingForm), ordersOnly ones only the order list
+// in Seller Hub. aliOk handlers also answer an AliExpress product page (the page buttons), and nothing else: the eBay
+// panel never saves a product or asks a rate. aiTask handlers answer any of those three pages, and check which task.
 // A sheetId of "local" means the on-device library (no sheet, no sign-in).
 const handlers = {
-  appendToSheet: { run: (request) => appendRow(request.data) },
+  appendToSheet: { aliOk: true, run: (request) => appendRow(request.data) },
+  quickList: { aliOk: true, run: (request) => quickList(request.data) },
   createSheet: { pagesOnly: true, run: (request) => createSheet(request.data) },
   authState: { run: () => authState() },
   signIn: { pagesOnly: true, run: () => signIn() },
   signOut: { pagesOnly: true, run: () => signOut() },
-  rate: { run: (request) => getRate(request.data) },
+  rate: { aliOk: true, run: (request) => getRate(request.data) },
   setRate: { pagesOnly: true, run: (request) => setRate(request.data) },
   listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
   setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
@@ -29,6 +32,10 @@ const handlers = {
   saveListing: { pagesOnly: true, run: (request) => saveListing(request) },
   listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
   ebayContext: { ebayOnly: true, run: () => ebayContext() },
+  ebayProducts: { ebayOnly: true, run: () => ebayProducts() },
+  importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
+  aiMap: { aiTask: true, run: (request, sender) => aiMap(request, sender) },
+  ebaySelect: { ebayOnly: true, run: (request) => ebaySelect(request) },
   planFill: { ebayOnly: true, run: (request) => planFill(request) },
   ebayDone: { ebayOnly: true, run: () => chrome.storage.local.remove("ebayTarget").then(() => ({ success: true })) },
   openPage: { ebayOnly: true, run: (request) => openPage(request.page) },
@@ -46,12 +53,20 @@ const fail = (error) => ({
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!Object.hasOwn(handlers, request?.action)) return;
   const handler = handlers[request.action];
-  if ((handler.pagesOnly && !sender.url?.startsWith(chrome.runtime.getURL(""))) || (handler.ebayOnly && !onListingForm(sender.url))) {
+  const own = Boolean(sender.url?.startsWith(chrome.runtime.getURL("")));
+  const url = sender.url;
+  const allowed = handler.pagesOnly ? own
+    : handler.aliOk ? own || onAliExpress(url)
+    : handler.ebayOnly ? onListingForm(url)
+    : handler.ordersOnly ? onOrdersPage(url)
+    : handler.aiTask ? onAliExpress(url) || onListingForm(url) || onOrdersPage(url)
+    : true;
+  if (!allowed) {
     sendResponse({ success: false, error: "Not allowed." });
     return;
   }
   Promise.resolve()
-    .then(() => handler.run(request))
+    .then(() => handler.run(request, sender))
     .catch(fail)
     .then(sendResponse);
   return true;
@@ -498,6 +513,42 @@ async function updateOrder({ sheetId, orderNumber, key, patch }) {
   });
 }
 
+// The orders on Seller Hub's list, added to the active sheet's Orders tab with one read of the tab, one read of the
+// inventory and one write. An order (number and SKU) already in the tab is skipped, so pressing the button again, or on
+// the next page, adds only what is new. Oldest first, so the tab stays in the order they were sold. Cost and sell price
+// come from the inventory's row for the SKU, like an order added on the dashboard.
+async function importOrders({ orders } = {}) {
+  const sheet = await getActiveSheet();
+  if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+  const { cols } = await ordersOf(sheet.id);
+  const { lines, rejected } = cleanOrderImport(orders);
+  if (!lines.length) return { success: true, added: 0, skipped: 0, rejected, unknown: 0 };
+  return enqueue(async () => {
+    const { f, rows } = await readOrderKeys(sheet, cols);
+    const keyOf = (no, sku) => `${text(no).toLowerCase()}|${text(sku).toLowerCase()}`;
+    const seen = new Set(rows.map((r) => keyOf(r.no, r.sku)));
+    const fresh = lines.filter((o) => !seen.has(keyOf(o.orderNumber, o.sku)) && seen.add(keyOf(o.orderNumber, o.sku)));
+    if (!fresh.length) return { success: true, added: 0, skipped: lines.length, rejected, unknown: 0 };
+
+    const inv = sheet.skuCol ? await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, cost: sheet.priceCol, sell: sheet.salePriceCol }, sheet.startRow) : { sku: [], cost: [], sell: [] };
+    const unit = new Map(inv.sku.map((s, i) => [text(s).toLowerCase(), { cost: num(inv.cost[i]), sell: num(inv.sell[i]) }]));
+    const first = nextRow(f.no.map((v) => [v]), f.sku.map((v) => [v]), sheet.oRow);
+    let unknown = 0;
+    const cells = fresh.flatMap((o, i) => {
+      const u = unit.get(o.sku.toLowerCase());
+      if (u?.cost == null) unknown++;
+      const sell = u?.sell == null ? null : round2(u.sell * o.qty);
+      const cost = u?.cost == null ? null : round2(u.cost * o.qty);
+      return [
+        [cols.no, o.orderNumber], [cols.sku, o.sku], [cols.date, o.serial], [cols.qty, o.qty], [cols.sell, sell],
+        [cols.cost, cost], [cols.status, o.status],
+      ].filter(([col]) => col).map(([col, value]) => [`${col}${first + i}`, value]);
+    });
+    await putCells(sheet.id, sheet.oTab, cells);
+    return { success: true, added: fresh.length, skipped: lines.length - fresh.length, rejected, unknown };
+  });
+}
+
 /* Library to sheet */
 
 // Moves the library's products into a sheet with one read and one write. A product already in the sheet (same
@@ -554,6 +605,62 @@ function importLibrary(incoming) {
     await chrome.storage.local.set({ library: lib });
     return { success: true, added: lib.length - library.length };
   });
+}
+
+/* Page buttons: what the AliExpress page's buttons ask for */
+
+// The products already in the sheet or the library, for quickList's look.
+async function savedProducts(local, sheet) {
+  return local ? libToProducts((await chrome.storage.local.get({ library: [] })).library) : (await readProducts(sheet)).products;
+}
+
+// The AliExpress page's "Create Listing": saves the product, writes its eBay listing and opens eBay, in one request.
+// A product already saved from this link (in the sheet, or the library) keeps its SKU and is not added again, and its
+// listing is the one already kept. A failure after the save says how far it got (`saved`, `sku`): the row stays.
+// ponytail: the "already saved?" look and the save are two steps, so two tabs clicking at the same instant could both add. Upgrade: do both inside enqueue.
+async function quickList(data) {
+  const local = data?.dest === "local";
+  const sheet = local ? null : await getActiveSheet();
+  if (!local && !sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+  const sheetId = local ? LOCAL : sheet.id;
+  const link = text(data?.link);
+  const known = link ? (await savedProducts(local, sheet)).find((x) => x.status !== "Discontinued" && x.link === link) : null;
+  let sku = known?.sku ?? "";
+  if (known) await saveDetails(data); // the listing is written from this visit's details
+  else {
+    const saved = await appendRow(data);
+    if (!saved.success) return saved; // nothing was saved: the page decides what to say
+    sku = saved.sku ?? "";
+  }
+  try {
+    const product = {
+      sku, title: known?.title || text(data.title), link, image: known?.image || httpsUrl(data.image),
+      salePrice: known ? known.salePrice : money(data.salePrice), currency: text(data.currency),
+    };
+    const made = await generateListing({ sheetId, product });
+    const { region } = await listOnEbay({ sheetId, key: made.key, product });
+    return { success: true, sku, existed: Boolean(known), cached: Boolean(made.cached), region };
+  } catch (error) {
+    return { ...fail(error), saved: true, sku };
+  }
+}
+
+// Chrome stops a worker that has had no event for 30 seconds, and a Gemini call still running is no event. An extension
+// API call every 20 seconds counts as one. Returns the function that stops the pings.
+function keepAlive() {
+  if (typeof setInterval !== "function") return () => {};
+  const timer = setInterval(() => chrome.runtime.getPlatformInfo?.(), 20000);
+  return () => clearInterval(timer);
+}
+
+// "Which one is it?" for a page that changed (lib/aimap.js): the page sends what it listed, Gemini answers with numbers
+// from the list, and only the checked numbers go back. Each task answers only the site it is about.
+const AI_SENDERS = { controls: onListingForm, orders: onOrdersPage, product: onAliExpress };
+async function aiMap({ task, items } = {}, sender) {
+  if (!Object.hasOwn(AI_TASKS, task) || !AI_SENDERS[task](sender?.url)) throw new Error("Not allowed.");
+  const [build, check] = AI_TASKS[task];
+  const raw = await callGemini({ ...build(items), timeoutMs: 30000 });
+  return { success: true, answer: check(raw, items) };
 }
 
 /* Listings (Gemini). One listing per product, kept under listing:<sheetId>:<key> in storage.local ("local" is the
@@ -639,7 +746,7 @@ async function generateListing({ sheetId, product, force } = {}) {
   const photos = (await Promise.all(urls.map(async (url) => ({ url, image: await fetchImage(url) })))).filter((x) => x.image);
 
   const { aiInstructions } = await chrome.storage.sync.get({ aiInstructions: "" });
-  const region = REGIONS[sheet?.region] ? sheet.region : p.currency === "USD" ? "US" : "UK";
+  const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const wordsToLeaveOut = sheet?.excludeKeywords ?? "";
   const currency = sheet ? REGIONS[sheet.region]?.currency : p.currency;
   const request = buildListingRequest(
@@ -650,14 +757,23 @@ async function generateListing({ sheetId, product, force } = {}) {
       images: photos.map((x) => x.url),
       sellPrice: p.salePrice == null ? "" : `${currency ?? ""} ${p.salePrice}`.trim(),
     },
-    { region, wordsToLeaveOut, instructions: typeof aiInstructions === "string" ? aiInstructions : "" },
+    { region, marketplace: REGIONS[region].label, language: REGIONS[region].lang, wordsToLeaveOut, instructions: typeof aiInstructions === "string" ? aiInstructions : "" },
   );
   // 90 s: a listing with photos takes a while. Not retried on a timeout (that would be three minutes); Regenerate is.
-  const raw = await callGemini({ ...request, images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000 });
+  const stop = keepAlive();
+  let raw;
+  try {
+    raw = await callGemini({ ...request, images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000 });
+  } finally {
+    stop();
+  }
   const { listing, warnings, ok } = validateListing(raw, { wordsToLeaveOut });
   if (!ok) throw Object.assign(new Error("Gemini's answer had no usable title and description. Try again."), { code: "bad-output" });
 
-  const record = { listing, limited: !details, model, createdAt: Date.now(), warnings };
+  // `product` is what the eBay panel's cards show (SKU, name, sell price), kept with the listing so the panel needs no
+  // sheet read. The cost price is never kept here.
+  const meta = { sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), salePrice: num(p.salePrice), currency: text(currency).slice(0, 3), link: text(p.link).slice(0, 2000) };
+  const record = { listing, limited: !details, model, createdAt: Date.now(), warnings, product: meta };
   await chrome.storage.local.set({ [slot]: record });
   return { success: true, key, ...record };
 }
@@ -788,7 +904,27 @@ async function mapSheet(data) {
 /* eBay listing form (P6). The panel on eBay's /lstng page asks this worker for the product picked on the dashboard and
    for Gemini's help with the item specifics. It never reads or writes a sheet. */
 
-// A message from the panel: the listing form on eBay UK or US, not any other page or site.
+// A message from a page button: a product page on AliExpress, not any other page or site.
+function onAliExpress(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && /(^|\.)aliexpress\.(com|us)$/.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+// A message from the orders button: Seller Hub's order pages on an eBay marketplace in REGIONS, not any other page or site.
+function onOrdersPage(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && Object.values(REGIONS).some((r) => r.ebay === u.hostname) && u.pathname.startsWith("/sh/ord");
+  } catch {
+    return false;
+  }
+}
+
+// A message from the panel: the listing form on an eBay marketplace in REGIONS, not any other page or site.
 function onListingForm(url) {
   try {
     const u = new URL(url);
@@ -798,20 +934,26 @@ function onListingForm(url) {
   }
 }
 
-// The dashboard's "List on eBay": remembers which product the panel works on (with what it needs to fill the form, so
-// the form never waits for a sheet) and opens eBay's listing start page for the sheet's marketplace. The price is kept
-// only when it is in that marketplace's currency, so a price is never typed into the wrong site.
-async function listOnEbay({ sheetId, key, product } = {}) {
+// Remembers which product the panel works on, with what it needs to fill the form (so the form never waits for a sheet).
+// The marketplace is the sheet's, else the one that sells in the product's currency. The price is kept only when it is in
+// that marketplace's currency, so a price is never typed into the wrong site. Needs the product's saved listing.
+async function pickTarget(sheetId, key, product) {
   const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
   const id = text(key).slice(0, 40);
   const slot = `listing:${sheetId}:${id}`;
   if (!id || !(await chrome.storage.local.get({ [slot]: null }))[slot]) throw new Error("Create a listing for this product first.");
   const p = product && typeof product === "object" ? product : {};
-  const region = REGIONS[sheet?.region] ? sheet.region : p.currency === "USD" ? "US" : "UK";
+  const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const currency = REGIONS[sheet?.region] ? REGIONS[sheet.region].currency : text(p.currency);
   const price = num(p.salePrice) > 0 && currency === REGIONS[region].currency ? num(p.salePrice) : null;
   const ebayTarget = { sheetId, key: id, sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), price, region, at: Date.now() };
   await chrome.storage.local.set({ ebayTarget });
+  return region;
+}
+
+// The dashboard's "List on eBay": picks the product, then opens eBay's listing start page for its marketplace.
+async function listOnEbay({ sheetId, key, product } = {}) {
+  const region = await pickTarget(sheetId, key, product);
   await chrome.tabs.create({ url: `https://${REGIONS[region].ebay}/sl/prelist/suggest` });
   return { success: true, region };
 }
@@ -836,6 +978,46 @@ async function ebayContext() {
     target: { sku: target.sku, title: target.title, price: target.price == null ? "" : target.price.toFixed(2), currency: region.currency, host: region.ebay },
     listing: listing ? { title: listing.title, description: listing.description, html: toEbayHtml(listing.description), specifics: listing.itemSpecifics ?? [] } : null,
   };
+}
+
+// The cards the panel offers: every product with a kept listing, newest first, as { sheetId, key, sku, title, price,
+// currency, product }. A listing carries its product since it was written; an older one is looked up in the dashboard's
+// cached list, else it shows the listing's own title. Listings of a sheet that has since been removed are left out.
+async function ebayProductList() {
+  const [all, { sheets }] = await Promise.all([chrome.storage.local.get(null), chrome.storage.sync.get({ sheets: [] })]);
+  const regionOf = new Map([[LOCAL, ""], ...sheets.map((s) => [s.id, s.region])]);
+  const cards = [];
+  for (const [slot, record] of Object.entries(all)) {
+    const [, sheetId, key] = /^listing:([\w-]+):(.+)$/.exec(slot) ?? [];
+    if (!key || !regionOf.has(sheetId) || !record?.listing) continue;
+    const cached = (all[`cache:${sheetId}`]?.products ?? []).find((x) => listingKey(x) === key);
+    const p = record.product ?? cached ?? {};
+    const currency = REGIONS[regionOf.get(sheetId)]?.currency ?? text(p.currency);
+    cards.push({
+      sheetId, key, sku: text(p.sku) || key, title: text(p.title) || text(record.listing.title), price: num(p.salePrice) > 0 ? num(p.salePrice) : null,
+      currency, createdAt: num(record.createdAt) ?? 0, product: { ...p, currency },
+    });
+  }
+  return cards.sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
+}
+
+// { products: [{ sheetId, key, sku, title, price, currency }], current: { sheetId, key } | null } for the panel's cards.
+async function ebayProducts() {
+  const { target } = await ebayPick();
+  return {
+    success: true,
+    current: target ? { sheetId: target.sheetId, key: target.key } : null,
+    products: (await ebayProductList()).map(({ product, createdAt, ...card }) => card),
+  };
+}
+
+// The card the seller clicked becomes the panel's product. The panel names only the card (sheet and key): what is
+// filled into the form, the price included, comes from this list and never from the page.
+async function ebaySelect({ sheetId, key } = {}) {
+  const card = (await ebayProductList()).find((x) => x.sheetId === sheetId && x.key === key);
+  if (!card) throw new Error("That product's listing is gone. Create one on the dashboard.");
+  await pickTarget(card.sheetId, card.key, card.product);
+  return { success: true };
 }
 
 // Gemini matches the form's empty item specifics to the saved listing. { fields, category } from the panel (cleaned

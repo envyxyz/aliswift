@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 // template.js reads REGIONS and TEMPLATE_LAYOUT as globals, the way the service worker has them.
 const shared = require("../lib/shared.js");
 Object.assign(globalThis, shared);
-const { TEMPLATE, buildWorkbook, feeMath } = require("../lib/template.js");
+const { TEMPLATE, REGION_SHEETS, buildWorkbook, feeMath } = require("../lib/template.js");
 const { TEMPLATE_LAYOUT } = shared;
 
 const IDS = [10, 20, 30]; // Dashboard, Inventory, Orders
@@ -46,7 +46,7 @@ test("the workbook has the three tabs, sized like the template", () => {
 });
 
 test("headers are exact, with the marketplace and home currency filled in", () => {
-  for (const [region, cur] of [["UK", "GBP"], ["US", "USD"]]) {
+  for (const [region, cur] of [["UK", "GBP"], ["US", "USD"], ["DE", "EUR"], ["AU", "AUD"]]) {
     const reqs = setup({ region });
     const header = (sheetId, row, n) =>
       Array.from({ length: n }, (_, i) => written(reqs, sheetId, `${String.fromCharCode(65 + i)}${row}`).userEnteredValue.stringValue);
@@ -73,8 +73,18 @@ test("the fee strip has the seven label and value pairs for each region", () => 
       ["  Tax on fees:", 0], ["  Int'l:", 0.0155], ["  Buyer sales tax (est.):", 0],
     ],
   };
-  for (const region of ["UK", "US"]) {
-    const reqs = setup({ region });
+  // The regions added later: the strip is built from REGION_SHEETS, so the labels follow the marketplace's symbol.
+  for (const region of ["GLOBAL", "DE", "AU", "CA"]) {
+    const r = REGION_SHEETS[region];
+    const sym = REGIONS[region].symbol;
+    expected[region] = [
+      ["eBay FVF Rate:", r.fvf], ["  Reg. Op. Fee:", r.regOp], [`  Order Fee (≤${sym}10):`, r.orderLow], [`  Order Fee (>${sym}10):`, r.orderHigh],
+      [`  ${r.taxLabel}:`, r.feeTax], ["  Int'l:", r.intl], [`  ${r.buyerLabel}:`, 0],
+    ];
+  }
+  assert.deepEqual(Object.keys(REGION_SHEETS), Object.keys(REGIONS)); // a region without a fee strip can't build a sheet
+  for (const region of Object.keys(REGIONS)) {
+    const reqs = setup({ region, homeCurrency: "usd" });
     const pairs = expected[region].map((_, i) => [
       written(reqs, 20, `${String.fromCharCode(65 + i * 2)}1`).userEnteredValue.stringValue,
       written(reqs, 20, `${String.fromCharCode(66 + i * 2)}1`).userEnteredValue.numberValue,

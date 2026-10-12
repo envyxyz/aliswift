@@ -13,7 +13,7 @@ Save products directly into a custom or auto-configured Google Sheet, or store t
 
 - One-Click Saving: Click the on-page save button on any AliExpress item page, or save from the extension popup.
 - Automated Pricing: Calculate your retail sell price instantly using custom formula rules (e.g., costPrice * 1.7) or target profit margins. Includes visible shipping and optional cost buffers.
-- Pre-Configured Spreadsheets: Auto-generate ready-to-use Google Sheets equipped with UK or US eBay fee breakdowns, profit calculations, currency exchange formulas, and customer order tracking.
+- Pre-Configured Spreadsheets: Auto-generate ready-to-use Google Sheets equipped with eBay fee breakdowns for UK, US, Global, Germany, Australia or Canada, profit calculations, currency exchange formulas, and customer order tracking.
 - Offline Local Library: No Google account required. Start dropshipping immediately by saving products directly to your browser storage, then transfer them to Google Sheets whenever you are ready.
 - Full Dashboard: Review saved products in a visual gallery, inspect supplier links, adjust listing statuses, and track fulfillment orders in a filterable table.
 - AI Listing Generation: Generate search-optimized eBay titles (up to 80 characters), descriptions, and item specifics from product cards on the dashboard using your own Gemini key. Editable with one-click copy buttons for every field.
@@ -88,7 +88,7 @@ Each requested permission and host permission in manifest.json is strictly requi
 4. Screenshot 4: Auto-Configured Google Sheet
    - Page: Google Sheets workbook in browser
    - State: Inventory tab showing structured columns for SKU, title, supplier link, cost price, sell price, marketplace fees, net profit, margin, and status.
-   - Caption: Pre-built templates tailored for eBay UK and US with automatic fee breakdowns and live currency rates.
+   - Caption: Pre-built templates for eBay UK, US, Global, Germany, Australia and Canada with automatic fee breakdowns and live currency rates.
 
 5. Screenshot 5: Flexible Settings and Pricing Rules
    - Page: Settings page (`options/options.html#pricing`)

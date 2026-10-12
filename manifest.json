@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AliSwift",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "minimum_chrome_version": "119",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqhAugC9Y2g7NUkcp/SD+Ya8LJTAtsvhPHqL/4GFEYJRL6CfUbdU23QvhwuFmLtpDa8FLMc1bxdjNIe2tEQTGYZq1yfTNNEkOZAe4y3wi8eRxAWf3GPIkAwOPcH8Ikiyt/6F/m8KpfljFASULqy/6ZfjNO0SBkZqlTgYq4uHLcW6tQDTRtdaxYaw1HtQvlyegSdaKbOc/G/XhNZihtR6Pz190yDSFI5oDpWn2rhYiWu35viyyaQLyMC/7EB+kfC5jBSOInu1Zzbg/oSwn035EL0CtJX73XKFrSL2itfHstam5VM26aypA6m5U3hB06lP2zd/GzVyrxj/a2k48rq7c6wIDAQAB",
   "description": "Save AliExpress products to Google Sheets in one click. Scrapes title, price and shipping, then adds your sell price.",
@@ -16,6 +16,9 @@
     "https://*.alicdn.com/*",
     "https://*.aliexpress-media.com/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  },
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
@@ -45,16 +48,32 @@
       "matches": [
         "https://www.ebay.com/lstng*",
         "https://www.ebay.co.uk/lstng*",
+        "https://www.ebay.de/lstng*",
+        "https://www.ebay.com.au/lstng*",
+        "https://www.ebay.ca/lstng*",
         "https://www.ebay.com/sl/*",
-        "https://www.ebay.co.uk/sl/*"
+        "https://www.ebay.co.uk/sl/*",
+        "https://www.ebay.de/sl/*",
+        "https://www.ebay.com.au/sl/*",
+        "https://www.ebay.ca/sl/*"
       ],
-      "js": ["lib/ebayform.js", "content-ebay.js"]
+      "js": ["lib/panel.js", "lib/ebayform.js", "content-ebay.js"]
+    },
+    {
+      "matches": [
+        "https://www.ebay.com/sh/ord*",
+        "https://www.ebay.co.uk/sh/ord*",
+        "https://www.ebay.de/sh/ord*",
+        "https://www.ebay.com.au/sh/ord*",
+        "https://www.ebay.ca/sh/ord*"
+      ],
+      "js": ["lib/panel.js", "lib/orders.js", "content-orders.js"]
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["lib/ui.css", "ebay.css"],
-      "matches": ["https://www.ebay.com/*", "https://www.ebay.co.uk/*"],
+      "matches": ["https://www.ebay.com/*", "https://www.ebay.co.uk/*", "https://www.ebay.de/*", "https://www.ebay.com.au/*", "https://www.ebay.ca/*"],
       "use_dynamic_url": true
     }
   ],

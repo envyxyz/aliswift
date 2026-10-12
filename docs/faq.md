@@ -9,9 +9,11 @@ No. Sign-in is completely optional. If you do not sign in, AliSwift operates in 
 Product data is stored only on your own device (in your local library and exported settings file) or in your own Google Sheet, never on our servers (we have none). Your data lives exclusively in your own Google Sheets spreadsheet and in your local browser storage (`chrome.storage`). AliSwift has no central server, no project database, and no cloud account. The creators of AliSwift never receive or store your product details, order history, or sales figures.
 
 ## 3. How does AliSwift calculate eBay fees and profits?
-When you create an auto-configured sheet for eBay UK or eBay US, AliSwift adds transparent fee calculation formulas to each row:
+When you create an auto-configured sheet for an eBay marketplace (UK, US, Global, Germany, Australia or Canada), AliSwift adds transparent fee calculation formulas to each row:
 - eBay UK: calculates the standard final value fee (12.9%), regulatory operating fee (0.35%), fixed order fee (0.30), VAT on fees (20%), and international fee (1.55%).
-- eBay US: calculates the standard final value fee (13.6%), fixed order fee (0.40), and international fee (1.55%).
+- eBay US and Global (USD): calculates the standard final value fee (13.6%), fixed order fee (0.30 or 0.40), and international fee (1.55%).
+- eBay Germany (12%, order fee 0.35 or 0.45, VAT on fees 19%), Australia (13.4%, order fee 0.30) and Canada (13.6%, order fee 0.30 or 0.40) use the published rates for most categories (October 2026).
+These defaults are not checked against real orders, and eBay changes them often: compare them with an order's fee breakdown and edit the cells.
 All fee parameters sit in editable cells at the top of your sheet, allowing you to tailor them to your specific eBay store subscription or seller status.
 
 ## 4. How does currency conversion work?
@@ -29,7 +31,8 @@ To use AI features, you provide your own free Gemini API key from Google AI Stud
 ## 6. What data is sent to Gemini?
 When AI features are invoked, requests travel directly from your browser to Google's Gemini API using your personal key.
 - For AI column mapping, AliSwift sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns that look personal (names, addresses, phone numbers, and emails). Because the filter is a deny-list and can miss odd or unexpected headers, always check the mapping preview before confirming.
-- For listing generation, the product title, price, details and its first photo are sent.
+- For listing generation, the product title, sell price (never your cost), the page's specifications and description, and up to four photos are sent.
+- For the AI fallbacks: the names, labels and types of the eBay form's boxes (never what is typed in them); the pieces of an AliExpress page that hold a price, with their size and a few words around them; and, from Seller Hub's order list, only each row's order number, custom label (SKU), quantities, money and dates, with every other piece of text replaced by a placeholder.
 - For eBay form filling, field names and available option choices from the eBay page are sent.
 Each Gemini call has a 15 s timeout and retries once, so requests take up to about 30 s total. Your Gemini API key stays in storage.local on this device, is sent only to Google's Gemini API, and is not included in settings export.
 

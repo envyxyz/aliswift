@@ -1089,6 +1089,7 @@ dialog {
   width: min(var(--dialog-w, 420px), calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
   padding: 0;
+  overflow: hidden;
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1136,9 +1137,11 @@ dialog form {
   flex-direction: column;
   gap: 0;
   max-height: calc(100dvh - 34px);
+  min-height: 0;
 }
 
 .dialog-head {
+  flex: none;
   padding: 20px 24px 0;
 }
 
@@ -1149,6 +1152,9 @@ dialog form {
 }
 
 .dialog-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   gap: 16px;
   padding: 16px 24px;
@@ -1161,6 +1167,7 @@ dialog form {
 }
 
 .dialog-foot {
+  flex: none;
   padding: 16px 24px 20px;
   border-top: 1px solid var(--border);
 }
