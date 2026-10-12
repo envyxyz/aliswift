@@ -175,7 +175,9 @@ test("a listing is written from the sheet's name and photo, filed by sheet and S
   assert.deepEqual(r.listing.analysis, GOOD.analysis);
   assert.ok(r.listing.description.startsWith("A heavy skull ring.\n\nMaterial & features"));
   assert.ok(Number.isFinite(r.createdAt));
-  assert.deepEqual(plain(t.store[`listing:${SHEET}:SKU-01`]), { listing: r.listing, limited: true, model: "gemini-test", createdAt: r.createdAt, warnings: [] });
+  assert.deepEqual(plain(t.store[`listing:${SHEET}:SKU-01`]), { listing: r.listing, limited: true, model: "gemini-test", createdAt: r.createdAt, warnings: [],
+    // what the eBay panel's cards show, kept beside the listing: the sell price, never the cost
+    product: { sku: "SKU-01", title: "Skull Ring", salePrice: 8.99, currency: "GBP", link: "https://www.aliexpress.com/item/1005001234567890.html" } });
 
   const [call] = t.gem();
   assert.equal(call.url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent");

@@ -60,6 +60,56 @@ function getLink() {
   return url.match(/^(https:\/\/.+?\.html)/)?.[1] ?? url;
 }
 
+// What the listing writer is given besides the sheet's short name: the page's full title, its specifications, its
+// photos (the share image first, then the gallery's, at full size) and its summary. Whatever a page does not have
+// is left out; the worker caps and cleans all of it. Read on a click only, never for the popup.
+// ponytail: the specification and gallery class names are AliExpress's today; when they change this finds less and
+// the listing is written from the title and the first photo, as before.
+function getDetails() {
+  const all = (sel) => [...(document.querySelectorAll?.(sel) ?? [])];
+  const pick = (el, sel) => el.querySelector(sel)?.textContent ?? "";
+  const specs = all('[class*="specification--prop"]').slice(0, 50).map((p) => [pick(p, '[class*="specification--title"]'), pick(p, '[class*="specification--desc"]')]);
+  const gallery = all('[class*="slider--img"] img, [class*="image-view"] img, [class*="slider--wrap"] img').map((img) => fullSizePhoto(img.src));
+  return {
+    fullTitle: document.querySelector('h1[data-pl="product-title"]')?.textContent ?? "",
+    specs,
+    description: document.querySelector('meta[name="description"]')?.content ?? "",
+    images: [...new Set([getImage(), ...gallery].filter(Boolean))],
+  };
+}
+
+// The pieces of the page that hold a price: a leaf element whose text has a currency mark and a number, with its
+// font size, whether it is struck through and the words around it. What the AI fallback is asked to choose from.
+function priceCandidates() {
+  const found = [];
+  const mark = /(?:US\s?\$|[$£€₽]|\b[A-Z]{3}\b)\s?\d[\d.,]*|\d[\d.,]*\s?(?:[$£€₽]|\b[A-Z]{3}\b)/;
+  for (const el of document.querySelectorAll?.("span,div,b,strong,p") ?? []) {
+    const text = (el.childElementCount ? "" : el.textContent ?? "").trim();
+    if (!text || text.length > 40 || !mark.test(text) || !el.offsetParent) continue;
+    const style = getComputedStyle(el);
+    found.push({
+      text, size: parseFloat(style.fontSize) || 0, struck: /line-through/.test(style.textDecorationLine) || /line-through/.test(getComputedStyle(el.parentElement).textDecorationLine),
+      near: (el.parentElement?.textContent ?? "").trim().slice(0, 100),
+    });
+    if (found.length >= 40) break;
+  }
+  return found;
+}
+
+// The AI fallback: when the price selectors above find nothing (AliExpress changed its page), Gemini is shown the
+// price-looking pieces and points at the price and the shipping. Only the page's own text comes back out of this.
+async function aiPrices() {
+  const candidates = priceCandidates();
+  if (!candidates.length) return null;
+  const title = document.querySelector('h1[data-pl="product-title"]')?.textContent ?? document.title;
+  const res = await chrome.runtime.sendMessage({ action: "aiMap", task: "product", items: { title, candidates } }).catch(() => null);
+  const a = res?.success ? res.answer : null;
+  const price = candidates[a?.price];
+  if (!price || !(parsePrice(price.text) > 0)) return null;
+  const shipping = candidates[a.shipping];
+  return { price: { n: parsePrice(price.text), text: price.text }, shipping: a.freeShipping || !shipping ? 0 : parsePrice(shipping.text) || 0 };
+}
+
 // The product on the page. `currency` is what price and salePrice are in ("" when the page's currency is
 // unknown); `kind` says how the page relates to the sheet (see currencyKind). When the page's currency is not
 // the sheet's, `fx` holds the raw amounts and the rate. With no rate (fx.rate null) price is the raw page
@@ -77,9 +127,17 @@ async function scrapeRow(where = dest) {
     currency: "",
     kind: "unknown",
   };
-  const { n: price, text } = firstNumber(PRICE_SELECTORS);
+  let { n: price, text } = firstNumber(PRICE_SELECTORS);
+  let shipping = firstNumber(SHIPPING_SELECTORS, /free/i).n || 0;
+  if (!(price > 0)) {
+    const found = await aiPrices();
+    if (found) {
+      price = found.price.n;
+      text = found.price.text;
+      shipping = found.shipping;
+    }
+  }
   if (price > 0) {
-    const shipping = firstNumber(SHIPPING_SELECTORS, /free/i).n || 0;
     const from = detectCurrency(document.cookie, text, document.documentElement.lang);
     const to = where === "local" ? "" : (REGIONS[sheet.region]?.currency ?? "");
     row.kind = currencyKind(from, to);
@@ -97,16 +155,53 @@ async function scrapeRow(where = dest) {
   return row;
 }
 
+/* The two buttons: Add to Sheet (just the save) and Create Listing (the save, the AI listing and eBay's form, in one). */
+
+const ACTIONS = {
+  add: { id: "aliswift-page-btn", busy: { sheet: "Adding...", local: "Saving..." }, done: "Added" },
+  list: { id: "aliswift-list-btn", busy: { sheet: "Working...", local: "Working..." }, done: "Listed", label: "Create Listing" },
+};
+const buttons = () => Object.fromEntries(Object.entries(ACTIONS).map(([k, a]) => [k, document.getElementById(a.id)]));
+const note = (text, tone = "") => {
+  const el = document.getElementById("aliswift-note");
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.tone = tone;
+};
+
 function setState(btn, state, text) {
   btn.dataset.state = state;
   btn.textContent = text;
   btn.disabled = state === "loading";
 }
 
-async function save(btn) {
+// "converted to £4.77", ". Currency unknown." and the like: what the saved price needs said about it.
+function priceNote(row) {
+  if (row.fx) {
+    const symbol = Object.values(REGIONS).find((r) => r.currency === row.fx.to)?.symbol ?? `${row.fx.to} `;
+    return `, converted to ${symbol}${row.price}`;
+  }
+  return row.kind === "unset" ? `, ${row.currency}` : row.kind === "unknown" ? ". Currency unknown." : "";
+}
+
+// What a failed Create Listing says: how far it got, then why, and what to do about it.
+function listFailure(result) {
+  if (!result.saved) return result.error ?? "Something went wrong";
+  const kept = `Saved as ${result.sku || "a new row"}, but no listing was made. `;
+  if (result.code === "nokey" || result.code === "invalid-key") return `${kept}Check your Gemini key in AliSwift settings (AI tab), then press Create Listing again.`;
+  if (result.code === "rate") return `${kept}Gemini is busy. Press Create Listing again in a minute.`;
+  return `${kept}${result.error ?? ""} Press Create Listing again to retry.`;
+}
+
+async function run(kind) {
+  const action = ACTIONS[kind];
+  const all = buttons();
+  const btn = all[kind];
   clearTimeout(resetTimer);
   const where = dest;
-  setState(btn, "loading", where === "local" ? "Saving..." : "Adding...");
+  for (const b of Object.values(all)) if (b) b.disabled = true;
+  setState(btn, "loading", action.busy[where]);
+  note(kind === "list" ? "Saving, writing the listing and opening eBay..." : "");
   let result;
   let row = {};
   try {
@@ -115,45 +210,73 @@ async function save(btn) {
     if (!title || !price) result = { error: "Couldn't read this product. Reload the page." };
     else if (row.fx && !row.fx.rate) {
       result = { error: `Prices are ${row.fx.from}, sheet is ${row.fx.to}. Set a rate in the popup.` };
-    } else result = await chrome.runtime.sendMessage({ action: "appendToSheet", data: { title, price, salePrice, link, currency, image, dest: where } });
+    } else {
+      result = await chrome.runtime.sendMessage({
+        action: kind === "list" ? "quickList" : "appendToSheet",
+        data: { title, price, salePrice, link, currency, image, dest: where, details: getDetails() },
+      });
+    }
   } catch (e) {
     result = { error: e.message };
   }
-  if (result?.success && where === "local") {
-    setState(btn, "success", result.sku ? `Saved to library as ${result.sku}` : "Saved to library");
-  } else if (result?.success) {
-    const symbol = row.fx && (Object.values(REGIONS).find((r) => r.currency === row.fx.to)?.symbol ?? `${row.fx.to} `);
-    const note = row.fx
-      ? `, converted to ${symbol}${row.price}`
-      : row.kind === "unset"
-        ? `, ${row.currency}`
-        : row.kind === "unknown"
-          ? ". Currency unknown."
-          : "";
-    setState(btn, "success", (result.sku ? `Added as ${result.sku}` : "Added") + note);
+
+  let message;
+  if (result?.success) {
+    const sku = result.sku ? ` as ${result.sku}` : "";
+    const place = where === "local" ? "library" : "sheet";
+    setState(btn, "success", action.done);
+    message = kind === "list"
+      ? `${result.existed ? "Already in your" : "Saved to your"} ${place}${sku}. ${result.cached ? "Used its saved listing" : "Listing written"}; eBay is opening.`
+      : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
   } else if (result?.code === "signin") {
     // The label was stale: signed out here or elsewhere. Nothing was written; the next click saves to the library.
     dest = "local";
-    setState(btn, "error", "Signed out. Click again to save to your library.");
+    setState(btn, "error", "Signed out");
+    message = "Signed out. Click again to save to your library.";
   } else {
-    setState(btn, "error", result?.error ?? "Something went wrong");
+    setState(btn, "error", "Try again");
+    message = kind === "list" ? listFailure(result ?? {}) : (result?.error ?? "Something went wrong");
   }
-  resetTimer = setTimeout(() => setState(btn, "", LABELS[dest]), result?.success ? 3000 : 4000); // long enough to read the SKU
+  for (const b of Object.values(all)) if (b) b.disabled = false; // the other button was only held while this one ran
+  note(message, result?.success ? "ok" : "error");
+  resetTimer = setTimeout(() => reset(), result?.success ? (kind === "list" ? 6000 : 3500) : 6000); // long enough to read the SKU
+}
+
+// Both buttons back to their words, and the note emptied.
+function reset() {
+  const all = buttons();
+  if (all.add) setState(all.add, "", LABELS[dest]);
+  if (all.list) setState(all.list, "", ACTIONS.list.label);
+  note("");
 }
 
 function injectButton() {
-  if (document.getElementById("aliswift-page-btn")) return true;
+  if (document.getElementById("aliswift-bar")) return true;
   const wrapper = document.querySelector('[class*="action--stickyWrap"]');
   if (!wrapper) return false;
 
-  const btn = document.createElement("button");
-  btn.id = "aliswift-page-btn";
-  btn.className = "aliswift-btn";
-  btn.type = "button";
-  btn.setAttribute("aria-live", "polite");
-  btn.textContent = LABELS[dest];
-  btn.addEventListener("click", () => save(btn));
-  wrapper.prepend(btn);
+  const bar = document.createElement("div");
+  bar.id = "aliswift-bar";
+  bar.className = "aliswift-bar";
+  const row = document.createElement("div");
+  row.className = "aliswift-row";
+  for (const kind of Object.keys(ACTIONS)) {
+    const btn = document.createElement("button");
+    btn.id = ACTIONS[kind].id;
+    btn.className = kind === "list" ? "aliswift-btn aliswift-btn-list" : "aliswift-btn";
+    btn.type = "button";
+    btn.textContent = kind === "list" ? ACTIONS.list.label : LABELS[dest];
+    // A click the page's own script makes (element.click()) is not the seller's: it must not save, write or open anything.
+    btn.addEventListener("click", (e) => e.isTrusted && run(kind));
+    row.append(btn);
+  }
+  const status = document.createElement("p");
+  status.id = "aliswift-note";
+  status.className = "aliswift-note";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  bar.append(row, status);
+  wrapper.prepend(bar);
   refreshDest();
   return true;
 }
@@ -162,7 +285,7 @@ let injectTimer;
 
 function showButton(show) {
   clearInterval(injectTimer);
-  if (!show) return document.getElementById("aliswift-page-btn")?.remove();
+  if (!show) return document.getElementById("aliswift-bar")?.remove();
   // The page renders late: retry every 500ms for up to 10 seconds.
   let attempts = 0;
   injectTimer = setInterval(() => {
@@ -181,6 +304,7 @@ document.addEventListener("visibilitychange", () => document.visibilityState ===
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action !== "scrape") return;
-  scrapeRow(request.dest).then(sendResponse);
+  // The popup saves what it shows, with the details the listing writer uses (read here, where the page is).
+  scrapeRow(request.dest).then((row) => sendResponse({ ...row, details: getDetails() }));
   return true;
 });

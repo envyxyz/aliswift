@@ -57,6 +57,21 @@ test("the Add sheet buttons point at the sign-in hint only while it shows", () =
   assert.match(js, /removeAttribute\("aria-describedby"\)/);
 });
 
+test("the eBay panel runs on the listing form of every marketplace in REGIONS, and nowhere else", () => {
+  const { REGIONS } = require("../lib/shared.js");
+  const hosts = [...new Set(Object.values(REGIONS).map((r) => r.ebay))].sort();
+  const ebay = manifest.content_scripts.find((c) => c.js.includes("content-ebay.js"));
+  const hostsOf = (patterns) => [...new Set(patterns.map((m) => new URL(m.replace("*", "x")).hostname))].sort();
+  assert.deepEqual(hostsOf(ebay.matches), hosts);
+  assert.deepEqual(hostsOf(manifest.web_accessible_resources[0].matches), hosts); // the panel's stylesheets load on each of them
+  for (const m of ebay.matches) assert.match(m, /^https:\/\/www\.ebay\.[a-z.]+\/(lstng\*|sl\/\*)$/);
+  // The orders button runs on Seller Hub's order pages of the same sites, and reads nothing else.
+  const orders = manifest.content_scripts.find((c) => c.js.includes("content-orders.js"));
+  assert.deepEqual(hostsOf(orders.matches), hosts);
+  for (const m of orders.matches) assert.match(m, /^https:\/\/www\.ebay\.[a-z.]+\/sh\/ord\*$/);
+  assert.deepEqual(orders.js, ["lib/panel.js", "lib/orders.js", "content-orders.js"]);
+});
+
 test("sign-in asks for no extra permission: no email, and only the two scopes the features need", () => {
   assert.deepEqual(manifest.permissions, ["storage", "identity"]); // not identity.email, which warns "Know your email address"
   // spreadsheets: read and write the sheets the user added. drive.metadata.readonly: list their spreadsheets' names

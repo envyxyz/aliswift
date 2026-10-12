@@ -192,6 +192,7 @@ $("form").addEventListener("submit", async (e) => {
         link: $("link").value,
         currency: row.currency,
         image: row.image,
+        details: row.details,
         dest,
       },
     })

@@ -1,22 +1,10 @@
-// The AliSwift panel on eBay's listing form (/lstng). It fills the title, custom label, description and price from the
-// product picked on the dashboard, then the item specifics through Gemini (the worker does the asking), and shows
-// everything it could not fill as a row to copy. Idle on every other eBay page. It never presses List it, Save for
-// later or Preview, and never touches Condition. Needs lib/ebayform.js (loaded first by the manifest).
-// Layout, copy and states: design-p2-6.md, surface 10. Not verified against the live site: see the build report.
+// The AliSwift panel on eBay's listing form (/lstng). It shows the products that have a listing, fills the title, custom
+// label, description and price from the one the seller picks, then the item specifics through Gemini (the worker does the
+// asking), and shows everything it could not fill as a row to copy. Idle on every other eBay page. It never presses
+// List it, Save for later or Preview, and never touches Condition. Needs lib/panel.js and lib/ebayform.js (loaded first
+// by the manifest). The names of eBay's boxes come from a saved copy of its form (test/fixtures/ebay-form-basics.html).
 
 (() => {
-  const NS = "http://www.w3.org/2000/svg";
-  const PATH = {
-    bolt: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
-    more: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
-    ring: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z",
-    check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
-    warn: "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z",
-    error: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z",
-    copy: "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
-    go: "M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z",
-    spin: "M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
-  };
   // Row status -> [word, tag tone, icon]
   const STATUS = {
     pending: ["Pending", "", "ring"],
@@ -38,30 +26,14 @@
   let collapsed = false;
   let timer;
   let resizer;
+  let products = []; // the cards the worker offers: { sheetId, key, sku, title, price, currency }
+  let current = null; // { sheetId, key } of the card in use
+  let ai = null; // the AI's reading of this form, asked at most once per Fill press: { list, pick } or {}
+  const found = {}; // intent -> "page" | "ai" | "missing", for the report
   const rows = new Map(); // id -> { id, label, value, status, field?, hint? }
   const saved = {}; // the page's own padding, put back on Done
 
   const send = (message) => chrome.runtime.sendMessage(message).catch((error) => ({ success: false, error: error.message }));
-
-  // Elements are built here, never from markup strings: every text goes in as text.
-  const h = (tag, props = {}, ...kids) => {
-    const e = document.createElement(tag);
-    for (const [k, v] of Object.entries(props)) {
-      if (k === "text") e.textContent = v;
-      else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-      else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
-    }
-    e.append(...kids.filter(Boolean));
-    return e;
-  };
-  const icon = (d, cls, size = 18) => {
-    const svg = document.createElementNS(NS, "svg");
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", d);
-    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", width: size, height: size, ...(cls && { class: cls }) })) svg.setAttribute(k, v);
-    svg.append(path);
-    return svg;
-  };
 
   /* State */
 
@@ -76,8 +48,8 @@
 
   function summary() {
     if (!ctx?.success) return "AliSwift didn't answer. Reload this page.";
-    if (!ctx.target) return "Choose a product on the dashboard first.";
-    if (!ctx.listing) return "That product has no saved listing. Create one on the dashboard.";
+    if (!ctx.target) return products.length ? "Choose the product to list." : "No product has a listing yet.";
+    if (!ctx.listing) return "That product has no saved listing. Pick another, or create one on the dashboard.";
     if (phase === "reading") return "Reading the form...";
     if (phase === "asking") return `Asking AI to match ${asking} fields...`;
     if (phase === "filling") return "Filling the form...";
@@ -89,6 +61,71 @@
     return "Pick your category on eBay, then press Fill form.";
   }
 
+  // A product picked for another marketplace than the one this form is on: its price is never typed in.
+  const otherSite = () => ready() && location.hostname !== ctx.target.host;
+
+  /* The product cards */
+
+  const money = (card) => {
+    if (card.price == null) return "";
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency: card.currency }).format(card.price);
+    } catch {
+      return `${card.currency} ${card.price.toFixed(2)}`.trim();
+    }
+  };
+
+  const isCurrent = (card) => current?.sheetId === card.sheetId && current?.key === card.key;
+
+  function cardEl(card) {
+    const price = money(card);
+    return h(
+      "li",
+      {},
+      h(
+        "button",
+        { type: "button", class: "ali-card", "aria-pressed": String(isCurrent(card)), onclick: () => choose(card) },
+        h("span", { class: "ali-card-top" }, h("strong", { text: card.sku }), price && h("span", { class: "tag", text: price })),
+        h("span", { class: "ali-card-title", text: card.title }),
+      ),
+    );
+  }
+
+  function renderCards() {
+    const words = ui.search.value.trim().toLowerCase();
+    const shown = products.filter((c) => !words || `${c.sku} ${c.title}`.toLowerCase().includes(words));
+    ui.search.hidden = products.length < 6;
+    ui.cards.replaceChildren(...shown.map(cardEl));
+    ui.pickNote.textContent = !products.length
+      ? "Press Create Listing on an AliExpress product page, or create a listing on the dashboard."
+      : !shown.length ? "Nothing matches." : "";
+  }
+
+  async function loadProducts() {
+    const res = await send({ action: "ebayProducts" });
+    products = res.success ? res.products : [];
+    current = res.success ? res.current : null;
+    if (ui) render();
+  }
+
+  // The seller clicked a card: the worker makes it the product, and the panel starts over with it.
+  async function choose(card) {
+    if (running()) return;
+    const res = await send({ action: "ebaySelect", sheetId: card.sheetId, key: card.key });
+    if (!res.success) {
+      notice = { tone: "error", text: res.error ?? "Couldn't pick that product." };
+      return render();
+    }
+    current = { sheetId: card.sheetId, key: card.key };
+    ctx = await send({ action: "ebayContext" });
+    rows.clear();
+    if (ready()) idleRows();
+    phase = "idle";
+    notice = null;
+    ui.pickOpen = false;
+    render();
+  }
+
   /* Rows and the panel */
 
   const go = (field) => {
@@ -97,19 +134,7 @@
   };
 
   async function copyValue(btn, r) {
-    let ok = true;
-    try {
-      await navigator.clipboard.writeText(r.value);
-    } catch {
-      // eBay's permissions policy may refuse the clipboard: copy through a text box instead.
-      const box = h("textarea", { style: "position:fixed;opacity:0" });
-      box.value = r.value;
-      document.body.append(box);
-      box.select();
-      ok = document.execCommand("copy");
-      box.remove();
-    }
-    if (ok) {
+    if (await copyToClipboard(r.value)) {
       btn.dataset.copied = "";
       setTimeout(() => delete btn.dataset.copied, 1500);
     } else {
@@ -149,6 +174,13 @@
     ui.spin.toggleAttribute("hidden", !running());
     ui.panel.dataset.phase = phase;
 
+    // The product: the card in use, and the list to change it (open while none is chosen).
+    const open = ui.pickOpen || !ready();
+    ui.pickList.hidden = !open;
+    ui.pickBtn.setAttribute("aria-expanded", String(open));
+    ui.pickBtn.replaceChildren(h("span", { class: "ali-pick-now", text: ready() ? `${target.sku ? `${target.sku} · ` : ""}${target.title}` : "Choose a product" }), icon(PATH.more));
+    renderCards();
+
     const all = [...rows.values()];
     ui.list.replaceChildren(...["needs", "copy", "pending", "filling"].flatMap((s) => all.filter((r) => r.status === s)).map(rowEl));
     const done = all.filter((r) => r.status === "filled");
@@ -156,17 +188,18 @@
     ui.filledCount.textContent = done.length;
     ui.filledList.replaceChildren(...done.map(rowEl));
 
-    ui.notice.hidden = !notice;
+    const shown = notice ?? (otherSite() && phase !== "done" ? { tone: "warn", text: `This product is for ${ctx.target.host}. You are on ${location.hostname}, so its price is not typed in.` } : null);
+    ui.notice.hidden = !shown;
     ui.notice.replaceChildren();
-    if (notice) {
-      ui.notice.dataset.tone = notice.tone;
-      ui.notice.append(icon(notice.tone === "error" ? PATH.error : PATH.warn, "", 16), h("div", { text: notice.text }));
-      if (notice.settings) ui.notice.append(h("button", { type: "button", class: "btn btn-quiet btn-sm", text: "Open settings", onclick: () => send({ action: "openPage", page: "settings" }) }));
+    if (shown) {
+      ui.notice.dataset.tone = shown.tone;
+      ui.notice.append(icon(shown.tone === "error" ? PATH.error : PATH.warn, "", 16), h("div", { text: shown.text }));
+      if (shown.settings) ui.notice.append(h("button", { type: "button", class: "btn btn-quiet btn-sm", text: "Open settings", onclick: () => send({ action: "openPage", page: "settings" }) }));
     }
 
     const busy = running();
-    ui.fill.textContent = !ready() ? "Open dashboard" : busy ? "Filling..." : notice?.retry ? "Try again" : phase === "done" && !notice?.settings ? "Fill again" : "Fill form";
-    ui.fill.setAttribute("aria-disabled", String(busy));
+    ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Filling..." : notice?.retry ? "Try again" : phase === "done" && !notice?.settings ? "Fill again" : "Fill form";
+    ui.fill.setAttribute("aria-disabled", String(busy || (!ready() && products.length > 0)));
     if (busy) ui.fill.dataset.state = "loading";
     else delete ui.fill.dataset.state;
   }
@@ -188,21 +221,26 @@
   }
 
   function mount() {
-    const host = h("div", { id: "aliswift-host" });
-    const root = host.attachShadow({ mode: "closed" });
     const toggle = h("button", { type: "button", class: "icon-btn", id: "ali-toggle", "aria-controls": "ali-panel", "aria-expanded": "true", "aria-label": "Collapse AliSwift panel" }, icon(PATH.more));
     ui = {
-      host, toggle,
+      toggle,
+      pickOpen: false,
       say: h("span"),
       prod: h("span", { class: "ali-prod" }),
       mini: h("span", { class: "ali-mini" }),
       spin: icon(PATH.spin, "spin", 14),
       notice: h("div", { class: "notice", role: "alert", hidden: true }),
+      pickBtn: h("button", { type: "button", class: "ali-pick-btn", "aria-controls": "ali-pick-list" }),
+      search: h("input", { type: "search", class: "textbox__control ali-search", placeholder: "Search SKU or name", "aria-label": "Search products", hidden: true }),
+      cards: h("ul", { class: "ali-cards", role: "list" }),
+      pickNote: h("p", { class: "ali-hint" }),
       list: h("ul", { class: "ali-rows", role: "list" }),
       filledCount: h("span", { class: "muted" }),
       filledList: h("ul", { class: "ali-rows", role: "list" }),
       fill: h("button", { type: "button", class: "btn btn-sm", id: "ali-fill" }),
+      report: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-report", text: "Copy report", title: "Copies the form's boxes and what happened, to send with a bug report" }),
     };
+    ui.pickList = h("div", { class: "ali-pick-list", id: "ali-pick-list" }, ui.search, ui.cards, ui.pickNote);
     ui.filled = h("details", { class: "disclosure ali-filled", hidden: true }, h("summary", {}, "Filled ", ui.filledCount), ui.filledList);
     ui.collapsible = h(
       "div",
@@ -213,6 +251,7 @@
         h(
           "div",
           { class: "ali-body" },
+          h("section", { class: "ali-pick", "aria-label": "Product" }, ui.pickBtn, ui.pickList),
           h("p", { class: "ali-summary", role: "status" }, ui.spin, ui.say),
           ui.notice,
           ui.list,
@@ -221,7 +260,7 @@
         h(
           "footer",
           { class: "ali-foot" },
-          h("div", { class: "actions" }, h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-done", text: "Done", onclick: finish }), ui.fill),
+          h("div", { class: "actions" }, ui.report, h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-done", text: "Done", onclick: finish }), ui.fill),
         ),
       ),
     );
@@ -231,9 +270,22 @@
       h("header", { class: "ali-head" }, icon(PATH.bolt, "bolt"), h("div", { class: "ali-title" }, h("strong", { text: "AliSwift" }), ui.prod, ui.mini), toggle),
       ui.collapsible,
     );
+    ui.host = mountPanel("aliswift-host", ui.panel);
     ui.fill.addEventListener("click", () => {
-      if (!ready()) send({ action: "openPage", page: "dashboard" });
-      else if (!running()) fillForm();
+      if (!ready()) {
+        if (!products.length) send({ action: "openPage", page: "dashboard" });
+      } else if (!running()) fillForm();
+    });
+    ui.pickBtn.addEventListener("click", () => {
+      ui.pickOpen = !ui.pickOpen;
+      if (ui.pickOpen) loadProducts();
+      render();
+    });
+    ui.search.addEventListener("input", renderCards);
+    ui.report.addEventListener("click", async () => {
+      const ok = await copyToClipboard(report());
+      ui.report.textContent = ok ? "Copied" : "Press Ctrl+C";
+      setTimeout(() => (ui.report.textContent = "Copy report"), 1800);
     });
     toggle.addEventListener("click", () => {
       setCollapsed(!collapsed);
@@ -243,9 +295,6 @@
         // storage can be blocked: the choice just isn't remembered
       }
     });
-
-    root.append(h("link", { rel: "stylesheet", href: chrome.runtime.getURL("lib/ui.css") }), h("link", { rel: "stylesheet", href: chrome.runtime.getURL("ebay.css") }), ui.panel);
-    document.body.prepend(host);
 
     Object.assign(saved, { right: document.documentElement.style.paddingRight, bottom: document.documentElement.style.paddingBottom });
     let stored = null;
@@ -260,9 +309,10 @@
     resizer.observe(ui.panel);
     if (ready()) idleRows();
     render();
+    loadProducts();
   }
 
-  // The four fields the panel fills itself, shown as Pending before anything is pressed.
+  // The fields the panel fills itself, shown as Pending before anything is pressed.
   function idleRows() {
     const { target: t, listing: l } = ctx;
     row("title", "Title", l.title, "pending");
@@ -282,44 +332,112 @@
     send({ action: "ebayDone" });
   }
 
+  // What to send with a bug report: this form's boxes (names and words, never what is typed in them) and what the pass did.
+  function report() {
+    return JSON.stringify(
+      {
+        report: "AliSwift form report",
+        page: `${location.hostname}${location.pathname}`,
+        target: ctx?.target ? { host: ctx.target.host, currency: ctx.target.currency } : null,
+        found,
+        rows: [...rows.values()].map((r) => [r.id, r.status]),
+        controls: listControls(document).map(({ el, ...c }) => c),
+      },
+      null,
+      1,
+    );
+  }
+
   /* Filling */
 
   const plain = (html) => clean(new DOMParser().parseFromString(html, "text/html").body.textContent);
+  const squash = (s) => String(s ?? "").replace(/\s+/g, "");
 
-  // The custom label box only exists while its switch is on.
-  async function customLabel() {
-    const box = q('input[name="customLabel"]');
-    if (box) return box;
-    const toggle = q('input[name="customLabelPref"]');
-    if (!toggle) return null;
-    if (!toggle.checked) press(toggle);
-    return until(() => q('input[name="customLabel"]'));
+  // The AI's reading of this form, asked once per pass and only when a box was not found the usual ways. It answers with
+  // positions in the list of boxes sent, so all it can do is point at one of them.
+  async function viaAI(intent) {
+    if (ai === null) {
+      const list = listControls(document);
+      const res = await send({ action: "aiMap", task: "controls", items: list.map(({ el, ...c }) => c) });
+      ai = res.success ? { list, pick: res.answer } : {};
+    }
+    const el = ai.list?.[ai.pick?.[intent]]?.el ?? null;
+    if (el) found[intent] = "ai";
+    return el;
   }
 
-  // The description has a rich editor and a raw-HTML box behind a checkbox: switch to the raw box, set it, switch back
-  // so the rich editor reads it, then check both (the editor too, when its frame can be reached).
+  // A box of the form: its usual name or label (waiting for the form to draw it), then the AI.
+  async function locate(intent, ms = 4000) {
+    const el = await until(() => findBasic(document, intent), ms);
+    if (el) found[intent] = "page";
+    return el ?? (await viaAI(intent)) ?? ((found[intent] = "missing"), null);
+  }
+
+  // The custom label box only exists while its switch is on, and the switch sits in the title's options menu.
+  async function customLabel() {
+    const box = () => findBasic(document, "sku");
+    if (box()) return box();
+    const toggle = await locate("skuSwitch", 1500);
+    if (toggle && !toggle.checked) press(toggle);
+    const el = await until(box, 5000);
+    if (el) found.sku = "page";
+    return el ?? (await viaAI("sku"));
+  }
+
+  // A box eBay may re-draw after it was set: the value must be there a moment later too, and is typed in if it is not.
+  async function fillBasic(box, value) {
+    if (await fillText(box, value)) {
+      await wait(300);
+      if (matches(box.value, value)) return true;
+    }
+    return typeIn(box, value);
+  }
+
+  // The price goes in the Buy It Now box, which is the price only in the fixed-price format: in an auction it is an
+  // optional extra that must beat the starting bid. So the format is set first (and said, as a row).
+  async function priceBox() {
+    const set = await useFixedPrice(document);
+    if (set === "set") row("format", "Format", "Buy It Now", "filled");
+    else if (set === "failed") row("format", "Format", "Buy It Now", "needs", { hint: "Choose Buy It Now yourself, then paste the price." });
+    return set === "failed" ? null : locate("price");
+  }
+
+  // The description has a rich editor (an iframe) and a raw-HTML box behind the "Show HTML code" checkbox: switch to the
+  // raw box, set it, switch back so the rich editor reads it, then check that both hold it. When the editor did not
+  // take it, it is written into the editor itself, the way a pasted text is.
   async function fillDescription(box, html) {
-    const mode = q('input[name="descriptionEditorMode"]');
+    const mode = await locate("htmlSwitch", 1500);
     if (!mode) return false;
+    const want = squash(plain(html));
     const wasHtml = mode.checked;
     if (!wasHtml) press(mode);
     await wait(250);
     setValue(box, html);
-    await wait(150);
-    const stuck = box.value === html;
+    await wait(200);
+    const held = () => squash(plain(box.value)) === want;
+    const stuck = held() || ((await typeIn(box, html)) && held());
     if (!wasHtml) press(mode);
-    const body = () => q('iframe[title="Description"]')?.contentDocument?.body;
-    return stuck && (!body() || Boolean(await until(() => clean(body().textContent) === plain(html), 2000)));
+    if (!stuck) return false;
+    const editor = () => q('iframe[title="Description"]')?.contentDocument;
+    const shows = () => squash(editor()?.body?.textContent) === want;
+    if (!editor()) return true; // the frame can't be reached: the HTML box holds it
+    if (await until(shows, 2500)) return true;
+    const rich = editor().querySelector('[contenteditable="true"]');
+    if (!rich) return false;
+    rich.focus();
+    editor().execCommand("selectAll");
+    editor().execCommand("insertHTML", false, html);
+    return Boolean(await until(shows, 1500));
   }
 
   async function fillBasics() {
     const { target: t, listing: l } = ctx;
     const basics = [
-      ["title", "Title", l.title, async () => q('input[name="title"]'), fillText],
-      ["sku", "Custom label", t.sku, customLabel, fillText],
-      ["description", "Description", l.description, async () => q('textarea[name="description"]'), (box) => fillDescription(box, l.html)],
+      ["title", "Title", l.title, () => locate("title"), fillBasic],
+      ["sku", "Custom label", t.sku, customLabel, fillBasic],
+      ["description", "Description", l.description, () => locate("description"), (box) => fillDescription(box, l.html)],
       // A price for another marketplace is never typed in.
-      ["price", `Price (${t.currency})`, t.price, async () => q('input[name="price"]'), async (box, v) => location.hostname === t.host && (await fillText(box, v))],
+      ["price", `Price (${t.currency})`, t.price, () => (otherSite() || !t.price ? null : priceBox()), fillBasic],
     ];
     for (const [id, label, value, find, fill] of basics) {
       if (dismissed) return;
@@ -328,12 +446,21 @@
       render();
       const field = await find();
       const ok = Boolean(value && field && (await fill(field, value).catch(() => false)));
-      row(id, label, value, ok ? "filled" : value ? "copy" : "needs", { field, ...(!value && { hint: "Choose a value on eBay." }) });
+      const hint = !value ? "Choose a value on eBay." : id === "price" && otherSite() ? `This is ${location.hostname}, the product is for ${t.host}: type the price yourself if it applies.` : !field ? "AliSwift couldn't find this box. Copy it, or send the report." : undefined;
+      row(id, label, value, ok ? "filled" : value ? "copy" : "needs", { field, ...(hint && { hint }) });
     }
     const cond = q('button[name="condition"]');
     const shown = clean(cond?.textContent);
     if (cond && !/^new/i.test(shown)) row("condition", "Condition", shown, "needs", { field: cond, hint: "Check that this is right." });
     render();
+  }
+
+  // Lazily drawn parts of the form (the price, the description) only exist once they have scrolled into view.
+  async function reveal() {
+    const top = scrollY;
+    scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+    await wait(400);
+    scrollTo({ top, behavior: "instant" });
   }
 
   // Why the AI step failed, as the panel says it.
@@ -347,13 +474,16 @@
     for (const [id, r] of rows) if (r.status !== "filled") rows.delete(id);
     phase = "reading";
     notice = null;
+    ai = null;
+    for (const k of Object.keys(found)) delete found[k];
     render();
-    ctx = await send({ action: "ebayContext" }); // asked again: the dashboard may have picked another product
+    ctx = await send({ action: "ebayContext" }); // asked again: another product may have been picked
     if (!ready()) {
       phase = "idle";
       return render();
     }
-    if (!q('input[name="title"]')) {
+    await reveal();
+    if (!(await locate("title", 6000))) {
       phase = "done";
       notice = { tone: "error", text: "Couldn't find the listing form. Choose a category on eBay, then press Fill form again.", retry: true };
       return render();

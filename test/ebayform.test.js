@@ -2,7 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseModel, extractFields } = require("../lib/ebayform.js");
+const { parseModel, extractFields, findBasic, findFormat, listControls, labelOf, matches, BASICS } = require("../lib/ebayform.js");
 
 // The form code reads the page through querySelector(All), getAttribute, textContent and value. This is just enough DOM
 // for that, built from the saved-page fixture (test/fixtures/ebay-attributes.html), so no browser or package is needed.
@@ -15,6 +15,9 @@ class El {
   }
   get parentElement() {
     return this.parent;
+  }
+  get tagName() {
+    return this.tag.toUpperCase();
   }
   get textContent() {
     return this.children.map((c) => (typeof c === "string" ? c : c.textContent)).join("");
@@ -179,4 +182,62 @@ test("parseModel reads the list by matching brackets, not by looking at the text
   assert.equal(parseModel("no model here"), null);
   assert.equal(parseModel('"AttributesViewHelix","attributeList":[{"name":"a"'), null); // cut off
   assert.equal(parseModel('"AttributesViewHelix","attributeList":[{name:1}]'), null); // not JSON
+});
+
+/* The boxes the panel fills itself: title, custom label, description, price. test/fixtures/ebay-form-basics.html is
+   those parts of a real listing form (eBay UK), saved on 2026-10-12. */
+
+const FORM = fs.readFileSync(path.join(__dirname, "fixtures", "ebay-form-basics.html"), "utf8");
+const attr = (el, name) => el?.getAttribute(name);
+
+test("the form's four boxes, the two switches and the format picker are found by eBay's own names", () => {
+  const doc = parse(FORM);
+  for (const [intent, name] of [["title", "title"], ["sku", "customLabel"], ["skuSwitch", "customLabelPref"], ["description", "description"], ["htmlSwitch", "descriptionEditorMode"], ["price", "price"]]) {
+    assert.equal(attr(findBasic(doc, intent), "name"), name, intent);
+  }
+  assert.equal(attr(findBasic(doc, "price"), "aria-label"), "Buy It Now"); // not the starting bid
+  const f = findFormat(doc);
+  assert.equal(attr(f.select, "name"), "format");
+  assert.equal(f.options.length, 2);
+  assert.deepEqual(f.select.querySelectorAll("option").map((o) => attr(o, "value")), ["ChineseAuction", "FixedPrice"]); // the option is picked by this place
+  assert.equal(findFormat(parse(FORM.replace('name="format"', 'name="other"'))), null);
+});
+
+test("when eBay renames a box, what a seller reads beside it still finds it", () => {
+  const renamed = FORM.replace(/name="(title|customLabel|customLabelPref|description|descriptionEditorMode|price)"/g, (m, n) => `name="renamed-${n}"`);
+  const doc = parse(renamed);
+  assert.equal(attr(findBasic(doc, "title"), "name"), "renamed-title"); // label "Item title"
+  assert.equal(attr(findBasic(doc, "sku"), "name"), "renamed-customLabel"); // label "Custom label (SKU)"
+  assert.equal(attr(findBasic(doc, "skuSwitch"), "name"), "renamed-customLabelPref"); // aria-label of the switch
+  assert.equal(attr(findBasic(doc, "description"), "name"), "renamed-description"); // aria-label "Description"
+  assert.equal(attr(findBasic(doc, "htmlSwitch"), "name"), "renamed-descriptionEditorMode"); // "Show HTML code"
+  assert.equal(attr(findBasic(doc, "price"), "name"), "renamed-price"); // "Buy It Now", and never the starting bid
+});
+
+test("a starting bid is never taken for the price, and a condition description never for the description", () => {
+  const doc = parse(FORM.replace('name="price"', 'name="gone"').replace('aria-label="Buy It Now"', 'aria-label="Starting bid 2"'));
+  assert.equal(findBasic(doc, "price"), null);
+  const other = parse(`<main><textarea name="itemConditionDescription" aria-label="Condition description"></textarea></main>`);
+  assert.equal(findBasic(other, "description"), null);
+});
+
+test("the control list for the AI holds names and words, never a value, and leaves the item specifics to their own reader", () => {
+  const doc = parse(FORM.replace("<main>", `<main><input type="hidden" name="secret" value="x"><button name="attributes.Type" type="button">Type</button><input name="search-box-attributesType" type="text">`));
+  const list = listControls(doc);
+  const names = list.map((c) => c.name);
+  assert.ok(["title", "customLabel", "customLabelPref", "description", "price", "format", "startPrice"].every((n) => names.includes(n)));
+  assert.ok(!names.includes("secret") && !names.includes("attributes.Type") && !names.includes("search-box-attributesType"));
+  const price = list.find((c) => c.name === "price");
+  assert.deepEqual(Object.keys(price).sort(), ["aria", "el", "label", "name", "placeholder", "tag", "type"]);
+  assert.equal(price.label, "Buy It Now");
+  assert.equal(labelOf(findBasic(doc, "title")), "Item title"); // no aria-label: the label of the field it sits in
+});
+
+test("matches: the same words or the same number, however eBay formats them", () => {
+  assert.equal(matches("  Skull  Ring ", "skull ring"), true);
+  assert.equal(matches("8.9", "8.90"), true);
+  assert.equal(matches("8.99", "8.90"), false);
+  assert.equal(matches("", "x"), false);
+  assert.equal(matches("£8.99", "8.99"), true);
+  assert.deepEqual(Object.keys(BASICS), ["title", "sku", "skuSwitch", "description", "htmlSwitch", "price"]);
 });
