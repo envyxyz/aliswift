@@ -32,6 +32,17 @@
   background: #1d1b20;
 }
 
+.aliswift-btn-dl {
+  flex: 0 0 auto;
+  width: 48px;
+  padding: 12px 0;
+  background: #1d1b20;
+}
+
+.aliswift-btn-dl svg {
+  pointer-events: none;
+}
+
 .aliswift-note {
   all: initial;
   display: block;
@@ -90,4 +101,17 @@
   .aliswift-btn[data-state="loading"]::before {
     animation: none;
   }
+}
+
+.aliswift-note-link {
+  all: unset;
+  display: inline;
+  color: #1d1b20;
+  text-decoration: underline;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.aliswift-note[data-tone="error"] .aliswift-note-link {
+  color: #c4281c;
 }

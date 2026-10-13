@@ -1437,8 +1437,8 @@ function showImagesNote(on, granted) {
   $("imagesNote").textContent = !on
     ? ""
     : granted
-      ? "Create Listing on AliExpress then attaches up to 12 photos to the eBay form. If the form doesn't take them, AliSwift saves them to your Downloads folder, in a folder named after the sheet and then the SKU, for you to drag in."
-      : "Photos will be attached to the eBay form. Downloads wasn't allowed, so AliSwift can't save them to a folder when attaching fails. Switch this off and on to be asked again.";
+      ? "Downloads allowed: the download button on AliExpress saves gallery and variant photos to your Downloads folder, and Create Listing attaches photos to eBay forms."
+      : "Downloads permission was not allowed. Switch this off and on to prompt for permission.";
 }
 
 async function saveIncludeImages(on) {

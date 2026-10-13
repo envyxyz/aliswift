@@ -407,7 +407,7 @@ test("the key is saved on this device only: never in a backup, never synced, nev
 const code = (src, from, to) => src.slice(src.indexOf(from), to ? src.indexOf(to) : undefined).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/ .*$/gm, "");
 
 test("the import code path contains no write: no method, no body, no values:update, batchUpdate, append or clear", () => {
-  const section = code(read("background.js"), "/* Import from Google Sheets");
+  const section = code(read("background.js"), "/* Import from Google Sheets", "/* eBay listing form (P6)");
   assert.ok(section.includes("function mapSheet") && section.includes("function listSpreadsheets") && section.includes("function readSpreadsheetMeta"));
   for (const bad of [/\bmethod\s*:\s*["'`]/, /\bbody\b/, /\bPOST\b|\bPUT\b|\bPATCH\b|\bDELETE\b/i, /values:(?:update|append|clear|batchUpdate|batchClear)/, /:batchUpdate|:append|:clear|batchClear/, /\bputCells\b|\bwriteRows?\b|\bcreateSheet\b|\bsetStatus\b|\baddOrder\b|\bupdateOrder\b|\bmoveLocal\b|\bappendRow\b|\bsaveLocal\b/]) {
     assert.doesNotMatch(section, bad);

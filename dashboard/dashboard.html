@@ -103,8 +103,8 @@
     <!-- Panel Orders -->
     <div role="tabpanel" id="panel-orders" aria-labelledby="tab-orders" class="panel" hidden>
       <div class="toolbar">
-        <input type="search" id="oSearch" class="search" placeholder="Search order, SKU, product or note" aria-label="Search orders">
-        <div class="segmented" id="oStatusGroup" data-scroll role="radiogroup" aria-label="Order status">
+        <input type="search" id="oSearch" class="search" placeholder="Search Order" aria-label="Search orders">
+        <div class="segmented" id="oStatusGroup" data-scroll role="radiogroup" aria-label="Order status" hidden>
           <label><input type="radio" name="oStatus" value="all" checked><span>All <small id="cntAllOrders">0</small></span></label>
           <label><input type="radio" name="oStatus" value="Pending"><span>Pending <small id="cntPending">0</small></span></label>
           <label><input type="radio" name="oStatus" value="Ordered"><span>Ordered <small id="cntOrdered">0</small></span></label>
@@ -113,12 +113,15 @@
           <label><input type="radio" name="oStatus" value="Cancelled"><span>Cancelled <small id="cntCancelled">0</small></span></label>
           <label><input type="radio" name="oStatus" value="Disputed"><span>Disputed <small id="cntDisputed">0</small></span></label>
         </div>
-        <button type="button" class="btn btn-sm" id="addOrderBtn">
+        <div class="toolbar-end">
+          <select id="oStatusSelect" class="sort" aria-label="Order status"></select>
+          <button type="button" class="btn btn-sm" id="addOrderBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
           Add order
-        </button>
+          </button>
+        </div>
       </div>
 
       <div class="results">
@@ -128,7 +131,6 @@
           <span>Units <b id="totUnits">0</b></span>
           <span>Revenue <b id="totRevenue">£0.00</b></span>
           <span>Profit <b id="totProfit">£0.00</b></span>
-          <span>Margin <b id="totMargin">–</b></span>
           <span class="title-row" data-align="end">
             <button type="button" class="info" aria-label="About totals" aria-describedby="tip-totals">
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -368,6 +370,26 @@
         <div class="actions">
           <button type="button" class="btn btn-quiet" id="moveCancel">Cancel</button>
           <button type="submit" class="btn" id="moveSubmit">Move products</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Delete Confirmation Dialog -->
+  <dialog id="deleteDialog" aria-labelledby="delTitle" style="--dialog-w:420px">
+    <form id="deleteForm" method="dialog">
+      <header class="dialog-head">
+        <h2 id="delTitle">Delete product</h2>
+      </header>
+      <div class="dialog-body">
+        <p id="delMsg">Are you sure you want to delete this product?</p>
+        <p class="dialog-sub" id="delSub" style="margin-top:6px;word-break:break-word;"></p>
+        <p class="note" id="delNote" style="margin-top:8px;">This will remove the product from your active sheet.</p>
+      </div>
+      <footer class="dialog-foot">
+        <div class="actions">
+          <button type="button" class="btn btn-quiet" id="delCancel">Cancel</button>
+          <button type="submit" class="btn btn-danger" id="delConfirm">Delete</button>
         </div>
       </footer>
     </form>

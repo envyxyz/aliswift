@@ -4,6 +4,10 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Changed
+
+- **Listings are written on eBay, not on the dashboard**: a card's button is now **List on eBay** (the product becomes a Draft and eBay opens); the AliExpress page's Create Listing also saves the product as a Draft and opens eBay without calling Gemini. The AliSwift panel on eBay's form lists the Draft products (and the one just sent), and its **Create listing** button writes the listing with Gemini, keeps it with the product (the dashboard's View listing shows it), and fills the form. The product becomes Listed only after eBay's published page is seen, or when you press **Mark listed**. A sheet with no Status column still offers the product just sent.
+
 ## [0.7.1] - 2026-10-12
 
 ### Added

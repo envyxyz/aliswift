@@ -1014,7 +1014,7 @@ const imported = [
 test("importOrders adds what is new in one read and one write, oldest first, and never an order that is already there", async () => {
   const t = setup(full, [orderKeys(), inventory(), { json: {} }]);
   const reply = await ask(t.listener, { action: "importOrders", orders: imported }, ordersPage);
-  assert.deepEqual(reply, { success: true, added: 3, skipped: 2, rejected: 1, unknown: 1 });
+  assert.deepEqual(reply, { success: true, added: 3, skipped: 2, rejected: 1, unknown: 1, unknownSkus: ["SKU-77"], updated: 0 });
   assert.equal(t.calls.length, 3); // the tab's keys, the inventory, one write
   assert.equal(t.calls[2].body.valueInputOption, "RAW");
   assert.deepEqual(cellsOf(t.calls[2]), {
@@ -1029,7 +1029,7 @@ test("importOrders adds what is new in one read and one write, oldest first, and
 test("importOrders, pressed again, finds everything already there and writes nothing; and it needs an Orders tab", async () => {
   const again = setup(full, [orderKeys()]);
   const lines = [{ orderNumber: "12-1", date: "2026-10-08", items: [{ sku: "SKU-01", qty: 1 }] }, { orderNumber: "12-2", items: [{ sku: "sku-02", qty: 1 }] }];
-  assert.deepEqual(await ask(again.listener, { action: "importOrders", orders: lines }, ordersPage), { success: true, added: 0, skipped: 2, rejected: 0, unknown: 0 });
+  assert.deepEqual(await ask(again.listener, { action: "importOrders", orders: lines }, ordersPage), { success: true, added: 0, skipped: 2, rejected: 0, unknown: 0, updated: 0 });
   assert.equal(again.calls.length, 1); // one read, no write
 
   const none = setup({ ...full, oTab: "" }, []);
@@ -1064,4 +1064,22 @@ test("each page asks for its own things: orders only from Seller Hub's list, sav
     assert.notEqual((await ask(t.listener, { action: "aiMap", task, items: [] }, from)).error, "Not allowed.", `${task} from ${from}`);
   }
   assert.equal((await ask(t.listener, { action: "aiMap", task: "constructor", items: [] }, ordersPage)).error, "Not allowed.");
+});
+
+test("importOrders moves a Pending or Ordered row on to eBay's status and fills an empty tracking cell, never over what the seller typed", async () => {
+  const keys = columns(["Order Number", "12-1", "12-2", "12-3"], ["SKU", "SKU-01", "SKU-02", "SKU-01"], ["Status", "Pending", "Ordered", "Delivered"], ["Tracking", "", "TRK-OLD", ""]);
+  const t = setup(full, [keys, { json: {} }]);
+  const line = (orderNumber, sku, status, tracking) => ({ orderNumber, items: [{ sku, qty: 1 }], status, tracking });
+  const reply = await ask(t.listener, { action: "importOrders", orders: [line("12-1", "SKU-01", "Shipped", "TRK-1"), line("12-2", "SKU-02", "Shipped", "TRK-2"), line("12-3", "SKU-01", "Shipped", "TRK-3")] }, ordersPage);
+  assert.equal(reply.updated, 4);
+  assert.equal(t.calls.length, 2); // one read, one write
+  // 12-1: status and tracking; 12-2: status only (its tracking stays); 12-3 was Delivered already: only the empty tracking cell.
+  assert.deepEqual(Object.values(cellsOf(t.calls[1])).sort(), ["Shipped", "Shipped", "TRK-1", "TRK-3"]);
+  const w = (word) => ({ orders: [{ orderNumber: "x", items: [{ sku: "s", qty: 1 }], status: word }] });
+  void w;
+});
+
+test("Seller Hub's status words map to the sheet's statuses, and anything unsure stays Pending", () => {
+  const f = (w) => require("../lib/shared.js").orderStatusOf(w);
+  assert.deepEqual(["Shipped", "Delivered", "Refunded", "Cancelled", "Return requested", "Awaiting shipment", "", "Paid"].map(f), ["Shipped", "Delivered", "Cancelled", "Cancelled", "Disputed", "Pending", "Pending", "Pending"]);
 });
