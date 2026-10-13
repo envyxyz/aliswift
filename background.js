@@ -11,6 +11,8 @@ chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 // A sheetId of "local" means the on-device library (no sheet, no sign-in).
 const handlers = {
   appendToSheet: { aliOk: true, run: (request) => appendRow(request.data) },
+  downloadPhotos: { aliOk: true, run: (request) => downloadPhotos(request.data) },
+  openOptions: { aliOk: true, run: (request) => openOptions(request?.tab) },
   quickList: { aliOk: true, run: (request) => quickList(request.data) },
   createSheet: { pagesOnly: true, run: (request) => createSheet(request.data) },
   authState: { run: () => authState() },
@@ -33,8 +35,10 @@ const handlers = {
   generateListing: { pagesOnly: true, run: (request) => generateListing(request) },
   saveListing: { pagesOnly: true, run: (request) => saveListing(request) },
   listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
-  ebayContext: { ebayOnly: true, run: () => ebayContext() },
+  ebayContext: { ebaySell: true, run: () => ebayContext() },
   ebayProducts: { ebayOnly: true, run: () => ebayProducts() },
+  ebayCreateListing: { ebayOnly: true, run: () => ebayCreateListing() },
+  ebayListed: { ebaySell: true, run: () => ebayListed() },
   ebayPhoto: { ebayOnly: true, run: (request) => ebayPhoto(request.n) },
   ebayPhotosSave: { ebayOnly: true, run: (request) => savePhotos(request.variantsOnly === true) },
   importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
@@ -62,6 +66,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   const allowed = handler.pagesOnly ? own
     : handler.aliOk ? own || onAliExpress(url)
     : handler.ebayOnly ? onListingForm(url)
+    : handler.ebaySell ? onListingForm(url) || onSellFlow(url)
     : handler.ordersOnly ? onOrdersPage(url)
     : handler.aiTask ? onAliExpress(url) || onListingForm(url) || onOrdersPage(url)
     : true;
@@ -474,7 +479,7 @@ async function ordersOf(sheetId) {
 // The Orders tab's order-number and SKU columns from row 1 down (f), and the order rows among them ({ row, no, sku }).
 async function readOrderKeys(sheet, cols) {
   if (!cols.no || !cols.sku) throw new Error("This sheet's Orders tab needs an Order Number and a SKU column.");
-  const f = await readFields(sheet.id, sheet.oTab, { no: cols.no, sku: cols.sku }, 1);
+  const f = await readFields(sheet.id, sheet.oTab, { no: cols.no, sku: cols.sku, status: cols.status, track: cols.track, sell: cols.sell }, 1); // one read: the same call also brings the status and tracking
   const rows = Array.from({ length: Math.max(f.no.length, f.sku.length) }, (_, i) => ({ row: i + 1, no: f.no[i], sku: f.sku[i] }));
   return { f, rows: rows.filter((r) => r.row >= sheet.oRow) };
 }
@@ -483,15 +488,19 @@ async function listOrders(sheetId) {
   const { sheet, cols } = await ordersOf(sheetId);
   const c = await readFields(sheet.id, sheet.oTab, cols, sheet.oRow);
   // The product's name is a formula on the Orders tab with no column of its own here, so it comes from Inventory by SKU.
-  const inv = sheet.skuCol && sheet.keywordsCol ? await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, name: sheet.keywordsCol }, sheet.startRow) : { sku: [], name: [] };
+  const inv = sheet.skuCol && sheet.keywordsCol ? await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, name: sheet.keywordsCol, sell: sheet.salePriceCol }, sheet.startRow) : { sku: [], name: [], sell: [] };
   const names = new Map(inv.sku.map((s, i) => [text(s).toLowerCase(), text(inv.name[i])]));
+  const unitSell = new Map(inv.sku.map((s, i) => [text(s).toLowerCase(), num(inv.sell?.[i])])); // when an order's own sell cell is empty
   const orders = [];
   for (let i = 0; i < Math.max(...Object.values(c).map((l) => l.length)); i++) {
     const [orderNumber, sku] = [c.no[i], c.sku[i]].map(text);
     if (!orderNumber && !sku) continue;
+    const qty = Number(c.qty[i]) > 0 ? Number(c.qty[i]) : 1;
+    const own = num(c.sell[i]);
+    const unit = unitSell.get(sku.toLowerCase());
     orders.push({
       row: sheet.oRow + i, orderNumber, sku, product: names.get(sku.toLowerCase()) ?? "", date: fromSheetDate(c.date[i]),
-      qty: Number(c.qty[i]) > 0 ? Number(c.qty[i]) : 1, sell: num(c.sell[i]), cost: num(c.cost[i]), profit: num(c.profit[i]),
+      qty, sell: own ?? (unit == null ? null : round2(unit * qty)), cost: num(c.cost[i]), profit: num(c.profit[i]),
       status: text(c.status[i]) || "Pending", tracking: text(c.track[i]), notes: text(c.notes[i]),
     });
   }
@@ -561,24 +570,41 @@ async function importOrders({ orders } = {}) {
     const keyOf = (no, sku) => `${text(no).toLowerCase()}|${text(sku).toLowerCase()}`;
     const seen = new Set(rows.map((r) => keyOf(r.no, r.sku)));
     const fresh = lines.filter((o) => !seen.has(keyOf(o.orderNumber, o.sku)) && seen.add(keyOf(o.orderNumber, o.sku)));
-    if (!fresh.length) return { success: true, added: 0, skipped: lines.length, rejected, unknown: 0 };
+    // An order already there: its status moves on from Pending/Ordered to what eBay shows, and an empty tracking cell takes
+    // eBay's number. Nothing else of the row is touched, so what the seller typed stays.
+    const have = f;
+    const updates = [];
+    for (const o of lines) {
+      const r = rows.find((x) => keyOf(x.no, x.sku) === keyOf(o.orderNumber, o.sku));
+      if (!r) continue;
+      const now = text(have.status?.[r.row - 1]);
+      if (cols.status && o.status !== "Pending" && o.status !== now && ["", "Pending", "Ordered"].includes(now)) updates.push([`${cols.status}${r.row}`, o.status]);
+      if (cols.track && o.tracking && !text(have.track?.[r.row - 1])) updates.push([`${cols.track}${r.row}`, o.tracking]);
+      if (cols.sell && o.sell != null && num(have.sell?.[r.row - 1]) == null) updates.push([`${cols.sell}${r.row}`, o.sell]); // the price eBay shows
+    }
+    if (updates.length) await putCells(sheet.id, sheet.oTab, updates);
+    if (!fresh.length) return { success: true, added: 0, skipped: lines.length, rejected, unknown: 0, updated: updates.length };
 
     const inv = sheet.skuCol ? await readFields(sheet.id, sheet.sheetTab, { sku: sheet.skuCol, cost: sheet.priceCol, sell: sheet.salePriceCol }, sheet.startRow) : { sku: [], cost: [], sell: [] };
     const unit = new Map(inv.sku.map((s, i) => [text(s).toLowerCase(), { cost: num(inv.cost[i]), sell: num(inv.sell[i]) }]));
     const first = nextRow(f.no.map((v) => [v]), f.sku.map((v) => [v]), sheet.oRow);
     let unknown = 0;
+    const unknownSkus = new Set();
     const cells = fresh.flatMap((o, i) => {
       const u = unit.get(o.sku.toLowerCase());
-      if (u?.cost == null) unknown++;
-      const sell = u?.sell == null ? null : round2(u.sell * o.qty);
+      if (u?.cost == null) {
+        unknown++;
+        unknownSkus.add(o.sku);
+      }
+      const sell = o.sell ?? (u?.sell == null ? null : round2(u.sell * o.qty)); // eBay's price first, the sheet's sell price when the page shows none
       const cost = u?.cost == null ? null : round2(u.cost * o.qty);
       return [
         [cols.no, o.orderNumber], [cols.sku, o.sku], [cols.date, o.serial], [cols.qty, o.qty], [cols.sell, sell],
-        [cols.cost, cost], [cols.status, o.status],
+        [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking],
       ].filter(([col]) => col).map(([col, value]) => [`${col}${first + i}`, value]);
     });
     await putCells(sheet.id, sheet.oTab, cells);
-    return { success: true, added: fresh.length, skipped: lines.length - fresh.length, rejected, unknown };
+    return { success: true, added: fresh.length, skipped: lines.length - fresh.length, rejected, unknown, unknownSkus: [...unknownSkus], updated: updates.length };
   });
 }
 
@@ -808,6 +834,66 @@ async function savePhotos(variantsOnly = false) {
   return { success: true, folder: folder.replace("/", "\\"), saved, total: jobs.length, variants: variants.length };
 }
 
+// Downloads a product's photos from its AliExpress page to Downloads/<sheet>/<title>/ (gallery and variants).
+// Called from the AliExpress content script; uses the details saved when the product was added.
+async function downloadPhotos(data) {
+  if (!chrome.downloads?.download) throw Object.assign(new Error("Allow downloads in AliSwift's settings to save photos to a folder."), { code: "permission" });
+  const sheet = await getActiveSheet();
+  const store = sheet ? sheet.name : "AliSwift";
+  const id = itemIdOf(data?.link);
+  const details = data?.details || (id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null);
+  const rawImages = (details?.images?.length ? details.images : [data?.image]).filter(Boolean);
+  const images = [...new Set(rawImages.map((u) => fullSizePhoto(u)).filter(onPhotoHost))].slice(0, PHOTOS_PER_LISTING);
+  const seen = new Set();
+  const variants = [];
+  for (const v of details?.variants ?? []) {
+    const image = fullSizePhoto(v?.image);
+    if (!text(v?.name) || !onPhotoHost(image) || seen.has(image)) continue;
+    seen.add(image);
+    variants.push({ group: text(v.group), name: text(v.name), image });
+  }
+  let sku = data?.sku;
+  if (!sku && id) {
+    const { library = [] } = await chrome.storage.local.get({ library: [] });
+    const inLib = library.find((item) => itemIdOf(item?.link) === id);
+    if (inLib?.sku) sku = inLib.sku;
+  }
+  const label = safeName(sku || data?.title || "product").slice(0, 40);
+  const folder = `${safeName(store)}/${label}`;
+  const jobs = [
+    ...images.map((url, i) => ({ url, dir: folder, n: i })),
+    ...variantFolders(variants.slice(0, VARIANTS_MAX)).map(({ dir, image }) => ({ url: image, dir: `${folder}/${dir}`, n: 0 })),
+  ];
+  if (!jobs.length) throw new Error("No photos found for this product.");
+  let saved = 0;
+  const stop = keepAlive();
+  try {
+    const exts = await Promise.all(jobs.map((j) => photoExt(j.url)));
+    for (const [i, { url, dir, n }] of jobs.entries()) {
+      try {
+        await chrome.downloads.download({ url, filename: `${dir}/${photoName(n, exts[i])}`, conflictAction: "uniquify" });
+        saved++;
+      } catch {}
+    }
+  } finally {
+    stop();
+  }
+  if (!saved) throw new Error("The photos couldn't be saved.");
+  return { success: true, folder: folder.replace("/", "\\"), saved, total: jobs.length, variants: variants.length };
+}
+
+async function openOptions(tab = "general") {
+  const url = chrome.runtime.getURL(`options/options.html${tab ? `#${tab}` : ""}`);
+  const [existing] = await chrome.tabs.query({ url: chrome.runtime.getURL("options/options.html*") });
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { url, active: true });
+    if (existing.windowId) await chrome.windows.update(existing.windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url });
+  }
+  return { success: true };
+}
+
 const NEW_COLUMNS = { skuCol: "SKU", imageCol: "Image URL" };
 
 // Adds the SKU and/or Image URL column to a sheet's Inventory tab, after the last column that has a value (AliSwift reads
@@ -953,9 +1039,8 @@ async function quickList(data) {
       sku, title: known?.title || text(data.title), link, image: known?.image || httpsUrl(data.image),
       salePrice: known ? known.salePrice : money(data.salePrice), currency: text(data.currency),
     };
-    const made = await generateListing({ sheetId, product });
-    const { region } = await listOnEbay({ sheetId, key: made.key, product });
-    return { success: true, sku, existed: Boolean(known), cached: Boolean(made.cached), region };
+    const { region } = await listOnEbay({ sheetId, key: listingKey(product), product, status: known?.status });
+    return { success: true, sku, existed: Boolean(known), region };
   } catch (error) {
     return { ...fail(error), saved: true, sku };
   }
@@ -1244,6 +1329,17 @@ function onOrdersPage(url) {
   }
 }
 
+// A message from eBay's other listing pages (/sl/...: the start page, the confirmation after publishing). Only to say that
+// the picked product was published; nothing else answers them.
+function onSellFlow(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && Object.values(REGIONS).some((r) => r.ebay === u.hostname) && u.pathname.startsWith("/sl/");
+  } catch {
+    return false;
+  }
+}
+
 // A message from the panel: the listing form on an eBay marketplace in REGIONS, not any other page or site.
 function onListingForm(url) {
   try {
@@ -1260,8 +1356,7 @@ function onListingForm(url) {
 async function pickTarget(sheetId, key, product) {
   const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
   const id = text(key).slice(0, 40);
-  const slot = `listing:${sheetId}:${id}`;
-  if (!id || !(await chrome.storage.local.get({ [slot]: null }))[slot]) throw new Error("Create a listing for this product first.");
+  if (!id) throw new Error("This product has no SKU or AliExpress link to list it under.");
   const p = product && typeof product === "object" ? product : {};
   const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const currency = REGIONS[sheet?.region] ? REGIONS[sheet.region].currency : text(p.currency);
@@ -1271,9 +1366,23 @@ async function pickTarget(sheetId, key, product) {
   return region;
 }
 
+// A product that is Not Listed becomes a Draft when it is sent to eBay: the panel on eBay offers the drafts. Best effort:
+// a sheet with no Status column (or a shared status) simply keeps the product out of the draft list, and the panel still
+// offers the one just picked.
+async function markDraft(sheetId, product, status) {
+  if (status && status !== "Not Listed") return;
+  try {
+    await setStatus(sheetId, { sku: product?.sku, link: product?.link, title: product?.title }, "Draft");
+  } catch {
+    // see above
+  }
+}
+
 // The dashboard's "List on eBay": picks the product, then opens eBay's listing start page for its marketplace.
-async function listOnEbay({ sheetId, key, product } = {}) {
+// The listing itself is written later, by the panel on eBay's form, when the seller presses Create listing.
+async function listOnEbay({ sheetId, key, product, status } = {}) {
   const region = await pickTarget(sheetId, key, product);
+  await markDraft(sheetId, product, status);
   await chrome.tabs.create({ url: `https://${REGIONS[region].ebay}/sl/prelist/suggest` });
   return { success: true, region };
 }
@@ -1306,21 +1415,56 @@ async function ebayContext() {
 // currency, product }. A listing carries its product since it was written; an older one is looked up in the dashboard's
 // cached list, else it shows the listing's own title. Listings of a sheet that has since been removed are left out.
 async function ebayProductList() {
-  const [all, { sheets }] = await Promise.all([chrome.storage.local.get(null), chrome.storage.sync.get({ sheets: [] })]);
-  const regionOf = new Map([[LOCAL, ""], ...sheets.map((s) => [s.id, s.region])]);
+  const [{ sheets }, { library }, { ebayTarget }] = await Promise.all([
+    chrome.storage.sync.get({ sheets: [] }),
+    chrome.storage.local.get({ library: [] }),
+    chrome.storage.local.get({ ebayTarget: null }),
+  ]);
   const cards = [];
-  for (const [slot, record] of Object.entries(all)) {
-    const [, sheetId, key] = /^listing:([\w-]+):(.+)$/.exec(slot) ?? [];
-    if (!key || !regionOf.has(sheetId) || !record?.listing) continue;
-    const cached = (all[`cache:${sheetId}`]?.products ?? []).find((x) => listingKey(x) === key);
-    const p = record.product ?? cached ?? {};
-    const currency = REGIONS[regionOf.get(sheetId)]?.currency ?? text(p.currency);
-    cards.push({
-      sheetId, key, sku: text(p.sku) || key, title: text(p.title) || text(record.listing.title), price: num(p.salePrice) > 0 ? num(p.salePrice) : null,
-      currency, createdAt: num(record.createdAt) ?? 0, product: { ...p, currency },
-    });
+  const add = (sheetId, region, products) => {
+    for (const p of products) {
+      const key = listingKey(p);
+      const picked = ebayTarget?.sheetId === sheetId && ebayTarget?.key === key;
+      if (!key || (p.status !== "Draft" && !picked)) continue; // the drafts, and the product just sent from AliExpress or the dashboard
+      const currency = REGIONS[region]?.currency ?? text(p.currency);
+      cards.push({ sheetId, key, sku: text(p.sku) || key, title: text(p.title), price: num(p.salePrice) > 0 ? num(p.salePrice) : null, currency, product: { ...p, currency } });
+    }
+  };
+  add(LOCAL, "", libToProducts(library));
+  // Each sheet is read fresh (the status may have changed in the sheet); the dashboard's last list stands in when it can't be.
+  for (const sheet of sheets) {
+    let products = await readProducts(sheet).then((r) => r.products).catch(() => []);
+    if (!products.length) products = (await chrome.storage.local.get({ [`cache:${sheet.id}`]: null }))[`cache:${sheet.id}`]?.products ?? [];
+    add(sheet.id, sheet.region, products.slice().reverse()); // the newest rows first
   }
-  return cards.sort((a, b) => b.createdAt - a.createdAt).slice(0, 200);
+  return cards.slice(0, 200);
+}
+
+// The panel's "Create listing": writes the picked product's listing with Gemini (kept with the product, so pressing it again
+// reuses it) from the target the panel is on, never from what the page says. A failed reply carries Gemini's `code`.
+async function ebayCreateListing() {
+  const { target } = await ebayPick();
+  if (!target) throw new Error("Choose a product first.");
+  const region = REGIONS[target.region] ?? REGIONS.UK;
+  const product = { sku: target.sku, title: target.title, link: target.link, image: target.image, salePrice: target.price, currency: region.currency };
+  const stop = keepAlive();
+  try {
+    await generateListing({ sheetId: target.sheetId, product });
+  } finally {
+    stop();
+  }
+  return { success: true };
+}
+
+// The seller published the listing: the picked product becomes Listed, once. { manual } is the panel's own button, the
+// other is the confirmation page of eBay, whose text the panel checked against the product's SKU or title.
+async function ebayListed() {
+  const { ebayTarget: target } = await chrome.storage.local.get({ ebayTarget: null });
+  if (!target) throw new Error("No product is picked.");
+  if (target.listed) return { success: true, already: true };
+  await setStatus(target.sheetId, { sku: target.sku, link: target.link, title: target.title }, "Listed");
+  await chrome.storage.local.set({ ebayTarget: { ...target, listed: true } });
+  return { success: true };
 }
 
 // { products: [{ sheetId, key, sku, title, price, currency }], current: { sheetId, key } | null } for the panel's cards.

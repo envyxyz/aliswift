@@ -605,7 +605,7 @@ test("9. Dashboard source: sends fillPhotos once in backfillPhotos after caching
 
   // Sends action "fillPhotos" exactly once (in backfillPhotos)
   const fillPhotosMatches = src.match(/action:\s*["']fillPhotos["']/g);
-  assert.equal(fillPhotosMatches?.length, 1);
+  assert.equal(fillPhotosMatches?.length, 2); // backfillPhotos, and rescueThumb for the Orders list
 
   const backfillPhotosFunc = src.match(/async function backfillPhotos\([\s\S]*?\n\}/)?.[0];
   assert.ok(backfillPhotosFunc, "backfillPhotos function found");

@@ -212,11 +212,13 @@ async function scrapeRow(where = dest) {
   return row;
 }
 
-/* The two buttons: Add to Sheet (just the save) and Create Listing (the save, the AI listing and eBay's form, in one). */
+/* The three buttons: Add to Sheet (just the save), Create Listing (the save, the AI listing and eBay's form, in one),
+   and Download Photos (saves gallery and variant images to a folder). */
 
 const ACTIONS = {
   add: { id: "aliswift-page-btn", busy: { sheet: "Adding...", local: "Saving..." }, done: "Added" },
   list: { id: "aliswift-list-btn", busy: { sheet: "Working...", local: "Working..." }, done: "Listed", label: "Create Listing" },
+  download: { id: "aliswift-dl-btn", busy: { sheet: "Saving...", local: "Saving..." }, done: "Saved", icon: true },
 };
 const buttons = () => Object.fromEntries(Object.entries(ACTIONS).map(([k, a]) => [k, document.getElementById(a.id)]));
 const note = (text, tone = "") => {
@@ -228,7 +230,7 @@ const note = (text, tone = "") => {
 
 function setState(btn, state, text) {
   btn.dataset.state = state;
-  btn.textContent = text;
+  if (!btn.dataset.icon) btn.textContent = text;
   btn.disabled = state === "loading";
 }
 
@@ -258,22 +260,29 @@ async function run(kind) {
   const where = dest;
   for (const b of Object.values(all)) if (b) b.disabled = true;
   setState(btn, "loading", action.busy[where]);
-  note(kind === "list" ? "Saving, writing the listing and opening eBay..." : "");
+  note(kind === "list" ? "Saving, writing the listing and opening eBay..." : kind === "download" ? "Downloading photos..." : "");
   let result;
   let row = {};
   try {
-    row = await scrapeRow(where);
-    const { title, price, salePrice, link, currency, image } = row;
-    if (!title || !price) result = { error: "Couldn't read this product. Reload the page." };
-    else if (row.fx && !row.fx.rate) {
-      result = { error: `Prices are ${row.fx.from}, sheet is ${row.fx.to}. Set a rate in the popup.` };
-    } else {
+    if (kind === "download") {
       const details = getDetails();
-      const finalImage = image || details.images?.[0] || details.variants?.[0]?.image || "";
-      result = await chrome.runtime.sendMessage({
-        action: kind === "list" ? "quickList" : "appendToSheet",
-        data: { title, price, salePrice, link, currency, image: finalImage, dest: where, details },
-      });
+      const title = document.querySelector('h1[data-pl="product-title"]')?.textContent ?? "";
+      const image = getImage() || details.images?.[0] || "";
+      result = await chrome.runtime.sendMessage({ action: "downloadPhotos", data: { link: getLink(), image, title, details } });
+    } else {
+      row = await scrapeRow(where);
+      const { title, price, salePrice, link, currency, image } = row;
+      if (!title || !price) result = { error: "Couldn't read this product. Reload the page." };
+      else if (row.fx && !row.fx.rate) {
+        result = { error: `Prices are ${row.fx.from}, sheet is ${row.fx.to}. Set a rate in the popup.` };
+      } else {
+        const details = getDetails();
+        const finalImage = image || details.images?.[0] || details.variants?.[0]?.image || "";
+        result = await chrome.runtime.sendMessage({
+          action: kind === "list" ? "quickList" : "appendToSheet",
+          data: { title, price, salePrice, link, currency, image: finalImage, dest: where, details },
+        });
+      }
     }
   } catch (e) {
     result = { error: /context invalidated/i.test(e.message) ? "AliSwift was updated. Reload this page and try again." : e.message };
@@ -284,11 +293,32 @@ async function run(kind) {
     const sku = result.sku ? ` as ${result.sku}` : "";
     const place = where === "local" ? "library" : "sheet";
     setState(btn, "success", action.done);
-    message = kind === "list"
-      ? `${result.existed ? "Already in your" : "Saved to your"} ${place}${sku}. ${result.cached ? "Used its saved listing" : "Listing written"}; eBay is opening.`
-      : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
+    if (kind === "download") {
+      message = `Saved ${result.saved} of ${result.total} photo${result.total === 1 ? "" : "s"} to ${result.folder}.`;
+    } else {
+      message = kind === "list"
+        ? `${result.existed ? "Already in your" : "Saved to your"} ${place}${sku}. Marked Draft; eBay is opening. Pick it in the AliSwift panel there.`
+        : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
+    }
+  } else if (result?.code === "permission") {
+    setState(btn, "error", "Permission");
+    const el = document.getElementById("aliswift-note");
+    if (el) {
+      el.textContent = "";
+      el.dataset.tone = "error";
+      const span = document.createElement("span");
+      span.textContent = "Downloads not allowed: ";
+      const link = document.createElement("button");
+      link.type = "button";
+      link.textContent = "Open Settings to Allow";
+      link.className = "aliswift-note-link";
+      link.onclick = () => chrome.runtime.sendMessage({ action: "openOptions", tab: "general" });
+      el.append(span, link);
+    }
+    for (const b of Object.values(all)) if (b) b.disabled = false;
+    resetTimer = setTimeout(() => reset(), 10000);
+    return;
   } else if (result?.code === "signin") {
-    // The label was stale: signed out here or elsewhere. Nothing was written; the next click saves to the library.
     dest = "local";
     setState(btn, "error", "Signed out");
     message = "Signed out. Click again to save to your library.";
@@ -296,16 +326,17 @@ async function run(kind) {
     setState(btn, "error", "Try again");
     message = kind === "list" ? listFailure(result ?? {}) : (result?.error ?? "Something went wrong");
   }
-  for (const b of Object.values(all)) if (b) b.disabled = false; // the other button was only held while this one ran
+  for (const b of Object.values(all)) if (b) b.disabled = false;
   note(message, result?.success ? "ok" : "error");
-  resetTimer = setTimeout(() => reset(), result?.success ? (kind === "list" ? 6000 : 3500) : 6000); // long enough to read the SKU
+  resetTimer = setTimeout(() => reset(), result?.success ? (kind === "list" ? 6000 : 3500) : 6000);
 }
 
-// Both buttons back to their words, and the note emptied.
+// All buttons back to their words, and the note emptied.
 function reset() {
   const all = buttons();
   if (all.add) setState(all.add, "", LABELS[dest]);
   if (all.list) setState(all.list, "", ACTIONS.list.label);
+  if (all.download) setState(all.download, "", "");
   note("");
 }
 
@@ -322,9 +353,26 @@ function injectButton() {
   for (const kind of Object.keys(ACTIONS)) {
     const btn = document.createElement("button");
     btn.id = ACTIONS[kind].id;
-    btn.className = kind === "list" ? "aliswift-btn aliswift-btn-list" : "aliswift-btn";
     btn.type = "button";
-    btn.textContent = kind === "list" ? ACTIONS.list.label : LABELS[dest];
+    if (kind === "download") {
+      btn.className = "aliswift-btn aliswift-btn-dl";
+      btn.dataset.icon = "1";
+      btn.setAttribute("aria-label", "Download photos");
+      // Download/image icon (Material: file_download)
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("width", "18");
+      svg.setAttribute("height", "18");
+      svg.setAttribute("fill", "currentColor");
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z");
+      svg.append(path);
+      btn.append(svg);
+    } else {
+      btn.className = kind === "list" ? "aliswift-btn aliswift-btn-list" : "aliswift-btn";
+      btn.textContent = kind === "list" ? ACTIONS.list.label : LABELS[dest];
+    }
     // A click the page's own script makes (element.click()) is not the seller's: it must not save, write or open anything.
     btn.addEventListener("click", (e) => e.isTrusted && run(kind));
     row.append(btn);

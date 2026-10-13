@@ -609,6 +609,23 @@ function updateFilterCounts() {
   setCnt("cntDelivered", oCounts.Delivered);
   setCnt("cntCancelled", oCounts.Cancelled);
   setCnt("cntDisputed", oCounts.Disputed);
+  syncOrderSelect(oCounts);
+}
+
+// The status dropdown mirrors the (hidden) radios that hold the filter: same choices, with their counts.
+function syncOrderSelect(counts) {
+  const select = document.getElementById("oStatusSelect");
+  if (!select) return;
+  const picked = document.querySelector('input[name="oStatus"]:checked')?.value ?? "all";
+  select.replaceChildren(
+    ...["all", "Pending", "Ordered", "Shipped", "Delivered", "Cancelled", "Disputed"].map((v) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = `${v === "all" ? "All" : v} (${counts[v] ?? 0})`;
+      return o;
+    }),
+  );
+  select.value = picked;
 }
 
 // Render Products View
@@ -860,9 +877,9 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     const xBtn = document.createElement("button");
     xBtn.type = "button";
     xBtn.className = "icon-btn card-x";
-    xBtn.setAttribute("aria-label", `Remove ${product.sku || product.title}`);
+    xBtn.setAttribute("aria-label", `Delete ${product.sku || product.title}`);
     xBtn.append(
-      createSvgPath("18", "18", "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z")
+      createSvgPath("18", "18", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z")
     );
 
     if (!hasStatusCol) {
@@ -902,7 +919,9 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
       });
       slotEnd.append(xBtn, tip);
     } else {
-      xBtn.addEventListener("click", () => handleRemoveProduct(product, card));
+      xBtn.addEventListener("click", () => {
+        openDeleteDialog(product, card, xBtn);
+      });
       slotEnd.append(xBtn);
     }
 
@@ -1007,7 +1026,8 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     createBtn.type = "button";
     createBtn.dataset.lkey = listingKeyOf(product);
     createBtn.setAttribute("aria-haspopup", "dialog");
-    createBtn.addEventListener("click", () => openListing(product, createBtn));
+    // A kept listing opens in the dialog; otherwise the product goes to eBay as a draft, where the panel writes its listing.
+    createBtn.addEventListener("click", () => (listingsCache[createBtn.dataset.lkey] || listingJobs.has(`${currentSheetId()}:${createBtn.dataset.lkey}`) ? openListing(product) : listOnEbayFromCard(product)));
     setListingButton(createBtn);
     actions.append(createBtn);
   }
@@ -1376,19 +1396,25 @@ function createOrderRow(order, currencyCode) {
   const matchedProd = currentProducts.find((p) => p.sku === order.sku);
   const safeImg = httpsUrl(matchedProd?.image);
 
-  if (safeImg) {
+  // The sheet's photo first; when it is missing or won't load, the product page's share image, else the icon.
+  const showThumb = (src, rescue) => {
     const thumb = document.createElement("img");
-    thumb.src = safeImg;
+    thumb.src = src;
     thumb.alt = "";
     thumb.loading = "lazy";
     thumb.referrerPolicy = "no-referrer";
     thumb.onerror = () => {
-      thumb.remove();
-      prodBox.prepend(createSmallThumbPlaceholder());
+      const ph = createSmallThumbPlaceholder();
+      thumb.replaceWith(ph);
+      if (rescue) rescueThumb(matchedProd, (url) => ph.replaceWith(showThumb(url, false)));
     };
-    prodBox.append(thumb);
-  } else {
-    prodBox.append(createSmallThumbPlaceholder());
+    return thumb;
+  };
+  if (safeImg) prodBox.append(showThumb(safeImg, true));
+  else {
+    const ph = createSmallThumbPlaceholder();
+    prodBox.append(ph);
+    rescueThumb(matchedProd, (url) => ph.replaceWith(showThumb(url, false)));
   }
 
   const textWrap = document.createElement("div");
@@ -1640,13 +1666,11 @@ function updateOrderTotals(orders, currencyCode) {
   const tUnits = document.getElementById("totUnits");
   const tRev = document.getElementById("totRevenue");
   const tProf = document.getElementById("totProfit");
-  const tMarg = document.getElementById("totMargin");
 
   if (tOrders) tOrders.textContent = String(totals.ordersCount);
   if (tUnits) tUnits.textContent = String(totals.units);
   if (tRev) tRev.textContent = formatCurrency(totals.revenue, currencyCode);
   if (tProf) tProf.textContent = formatCurrency(totals.profit, currencyCode);
-  if (tMarg) tMarg.textContent = totals.marginStr;
 }
 
 // Map product status to tone
@@ -1893,6 +1917,29 @@ function showPhoto(product) {
   if (!media || media.querySelector("img")) return;
   media.querySelector(".card-ph")?.remove();
   media.prepend(createProductImage(product.image, media, product.link));
+}
+
+// The Orders list's thumbnails: a product with no photo, or one that won't load, is asked about once, all together after a
+// moment, and `done(url)` runs for each that has a share image.
+const thumbAsked = new Set();
+let thumbQueue = new Map();
+let thumbTimer;
+function rescueThumb(product, done) {
+  const link = product?.link;
+  if (!link || thumbAsked.has(link)) return;
+  thumbAsked.add(link);
+  thumbQueue.set(link, [...(thumbQueue.get(link) ?? []), done]);
+  clearTimeout(thumbTimer);
+  thumbTimer = setTimeout(async () => {
+    const batch = thumbQueue;
+    thumbQueue = new Map();
+    const links = [...batch.keys()].slice(0, 60);
+    const res = await sendMessage({ action: "fillPhotos", sheetId: currentSheetId(), links, retry: links });
+    for (const link of links) {
+      const url = httpsUrl(res.photos?.[link]);
+      if (url) for (const fn of batch.get(link)) fn(url);
+    }
+  }, 400);
 }
 
 async function backfillPhotos(sheetId, token) {
@@ -2376,11 +2423,64 @@ function setupMoveForm() {
   };
 }
 
+let pendingDelete = null;
+
+function openDeleteDialog(product, card, triggerBtn) {
+  const dlg = document.getElementById("deleteDialog");
+  if (!dlg) {
+    handleRemoveProduct(product, card);
+    return;
+  }
+  pendingDelete = { product, card, triggerBtn };
+  const sub = document.getElementById("delSub");
+  if (sub) {
+    const label = product.sku
+      ? `${product.sku} · ${product.title || ""}`
+      : (product.title || "Selected product");
+    sub.textContent = label;
+  }
+  dlg.showModal();
+  const cancelBtn = document.getElementById("delCancel");
+  if (cancelBtn) cancelBtn.focus();
+}
+
+function setupDeleteDialog() {
+  const dlg = document.getElementById("deleteDialog");
+  if (!dlg) return;
+  const form = document.getElementById("deleteForm");
+  const cancelBtn = document.getElementById("delCancel");
+
+  const closeDlg = () => {
+    dlg.close();
+    if (pendingDelete?.triggerBtn?.isConnected) {
+      pendingDelete.triggerBtn.focus();
+    }
+    pendingDelete = null;
+  };
+
+  if (cancelBtn) cancelBtn.onclick = closeDlg;
+  dlg.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    closeDlg();
+  });
+
+  if (form) {
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      if (!pendingDelete) return;
+      const { product, card } = pendingDelete;
+      closeDlg();
+      handleRemoveProduct(product, card);
+    };
+  }
+}
+
 function setupDialogForms() {
   setupOrderForm();
   setupAddOrderForm();
   setupMoveForm();
   setupListingDialog();
+  setupDeleteDialog();
 }
 
 /* ==========================================================================
@@ -2413,7 +2513,7 @@ async function loadListings(sheetId, products) {
 function setListingButton(btn) {
   const key = btn.dataset.lkey;
   const state = listingJobs.has(`${currentSheetId()}:${key}`) ? "busy" : listingsCache[key] ? "view" : "create";
-  btn.textContent = { busy: "Generating...", view: "View listing", create: "Create listing" }[state];
+  btn.textContent = { busy: "Generating...", view: "View listing", create: "List on eBay" }[state];
   btn.className = state === "create" ? "btn btn-sm" : "btn btn-quiet btn-sm";
 }
 
@@ -2633,6 +2733,15 @@ async function generateListing(force) {
     const { message, detail } = listingError(res);
     toast(message, { kind: "error", detail, action: { label: "Open", onClick: () => openListing(product) } });
   }
+}
+
+// A card's "List on eBay": the product becomes a Draft and eBay's listing start page opens. Its listing is written there, by
+// the AliSwift panel, when the seller presses Create listing.
+async function listOnEbayFromCard(product) {
+  const res = await sendMessage({ action: "listOnEbay", sheetId: currentSheetId(), key: listingKeyOf(product), product: listingProductOf(product), status: product.status });
+  if (!res.success) return toast("Couldn't open eBay.", { kind: "error", detail: res.error });
+  toast("Opened eBay.", { kind: "neutral", detail: "Choose it in the AliSwift panel and press Create listing." });
+  loadProductsData();
 }
 
 function openListing(product) {
@@ -3083,6 +3192,13 @@ function setupEventListeners() {
     });
   }
 
+  document.getElementById("oStatusSelect")?.addEventListener("change", (e) => {
+    const radio = [...document.querySelectorAll('input[name="oStatus"]')].find((r) => r.value === e.target.value);
+    if (radio) {
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change"));
+    }
+  });
   const oStatusRadios = document.querySelectorAll('input[name="oStatus"]');
   for (const radio of oStatusRadios) {
     radio.addEventListener("change", () => {

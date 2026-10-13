@@ -136,6 +136,18 @@ textarea:focus-visible {
   margin-left: auto;
 }
 
+/* Orders: the search stays left, the status dropdown and Add order sit together on the right. */
+.toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+}
+
+.toolbar-end .sort {
+  margin-left: 0;
+}
+
 .results {
   display: flex;
   flex-wrap: wrap;
@@ -259,6 +271,12 @@ textarea:focus-visible {
 .card-x:hover:not([aria-disabled="true"]) {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+.card-x[data-confirm] {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 .card[data-status="Discontinued"] .card-media {
@@ -396,7 +414,7 @@ textarea:focus-visible {
   position: sticky;
   top: var(--head-h);
   z-index: 5;
-  padding: 8px 12px;
+  padding: 10px 20px;
   text-align: left;
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -407,7 +425,7 @@ textarea:focus-visible {
 }
 
 .orders td {
-  padding: 10px 12px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }

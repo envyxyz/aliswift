@@ -71,6 +71,7 @@ test("results text says whether there is another page, and only the all-orders l
   assert.equal(O.resultsRange("nothing"), null);
   assert.equal(O.onAllOrders("https://www.ebay.com/sh/ord/?filter=status:ALL_ORDERS"), true);
   assert.equal(O.onAllOrders("https://www.ebay.com/sh/ord?filter=status:ALL_ORDERS&limit=50"), true);
+  assert.equal(O.onAllOrders("https://www.ebay.com/sh/ord?filter=status:ALL_ORDERS,Timerange:CURRENTYEAR"), true);
   for (const href of ["https://www.ebay.com/sh/ord/?filter=status:AWAITING_SHIPMENT", "https://www.ebay.com/sh/ord/", "https://www.ebay.com/sh/ord/details?orderid=1", "nonsense"]) assert.equal(O.onAllOrders(href), false, href);
 });
 

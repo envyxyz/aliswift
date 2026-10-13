@@ -33,12 +33,19 @@
   const rows = new Map(); // id -> { id, label, value, status, field?, hint? }
   const saved = {}; // the page's own padding, put back on Done
 
-  const send = (message) => chrome.runtime.sendMessage(message).catch((error) => ({ success: false, error: error.message }));
+  // A page left open across an extension reload throws at once (not a rejected promise): that answers like any failure.
+  const send = async (message) => {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
 
   /* State */
 
-  const ready = () => Boolean(ctx?.target && ctx.listing);
-  const running = () => ["reading", "asking", "filling"].includes(phase);
+  const ready = () => Boolean(ctx?.target); // a product is chosen; its listing is written by Create listing, if it has none yet
+  const running = () => ["reading", "writing", "asking", "filling"].includes(phase);
   const counts = () => {
     const c = { filled: 0, copy: 0, needs: 0 };
     for (const r of rows.values()) if (r.status in c) c[r.status]++;
@@ -48,9 +55,9 @@
 
   function summary() {
     if (!ctx?.success) return "AliSwift didn't answer. Reload this page.";
-    if (!ctx.target) return products.length ? "Choose the product to list." : "No product has a listing yet.";
-    if (!ctx.listing) return "That product has no saved listing. Pick another, or create one on the dashboard.";
+    if (!ctx.target) return products.length ? "Choose the product to list." : "No drafts yet.";
     if (phase === "reading") return "Reading the form...";
+    if (phase === "writing") return "Writing the listing...";
     if (phase === "asking") return `Asking AI to match ${asking} fields...`;
     if (phase === "filling") return "Filling the form...";
     if (phase === "done") {
@@ -58,7 +65,7 @@
       const need = n ? `, ${n} need you` : "";
       return !f ? `Nothing filled, ${c} to copy${need}.` : !c && !n ? `All ${f} fields filled.` : `${f} filled, ${c} to copy${need}`;
     }
-    return "Pick your category on eBay, then press Fill form.";
+    return `Pick your category on eBay, then press ${ctx.listing ? "Fill form" : "Create listing"}.`;
   }
 
   // A product picked for another marketplace than the one this form is on: its price is never typed in.
@@ -97,7 +104,7 @@
     ui.search.hidden = products.length < 6;
     ui.cards.replaceChildren(...shown.map(cardEl));
     ui.pickNote.textContent = !products.length
-      ? "Press Create Listing on an AliExpress product page, or create a listing on the dashboard."
+      ? "Only drafts are listed here. Press Create Listing on an AliExpress product page, or List on eBay on the dashboard."
       : !shown.length ? "Nothing matches." : "";
   }
 
@@ -198,7 +205,8 @@
     }
 
     const busy = running();
-    ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Filling..." : notice?.retry ? "Try again" : phase === "done" && !notice?.settings ? "Fill again" : "Fill form";
+    ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Working..." : notice?.retry ? "Try again" : phase === "done" && !notice?.settings ? "Fill again" : ctx.listing ? "Fill form" : "Create listing";
+    ui.listed.hidden = !(ready() && phase === "done");
     ui.fill.setAttribute("aria-disabled", String(busy || (!ready() && products.length > 0)));
     if (busy) ui.fill.dataset.state = "loading";
     else delete ui.fill.dataset.state;
@@ -211,12 +219,37 @@
     s.paddingBottom = wide.matches ? saved.bottom : `${collapsed ? 64 : ui.panel.offsetHeight + 32}px`;
   }
 
-  function setCollapsed(on) {
+  function setCollapsed(on, animate = true) {
     collapsed = on;
-    ui.panel.toggleAttribute("data-collapsed", on);
     ui.collapsible.inert = on;
     ui.toggle.setAttribute("aria-expanded", String(!on));
     ui.toggle.setAttribute("aria-label", `${on ? "Expand" : "Collapse"} AliSwift panel`);
+    if (!animate) {
+      ui.panel.toggleAttribute("data-collapsed", on);
+      ui.panel.style.height = "";
+      reserve();
+      return;
+    }
+    if (on) {
+      ui.panel.style.height = `${ui.panel.offsetHeight}px`;
+      ui.panel.offsetHeight;
+      ui.panel.setAttribute("data-collapsed", "");
+      ui.panel.style.height = "48px";
+      setTimeout(() => {
+        if (collapsed) ui.panel.style.height = "";
+        reserve();
+      }, 300);
+    } else {
+      ui.panel.removeAttribute("data-collapsed");
+      const fullHeight = ui.panel.scrollHeight;
+      ui.panel.style.height = "48px";
+      ui.panel.offsetHeight;
+      ui.panel.style.height = `${fullHeight}px`;
+      setTimeout(() => {
+        if (!collapsed) ui.panel.style.height = "";
+        reserve();
+      }, 300);
+    }
     reserve();
   }
 
@@ -238,6 +271,7 @@
       filledCount: h("span", { class: "muted" }),
       filledList: h("ul", { class: "ali-rows", role: "list" }),
       fill: h("button", { type: "button", class: "btn btn-sm", id: "ali-fill" }),
+      listed: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-listed", text: "Mark listed", title: "Press after you have published it on eBay: the product becomes Listed", hidden: true, onclick: () => markListed(true) }),
       report: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-report", text: "Copy report", title: "Copies the form's boxes and what happened, to send with a bug report" }),
     };
     ui.pickList = h("div", { class: "ali-pick-list", id: "ali-pick-list" }, ui.search, ui.cards, ui.pickNote);
@@ -260,7 +294,7 @@
         h(
           "footer",
           { class: "ali-foot" },
-          h("div", { class: "actions" }, ui.report, h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-done", text: "Done", onclick: finish }), ui.fill),
+          h("div", { class: "actions" }, ui.report, h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-done", text: "Done", onclick: finish }), ui.listed, ui.fill),
         ),
       ),
     );
@@ -270,6 +304,14 @@
       h("header", { class: "ali-head" }, icon(PATH.bolt, "bolt"), h("div", { class: "ali-title" }, h("strong", { text: "AliSwift" }), ui.prod, ui.mini), toggle),
       ui.collapsible,
     );
+    ui.panel.addEventListener("click", () => {
+      if (collapsed) {
+        setCollapsed(false, true);
+        try {
+          sessionStorage.setItem(COLLAPSED_KEY, "0");
+        } catch {}
+      }
+    });
     ui.host = mountPanel("aliswift-host", ui.panel);
     ui.fill.addEventListener("click", () => {
       if (!ready()) {
@@ -287,8 +329,9 @@
       ui.report.textContent = ok ? "Copied" : "Press Ctrl+C";
       setTimeout(() => (ui.report.textContent = "Copy report"), 1800);
     });
-    toggle.addEventListener("click", () => {
-      setCollapsed(!collapsed);
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setCollapsed(!collapsed, true);
       try {
         sessionStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
       } catch {
@@ -303,7 +346,7 @@
     } catch {
       // see above
     }
-    setCollapsed(stored === null ? !wide.matches : stored === "1");
+    setCollapsed(stored === null ? true : stored === "1", false);
     wide.addEventListener("change", reserve);
     resizer = new ResizeObserver(reserve);
     resizer.observe(ui.panel);
@@ -315,9 +358,9 @@
   // The fields the panel fills itself, shown as Pending before anything is pressed.
   function idleRows() {
     const { target: t, listing: l } = ctx;
-    row("title", "Title", l.title, "pending");
+    row("title", "Title", l?.title ?? t.title, "pending");
     if (t.sku) row("sku", "Custom label", t.sku, "pending");
-    row("description", "Description", l.description, "pending");
+    row("description", "Description", l?.description ?? "", "pending");
     row("price", `Price (${t.currency})`, t.price, "pending");
     if (ctx.photos?.count) row("photos", "Photos", photoWords(ctx.photos.count), "pending");
   }
@@ -520,7 +563,12 @@
   }
 
   // Why the AI step failed, as the panel says it.
-  function failure(res) {
+  function failure(res, step = "match") {
+    if (step === "write") {
+      if (res.code === "nokey" || res.code === "invalid-key") return { tone: "error", text: "AI isn't set up. Check your Gemini key in AliSwift settings.", settings: true };
+      const why = { timeout: "Gemini took too long.", network: "Couldn't reach Gemini.", rate: "Gemini is busy or over its limit." }[res.code] ?? res.error ?? "";
+      return { tone: "warn", text: `Couldn't write the listing. ${why} Try again.`, retry: true };
+    }
     if (res.code === "nokey" || res.code === "invalid-key") return { tone: "error", text: "AI isn't set up. Check your Gemini key in AliSwift settings.", settings: true };
     if (res.code === "rate") return { tone: "warn", text: "Gemini is busy or over its limit. Try again in a minute.", retry: true };
     const why = { timeout: "Gemini took too long.", network: "Couldn't reach Gemini." }[res.code] ?? (res.error ? `Gemini said: ${res.error}` : "");
@@ -535,7 +583,22 @@
     for (const k of Object.keys(found)) delete found[k];
     render();
     ctx = await send({ action: "ebayContext" }); // asked again: another product may have been picked
-    if (!ready()) {
+    if (ready() && !ctx.listing) {
+      // The listing is written now, for the product picked (kept with it: the dashboard shows it, and a second press reuses it).
+      phase = "writing";
+      render();
+      const made = await send({ action: "ebayCreateListing" });
+      if (!made.success) {
+        found.aiError = [made.code, made.status, made.model, made.error].filter(Boolean).join(" | ");
+        phase = "done";
+        notice = failure(made, "write");
+        return render();
+      }
+      ctx = await send({ action: "ebayContext" });
+      rows.clear();
+      if (ready() && ctx.listing) idleRows();
+    }
+    if (!ready() || !ctx.listing) {
       phase = "idle";
       return render();
     }
@@ -610,6 +673,30 @@
     }
     for (const f of open) if (f.required && !rows.has(f.name)) row(f.name, f.label, "", "needs", { field: f.el, hint: "Required. Choose a value on eBay." });
   }
+
+  /* Listed: the product becomes Listed only after eBay says it is published. The confirmation page is recognised by its words,
+     an item link, and the product's own SKU or title on it (so another listing's page never counts). The panel's
+     "Mark listed" button is the same thing by hand, for when eBay words that page differently. Unverified on live eBay. */
+
+  async function markListed(manual) {
+    const res = await send({ action: "ebayListed" });
+    if (!ui) return;
+    notice = res.success ? { tone: "info", text: "Marked as Listed on the dashboard." } : { tone: "warn", text: `Couldn't mark it Listed. ${res.error ?? ""}`.trim() };
+    if (manual || res.success) render();
+  }
+
+  let published = false;
+  async function watchPublished() {
+    if (published || dismissed || q('input[name="title"]')) return; // the form itself is not a confirmation
+    const body = document.body?.innerText ?? "";
+    if (!/(your (item|listing) (is|has been) (now )?(live|listed|published)|(listing|item) (is )?(now )?live|successfully listed|congratulations)/i.test(body) || !q('a[href*="/itm/"]')) return;
+    const { target, listing } = await send({ action: "ebayContext" });
+    const mine = [target?.sku, (listing?.title ?? target?.title ?? "").slice(0, 30)].filter((x) => x && x.length > 3);
+    if (!mine.some((x) => body.toLowerCase().includes(x.toLowerCase()))) return;
+    published = true;
+    await markListed(false);
+  }
+  setInterval(watchPublished, 3000);
 
   /* Start: idle until the page is the listing form. eBay may reach /lstng from /sl/... without a page load, so look again. */
 
