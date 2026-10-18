@@ -646,3 +646,41 @@ table.map {
     animation: none;
   }
 }
+
+/* AI tab: the key pool */
+.key-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.key-name {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.key-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.key-form {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.fee-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}

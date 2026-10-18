@@ -12,6 +12,7 @@ const {
   parsePrice,
   evalFormula,
   priceProduct,
+  productProfit,
   afterRemoval,
   detectCurrency,
   currencyKind,
@@ -67,6 +68,17 @@ test("evalFormula rejects anything that is not plain arithmetic", () => {
 test("priceProduct adds shipping and extra cost before pricing", () => {
   const sheet = { ...SHEET_DEFAULTS, extraCost: 1, formulaValue: "costPrice * 2" };
   assert.deepEqual(priceProduct(4, 1, sheet), { price: "6.00", salePrice: "12.00" });
+});
+
+test("productProfit takes the sheet's fee off the sell price and answers null without two usable numbers", () => {
+  const sheet = { feePercent: 10, feeFixed: 0.5 };
+  assert.deepEqual(productProfit(4, 10, sheet), { fees: 1.5, profit: 4.5, margin: 0.45 });
+  assert.deepEqual(productProfit("4", "10", sheet), { fees: 1.5, profit: 4.5, margin: 0.45 }); // typed text
+  assert.equal(productProfit(20, 10, sheet).profit, -11.5); // a loss stays a loss
+  assert.deepEqual(productProfit(1, 2, {}), { fees: 0, profit: 1, margin: 0.5 }); // a sheet with no fees set
+  for (const [cost, sell] of [["", 5], [3, ""], [null, 5], [3, 0], [3, -1], ["x", 5], [3, undefined]]) assert.equal(productProfit(cost, sell, sheet), null, `${cost}/${sell}`);
+  assert.deepEqual(productProfit(3, 10), productProfit(3, 10, SHEET_DEFAULTS)); // the defaults: 13.6% + 0.40
+  assert.equal(SHEET_DEFAULTS.feePercent, 13.6);
 });
 
 test("priceProduct margin, .99 rounding and sell price off", () => {

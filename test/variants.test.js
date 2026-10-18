@@ -414,7 +414,8 @@ test("4. ebayPhotosSave variantsOnly downloads only variants, and fails with err
   const resEmpty = await tEmpty.ask({ action: "ebayPhotosSave", variantsOnly: true }, EBAY_FORM);
   assert.deepEqual(resEmpty, {
     success: false,
-    error: "The photos couldn't be saved.",
+    error: "No photos found for this product.",
+    code: "nophotos",
   });
 });
 
@@ -540,9 +541,11 @@ test("6. content.js getDetails() parses property blocks into variants without cl
     setTimeout: () => 0,
     URL,
     console,
+    addEventListener: () => {},
   });
 
   vm.runInContext(read("lib/shared.js"), ctx);
+  vm.runInContext(read("lib/errors.js"), ctx);
   vm.runInContext(read("content.js"), ctx);
 
   const details = plain(ctx.getDetails());

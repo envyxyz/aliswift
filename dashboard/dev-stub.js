@@ -41,6 +41,7 @@
       link: "https://www.aliexpress.com/item/1005002222222222.html",
       price: 1.45,
       salePrice: 4.99,
+      locked: ["salePrice"], // a sheet formula sets this one: the inspector shows it read-only
       image: "https://ae01.alicdn.com/kf/S2b3c4d5e6f7g8h9.jpg",
       status: "Listed",
       statusShared: false,
@@ -728,7 +729,7 @@
     activeSheetId: activeSheetId,
   };
 
-  // A kept listing, in the shape background.js stores it (listing:<sheetId>:<key>).
+  // A kept listing, in the shape background.js stores it (listing:<AliExpress item number>).
   const fakeListing = (title) => ({
     listing: {
       title: String(title).slice(0, 80),
@@ -748,7 +749,7 @@
     warnings: [],
   });
   const localStore = {
-    "listing:sheet-uk-primary:SKU-01": fakeListing("Stainless Steel Norse Viking Rune Ring Men Vintage Punk"),
+    "listing:1005001111111111": fakeListing("Stainless Steel Norse Viking Rune Ring Men Vintage Punk"),
   };
   if (stubMode === "cached" || stubMode === "offline") {
     localStore["cache:sheet-uk-primary"] = {
@@ -808,6 +809,18 @@
               if (prod) prod.status = status;
               res = { success: true };
             }
+          } else if (msg.action === "priceLocks") {
+            res = { success: true, locked: sampleProducts.find((p) => p.row === msg.row)?.locked ?? [] };
+          } else if (msg.action === "updateProduct") {
+            const { key, price, salePrice } = msg;
+            const prod = sampleProducts.find((p) => (key?.sku && p.sku === key.sku) || (key?.row && p.row === key.row));
+            if (!prod) res = { success: false, code: "gone", error: "That product isn't in the sheet any more." };
+            else if ((prod.locked ?? []).some((f) => msg[f] !== undefined)) res = { success: false, code: "formula", error: "That price is a formula in your sheet." };
+            else {
+              if (price !== undefined) prod.price = Number(price);
+              if (salePrice !== undefined) prod.salePrice = Number(salePrice);
+              res = { success: true, ...(price !== undefined && { price: prod.price }), ...(salePrice !== undefined && { salePrice: prod.salePrice }) };
+            }
           } else if (msg.action === "listOrders") {
             if (stubMode === "orders-error") {
               res = { success: false, error: "Google Sheets API: Orders tab not found in the spreadsheet." };
@@ -857,8 +870,8 @@
               res = { success: true };
             }
           } else if (msg.action === "generateListing") {
-            const key = msg.product?.sku || "item";
-            const slot = `listing:${msg.sheetId}:${key}`;
+            const key = /\/item\/(\d{6,})/.exec(msg.product?.link ?? "")?.[1] || "item";
+            const slot = `listing:${key}`;
             if (stubMode === "no-key") {
               res = { success: false, code: "nokey", error: "Add a Gemini key in the AI tab." };
             } else if (localStore[slot] && !msg.force) {
@@ -873,7 +886,7 @@
               res = { success: true, key, ...localStore[slot] };
             }
           } else if (msg.action === "saveListing") {
-            const slot = `listing:${msg.sheetId}:${msg.key}`;
+            const slot = `listing:${msg.key}`;
             if (!localStore[slot]) {
               res = { success: false, error: "That product has no saved listing. Create one first." };
             } else {

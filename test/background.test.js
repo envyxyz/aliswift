@@ -85,7 +85,7 @@ test("writes below the last keyword, quotes the tab, stores text as text", async
   });
   assert.equal(result.success, true);
   assert.equal(result.sku, undefined); // this sheet has no SKU column
-  assert.ok(decodeURIComponent(calls[0].url).endsWith("/values:batchGet?ranges='Joe''s Items'!B:B"));
+  assert.ok(decodeURIComponent(calls[0].url).endsWith("/values:batchGet?ranges='Joe''s Items'!B:B&ranges='Joe''s Items'!C:C")); // names, and links (no duplicates)
 
   const body = calls[1].body;
   assert.equal(body.valueInputOption, "RAW");
@@ -157,7 +157,7 @@ test("a sheet with a SKU column gets the next row and the SKU the template formu
   ]);
   const result = await appendRow(product);
   assert.deepEqual(result, { success: true, sku: "SKU-03" });
-  assert.ok(decodeURIComponent(calls[0].url).endsWith("ranges='Inventory'!A:A&ranges='Inventory'!B:B"));
+  assert.ok(decodeURIComponent(calls[0].url).includes("ranges='Inventory'!A:A&ranges='Inventory'!B:B"));
   const byRange = Object.fromEntries(calls[1].body.data.map((d) => [d.range, d.values[0][0]]));
   assert.deepEqual(byRange, {
     "'Inventory'!B5": "ring",
@@ -506,11 +506,18 @@ test("rates saved at the same moment all survive", async () => {
 
 /* Your data stays yours */
 
-test("no code the service worker loads can delete rows or clear cells", () => {
+test("no code the service worker loads can delete rows, and only Remove clears cells", () => {
   const forbidden = /deleteDimension|deleteRange|deleteSheet|:clear|values:clear|clearBasicFilter/;
   for (const file of ["background.js", "lib/shared.js", "lib/template.js"]) {
     assert.doesNotMatch(read(file), forbidden, file);
   }
+  // The one clear is Remove's, of the product's own row.
+  const src = read("background.js");
+  assert.equal(src.match(/batchClear/g).length, 1);
+  const at = src.indexOf("batchClear");
+  const from = src.indexOf("async function removeFromSheet");
+  assert.ok(at > from && at < src.indexOf("\n}\n", from));
+  for (const file of ["lib/shared.js", "lib/template.js"]) assert.doesNotMatch(read(file), /batchClear/, file);
 });
 
 /* Products, orders and the local library */
@@ -691,6 +698,57 @@ test("setStatus refuses a status shared by merged variant rows, a vanished produ
   assert.equal(noStatusColumn.calls.length, 0);
 });
 
+/* Inspector: priceLocks and updateProduct */
+
+test("updateProduct writes only the price sent, in the row it finds again, and reads the cell as typed first", async () => {
+  const t = setup(full, [...productReplies(), columns([1.5], [6]), { json: {} }]); // products (2), the price cells of row 4 (cost, sell), the write
+  const key = { sku: "SKU-02", row: 9, link: "https://a/2", title: "lamp" }; // the row hint is stale
+  assert.deepEqual(await ask(t.listener, { action: "updateProduct", sheetId: full.id, key, salePrice: "7.5" }, options), { success: true, salePrice: 7.5 });
+  assert.match(decoded(t.calls[2]), /valueRenderOption=FORMULA/);
+  assert.deepEqual(cellsOf(t.calls[3]), { "'Inventory'!E4": 7.5 });
+  assertNothingDestroyed(t.calls);
+});
+
+test("updateProduct never writes over a formula, a bad number, or a product that has gone", async () => {
+  const formula = setup(full, [...productReplies(), columns([1.5], ["=D4*3"])]);
+  const key = { sku: "SKU-02", row: 4, link: "https://a/2", title: "lamp" };
+  const locked = await ask(formula.listener, { action: "updateProduct", sheetId: full.id, key, salePrice: 9 }, options);
+  assert.equal(locked.code, "formula");
+  assert.equal(formula.calls.length, 3, "nothing was written");
+  // The cost is not a formula, so it can still be changed in the same row.
+  const cost = setup(full, [...productReplies(), columns([1.5], ["=D4*3"]), { json: {} }]);
+  assert.equal((await ask(cost.listener, { action: "updateProduct", sheetId: full.id, key, price: 2 }, options)).success, true);
+  assert.deepEqual(cellsOf(cost.calls[3]), { "'Inventory'!D4": 2 });
+
+  const bad = setup(full, []);
+  for (const price of ["", "abc", -1, null, 2e9]) {
+    assert.equal((await ask(bad.listener, { action: "updateProduct", sheetId: full.id, key, price }, options)).success, false, String(price));
+  }
+  assert.equal((await ask(bad.listener, { action: "updateProduct", sheetId: full.id, key }, options)).success, false); // no price named
+  assert.equal(bad.calls.length, 0);
+
+  const gone = setup(full, productReplies());
+  const missing = await ask(gone.listener, { action: "updateProduct", sheetId: full.id, key: { sku: "SKU-99", row: 3, link: "https://a/1", title: "ring" }, price: 2 }, options);
+  assert.equal(missing.code, "gone");
+  assert.equal(gone.calls.length, 2);
+});
+
+test("updateProduct changes the library's own prices, and priceLocks finds the formula cells of a sheet row", async () => {
+  const t = setup(full, [], { tokens: [null] });
+  await t.appendRow({ ...product, dest: "local", price: "3.00" });
+  const sellBefore = t.store.library[0].salePrice;
+  const mine = await ask(t.listener, { action: "updateProduct", sheetId: "local", key: { sku: "L-01" }, price: "4.25" }, options);
+  assert.deepEqual(mine, { success: true, price: 4.25 });
+  assert.equal(t.store.library[0].price, 4.25);
+  assert.equal(t.store.library[0].salePrice, sellBefore); // the sell price was not sent, so it stays
+  assert.deepEqual(await ask(t.listener, { action: "priceLocks", sheetId: "local", row: 1 }, options), { success: true, locked: [] });
+  assert.equal(t.calls.length, 0);
+
+  const sheet = setup(full, [columns([2], ["=D3*1.7"])]);
+  assert.deepEqual(await ask(sheet.listener, { action: "priceLocks", sheetId: full.id, row: 3 }, options), { success: true, locked: ["salePrice"] });
+  assert.equal((await ask(sheet.listener, { action: "priceLocks", sheetId: full.id, row: 3 }, page)).success, false); // a web page may not ask
+});
+
 test("setStatus on a library product edits the record; removing it keeps the record", async () => {
   const t = setup(full, [], { tokens: [null] });
   await t.appendRow({ ...product, dest: "local" });
@@ -848,7 +906,7 @@ const sheetNow = (existing = [["SKU-01", "old", "https://a/9"]]) => ({
 
 test("moveLocal moves the library with one read and one write, skips what is already in the sheet, and leaves removed ones", async () => {
   const library = [rec(1), rec(2), rec(3, { title: "old", link: "https://a/9" }), rec(4, { status: "Discontinued" })];
-  const t = setup(full, [sheetNow(), { json: {} }], { local: { library, "listing:local:L-01": { text: "a listing" } } });
+  const t = setup(full, [sheetNow(), { json: {} }], { local: { library } });
   const reply = await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options);
   assert.deepEqual(reply, { success: true, moved: 2, skipped: 1, needRate: 0 });
   assert.equal(t.calls.length, 2);
@@ -858,9 +916,6 @@ test("moveLocal moves the library with one read and one write, skips what is alr
   );
   assert.equal(cellsOf(t.calls[1])["'Inventory'!D4"], 2);
   assert.deepEqual(t.store.library.map((x) => x.id), ["id4"]); // the removed one stays on the device
-  // The generated listing follows its product to the sheet's key.
-  assert.deepEqual(plain(t.store[`listing:${full.id}:SKU-02`]), { text: "a listing" });
-  assert.equal("listing:local:L-01" in t.store, false);
   assertNothingDestroyed(t.calls);
 });
 
@@ -890,7 +945,7 @@ test("moveLocal converts other currencies with the same rate lookup as a save, a
 test("a failed move leaves the library exactly as it was", async () => {
   const library = [rec(1), rec(2)];
   const failed = setup(full, [sheetNow(), { status: 500, json: { error: { message: "Backend error" } } }], { local: { library } });
-  assert.deepEqual(await ask(failed.listener, { action: "moveLocal", sheetId: full.id }, options), { success: false, error: "Backend error" });
+  assert.deepEqual(await ask(failed.listener, { action: "moveLocal", sheetId: full.id }, options), { success: false, error: "Backend error", code: "sheet-error" });
   assert.deepEqual(plain(failed.store.library), library);
 
   const signedOut = setup(full, [], { local: { library }, tokens: [null] });
@@ -988,9 +1043,10 @@ test("a page-button library save keeps the price as shown: cost is price plus sh
     },
     document: { querySelector: (sel) => dom[sel] ?? null, getElementById: () => null, addEventListener() {}, cookie: "", documentElement: { lang: "en" } },
     location: { href: "https://www.aliexpress.com/item/1.html" },
-    setInterval: () => 0, clearInterval() {}, clearTimeout, setTimeout, URL, console,
+    addEventListener() {}, setInterval: () => 0, clearInterval() {}, clearTimeout, setTimeout, URL, console,
   });
   vm.runInContext(read("lib/shared.js"), ctx);
+  vm.runInContext(read("lib/errors.js"), ctx);
   vm.runInContext(read("content.js"), ctx);
   const scrape = (dest) => ask(listener, { action: "scrape", dest }, "");
   const local = await scrape("local");
@@ -1049,7 +1105,7 @@ test("each page asks for its own things: orders only from Seller Hub's list, sav
   assert.equal((await ask(t.listener, { action: "importOrders", orders: [] }, "https://www.ebay.de/sh/ord/details?orderid=1")).success, true); // any of the sites in REGIONS
 
   // The eBay pages never save a product, ask a rate or create a listing; a product page and AliSwift's pages may.
-  for (const request of [{ action: "appendToSheet", data: {} }, { action: "rate", data: {} }, { action: "quickList", data: {} }]) {
+  for (const request of [{ action: "appendToSheet", data: {} }, { action: "rate", data: {} }, { action: "inSheet" }, { action: "removeCheck" }, { action: "removeFromSheet" }]) {
     for (const url of [listingForm, ordersPage, "https://www.aliexpress.com.evil.example/item/1.html", "http://www.aliexpress.com/item/1.html"]) {
       assert.deepEqual(await ask(t.listener, request, url), denied, `${request.action} from ${url}`);
     }

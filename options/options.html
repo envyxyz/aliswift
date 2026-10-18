@@ -66,6 +66,7 @@
             <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
             <h3>No sheets yet</h3>
             <p>Let AliSwift create a ready-made Google Sheet for you, or connect one you already have.</p>
+            <p class="note">AliSwift sends error reports (no product content) so bugs get fixed. Turn them off in General.</p>
             <div class="empty-actions">
               <button id="emptyAddBtn" class="btn" type="button">Create a sheet</button>
               <button id="gsOpenEmpty" class="btn btn-quiet" type="button" aria-haspopup="dialog">Import from Google Sheets</button>
@@ -118,6 +119,26 @@
             <label class="inline"><input type="checkbox" name="includeSalePrice" /> Add the sell price to the sheet</label>
             <label class="inline"><input type="checkbox" name="roundToNinetyNine" /> Round sell price to .99 (4.77 becomes 4.99)</label>
           </div>
+
+          <div class="group">
+            <div class="title-row">
+              <h2>eBay fees</h2>
+              <button type="button" class="info" aria-label="About eBay fees" aria-describedby="tip-fees">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+              </button>
+              <span id="tip-fees" role="tooltip" class="tip">Used only for the profit in the dashboard's Inspect view: sell price x percentage, plus the fixed fee. The starting figures are eBay US's for most categories. Check your own marketplace's fee table and change them here.</span>
+            </div>
+            <div class="fee-row">
+              <div class="field-narrow">
+                <label for="feePercent">Percentage (%)</label>
+                <input id="feePercent" name="feePercent" type="number" min="0" max="100" step="any" required />
+              </div>
+              <div class="field-narrow">
+                <label for="feeFixed">Fixed fee per order</label>
+                <input id="feeFixed" name="feeFixed" type="number" min="0" step="0.01" required />
+              </div>
+            </div>
+          </div>
         </form>
       </div>
 
@@ -150,32 +171,47 @@
       </div>
 
       <div role="tabpanel" id="panel-ai" aria-labelledby="tab-ai" class="panel" hidden>
-        <form id="keyForm">
-          <div class="group">
-            <div class="title-row">
-              <h2 id="h-key">Gemini key</h2>
-              <button type="button" class="info" aria-label="About the Gemini key" aria-describedby="tip-key">
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
-              </button>
-              <span id="tip-key" role="tooltip" class="tip">Used for AI features such as writing listings and mapping an imported sheet. The key stays on this device. It isn't synced or exported, and it is sent only to Google's Gemini API, with the product details and photos of each listing you write.</span>
-            </div>
-            <div class="input-row">
-              <input id="geminiKey" type="password" aria-labelledby="h-key" required maxlength="200" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" />
-              <button type="submit" class="btn" id="keySave">Save key</button>
-            </div>
-            <p id="keyState" class="muted" role="status"></p>
-          </div>
-        </form>
-
         <div class="group">
           <div class="title-row">
-            <h2 id="h-model">Model</h2>
-            <button type="button" class="info" aria-label="About the model" aria-describedby="tip-model">
+            <h2 id="h-key">AI keys</h2>
+            <button type="button" class="info" aria-label="About AI keys" aria-describedby="tip-key">
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
             </button>
-            <span id="tip-model" role="tooltip" class="tip">The Gemini model that writes your listings. Change it only if Google retires the default.</span>
+            <span id="tip-key" role="tooltip" class="tip">Used for writing listings, filling item specifics and mapping an imported sheet. Free keys are used first, top to bottom; a Paid key takes over the moment every free key is busy. Keys stay on this device. They aren't synced or exported, and each is sent only to its own provider.</span>
           </div>
-          <input id="aiModel" aria-labelledby="h-model" maxlength="100" placeholder="gemini-3.8-flash" autocomplete="off" spellcheck="false" />
+          <ul id="keyList" class="key-list" aria-labelledby="h-key"></ul>
+          <p id="keyState" class="muted" role="status"></p>
+          <form id="keyForm" class="key-form">
+            <div class="fields-row">
+              <select id="keyProvider" aria-label="Provider">
+                <option value="gemini">Gemini</option>
+                <option value="groq">Groq</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+              <select id="keyPaid" aria-label="Free or paid">
+                <option value="free">Free</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+            <div class="input-row">
+              <input id="keyInput" type="password" aria-label="API key" required maxlength="200" placeholder="Paste an API key" autocomplete="off" spellcheck="false" />
+              <button type="button" class="btn btn-quiet" id="keyCheck">Check</button>
+            </div>
+            <div class="input-row" id="keyModelRow" hidden>
+              <select id="keyModel" aria-label="Model"></select>
+              <button type="submit" class="btn" id="keySave">Add key</button>
+            </div>
+          </form>
+          <details class="disclosure" id="keyGuide">
+            <summary>Get API keys</summary>
+            <div class="note">
+              <p><strong>Gemini</strong> (Google): reads photos, the default. Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. More keys from the same Google Cloud project share one limit and add nothing: use a different project, or better, a different Google account.</p>
+              <p><strong>Groq</strong>: very fast, text only, with a free plan; its limits are per account, not per key. Get a key at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a>.</p>
+              <p><strong>OpenRouter</strong>: one key for many models, free and paid, text only. Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai</a>. A Free key lists the free models only, and only models that can answer in JSON are offered. Free models allow about 50 requests a day until you have bought $10 of credit; a busy free model makes AliSwift move on to your next key.</p>
+              <p>Check the free limits on each provider's page. Using several accounts to get past a provider's limits may break its terms: check them first.</p>
+            </div>
+          </details>
+          <label class="inline"><input id="aiPhotos" type="checkbox" /> Send product photos to the AI (Gemini keys only; slower)</label>
         </div>
 
         <div class="group">
@@ -199,11 +235,19 @@
             <button type="button" class="info" aria-label="About the page button" aria-describedby="tip-general">
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
             </button>
-            <span id="tip-general" role="tooltip" class="tip">Shows or hides the Add to Sheet button on AliExpress product pages, and chooses whether Create Listing also brings the product's photos to eBay.</span>
+            <span id="tip-general" role="tooltip" class="tip">Shows or hides the Add to Sheet button on AliExpress product pages, and chooses whether the eBay panel also brings the product's photos to eBay's form.</span>
           </div>
           <label class="inline"><input id="showPageButton" type="checkbox" /> Show the Add to Sheet button on AliExpress pages</label>
           <label class="inline"><input id="includeImages" type="checkbox" /> Allow photo downloads &amp; include images when creating listings</label>
           <p id="imagesNote" class="note" role="status"></p>
+        </div>
+        <div class="group" id="diag">
+          <div class="title-row">
+            <h2>Error reports</h2>
+          </div>
+          <label class="inline"><input id="diagOn" type="checkbox" /> Send error reports (errors and timing, no product content)</label>
+          <label class="inline"><input id="diagContent" type="checkbox" /> Include prompts and answers (helps fix a wrong listing)</label>
+          <p class="note"><a href="https://github.com/envyxyz/aliswift/blob/main/PRIVACY.md#error-reports" target="_blank" rel="noopener">What's sent</a>. Never your keys, sign-in, sheet names, orders or cost prices.</p>
         </div>
         <div class="group" role="group" aria-labelledby="h-backup">
           <div class="title-row">
@@ -211,7 +255,7 @@
             <button type="button" class="info" aria-label="About settings backup" aria-describedby="tip-backup">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-            <span id="tip-backup" role="tooltip" class="tip">Export saves your sheets and settings to a file. Import loads that file here, for example on a new computer. Your Gemini key and saved product data are not included.</span>
+            <span id="tip-backup" role="tooltip" class="tip">Export saves your sheets and settings to a file. Import loads that file here, for example on a new computer. Your AI keys and saved product data are not included.</span>
           </div>
           <div class="actions backup-actions">
             <button type="button" class="btn btn-quiet" id="exportBtn">Export settings</button>
@@ -298,6 +342,7 @@
                   <label for="edit-skuPrefix">SKU prefix</label>
                   <input id="edit-skuPrefix" name="skuPrefix" class="prefix" maxlength="8" placeholder="SKU-" autocomplete="off" />
                 </div>
+                <label class="inline"><input type="checkbox" name="skuFormula" /> The SKU column holds my sheet's own formula: read it, never write it</label>
               </div>
             </details>
           </div>
@@ -439,7 +484,7 @@
                 <button type="button" class="info" aria-label="About AI matching" aria-describedby="tip-gs-ai">
                   <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
                 </button>
-                <span id="tip-gs-ai" role="tooltip" class="tip">AI saw your tab names, column titles and up to 3 sample rows per tab. AliSwift tries to leave out columns that look personal (names, addresses, emails, notes) and sends sample values only for columns it recognises. It used your own Gemini key.</span>
+                <span id="tip-gs-ai" role="tooltip" class="tip">AI saw your tab names, column titles and up to 3 sample rows per tab. AliSwift tries to leave out columns that look personal (names, addresses, emails, notes) and sends sample values only for columns it recognises. It used your own AI key.</span>
               </span>
               <span id="gsReason" class="note" hidden></span>
               <button type="button" class="link-btn" id="gsRetryAi" hidden>Try AI again</button>
@@ -553,7 +598,7 @@
         <div class="dialog-head"><h2 id="impTitle">Import settings</h2></div>
         <div class="dialog-body">
           <p><strong id="impQ"></strong></p>
-          <p id="impWhy" class="muted">Other settings in the file replace yours too. Your Gemini key isn't affected.</p>
+          <p id="impWhy" class="muted">Other settings in the file replace yours too. Your AI keys aren't affected.</p>
         </div>
         <div class="dialog-foot">
           <div class="actions">
@@ -569,6 +614,7 @@
     <script src="../lib/shared.js"></script>
     <script src="../lib/importmap.js"></script>
     <script src="../lib/listing.js"></script>
+    <script src="../lib/ai.js"></script>
     <script src="../lib/ui.js"></script>
     <script src="options.js"></script>
   </body>

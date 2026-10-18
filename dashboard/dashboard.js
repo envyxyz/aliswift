@@ -1,6 +1,6 @@
-// AliSwift dashboard: the Products and Orders views, and the listing dialog.
-// Plain JavaScript, no build step, no dependencies. Loaded after lib/shared.js and lib/ui.js, which provide
-// the helpers used here: httpsUrl, formatDate, formatCurrency, marginTone, createStaleGuard, toast, liveSay, copyText.
+// AliSwift dashboard: the Products and Orders views, and the product inspector.
+// Plain JavaScript, no build step, no dependencies. Loaded after lib/shared.js, lib/ui.js and lib/errors.js, which provide
+// the helpers used here: httpsUrl, errorView, formatDate, formatCurrency, marginTone, createStaleGuard, toast, liveSay, copyText.
 // Tests (Node) load this file after putting lib/shared.js's exports on globalThis; see test/dashboard.test.js.
 
 // Helper: returns true if the current view supports status column operations
@@ -60,11 +60,10 @@ function orderEditPatch(initial, current) {
 // Pure helper: the status Undo writes back. A blank old status is shown as Pending, and "" is never sent.
 const undoOrderStatus = (oldStatus) => (ORDER_STATUSES.includes(oldStatus) ? oldStatus : "Pending");
 
-// The key a product's listing is kept under: its SKU, or the AliExpress item number when it has none.
+// The key a product's listing is kept under: its AliExpress item number.
 // The same rule as listingKey in background.js, which files the listing.
 function listingKeyOf(product) {
-  const sku = String(product?.sku ?? "").trim().slice(0, 40);
-  return sku || /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(product?.link ?? ""))?.[1] || "";
+  return /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(product?.link ?? ""))?.[1] || "";
 }
 
 // What the listing writer is given about a product: its name, link, photo and sell price, never the cost price.
@@ -73,18 +72,12 @@ function listingProductOf(product) {
   return { sku, title, link, salePrice, image, currency };
 }
 
-// What a failed generateListing reply means to the dialog: the sentence, the detail, whether Try again makes
-// sense, and whether the Settings AI tab is the fix. The detail is cut to 140 characters.
-function listingError(res) {
-  const detail = String(res?.error ?? "").slice(0, 140);
-  const generic = { message: "Couldn't write the listing.", detail, retry: true, settings: false };
-  if (res?.code === "nokey") return { message: "Add your Gemini key to write listings.", detail: "Paste a key in Settings, on the AI tab.", retry: false, settings: true };
-  if (res?.code === "invalid-key") return { message: "That key didn't work.", detail: "Check it in Settings, on the AI tab.", retry: false, settings: true };
-  if (res?.status === 404) return { message: "Couldn't write the listing.", detail: `The model “${String(res.model ?? "").slice(0, 60)}” isn't available. Check it in Settings, AI.`, retry: false, settings: true };
-  if (res?.code === "rate") return { message: "Gemini says you've reached its limit for now.", detail: "Wait a minute, then try again.", retry: true, settings: false };
-  if (res?.code === "timeout") return { ...generic, detail: "It took too long to answer." };
-  if (res?.code === "network") return { ...generic, detail: "Couldn't reach Gemini. Check your connection." };
-  return generic;
+// A failed reply as the inspector shows it: lib/errors.js's sentence for its code (the worker's own sentence when the
+// reply has no code), and whether Try again makes sense and whether Settings is the fix. `step` is write or save.
+function failView(res, step) {
+  const view = errorView({ step, ...res });
+  const text = !res?.code && res?.error ? String(res.error).slice(0, 140) : view.text;
+  return { text, retry: view.buttons.includes("retry"), settings: view.buttons.some((b) => b === "settings" || b === "keys") };
 }
 
 // The listing score's band: 75 and up Strong, 50 to 74 Fair, below Weak. null when the model gave no score.
@@ -250,7 +243,8 @@ let sheets = [];
 let activeSheet = null;
 let currentProducts = [];
 let currentOrders = [];
-let listingsCache = {}; // listing:<sheetId>:<key> records of the products on screen, by key
+let listingsCache = {}; // listing:<key> records of the products on screen, by key
+let queuedListings = {}; // the background queue's jobs (aiQueue in background.js), by key
 const listingJobs = new Map(); // "<sheetId>:<key>" -> the generateListing request in flight
 let isLibraryMode = false;
 let authSignedIn = true;
@@ -736,6 +730,23 @@ function renderProducts() {
   updateCountAnnouncements();
 }
 
+// The card's price: the sell price. A library save has none (the sheet prices it when it is moved), so its saved price is
+// shown instead, marked as the cost it is; a sheet's blank sell price stays "-" and never shows the cost.
+function fillPriceRow(row, product, currencyCode) {
+  const hasSell = product.salePrice !== null && product.salePrice !== undefined && product.salePrice !== "";
+  const shown = hasSell ? product.salePrice : isLibraryMode ? product.price : null;
+  const priceSpan = document.createElement("span");
+  priceSpan.className = hasSell ? "price" : "price muted";
+  priceSpan.textContent = formatCurrency(shown, product.currency || currencyCode, { display: product.currency ? "code" : "symbol" });
+  row.replaceChildren(priceSpan);
+  if (!hasSell && shown != null && shown !== "") {
+    const costNote = document.createElement("span");
+    costNote.className = "note";
+    costNote.textContent = "cost";
+    row.append(costNote);
+  }
+}
+
 // Create a single Product Card element
 function createProductCard(product, { currencyCode = "", isRemovedView = false }) {
   const card = document.createElement("article");
@@ -968,24 +979,10 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
   name.textContent = product.title || "Untitled Product";
   body.append(name);
 
-  // Price & Margin row
+  // Price row
   const priceRow = document.createElement("div");
   priceRow.className = "card-price";
-
-  // The sell price. A library save has none (the sheet prices it when it is moved), so its saved price is
-  // shown instead, marked as the cost it is; a sheet's blank sell price stays "-" and never shows the cost.
-  const hasSell = product.salePrice !== null && product.salePrice !== undefined && product.salePrice !== "";
-  const shown = hasSell ? product.salePrice : isLibraryMode ? product.price : null;
-  const priceSpan = document.createElement("span");
-  priceSpan.className = hasSell ? "price" : "price muted";
-  priceSpan.textContent = formatCurrency(shown, product.currency || currencyCode, { display: product.currency ? "code" : "symbol" });
-  priceRow.append(priceSpan);
-  if (!hasSell && shown != null && shown !== "") {
-    const costNote = document.createElement("span");
-    costNote.className = "note";
-    costNote.textContent = "cost";
-    priceRow.append(costNote);
-  }
+  fillPriceRow(priceRow, product, currencyCode);
 
   body.append(priceRow);
   card.append(body);
@@ -1013,7 +1010,7 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     actions.append(viewBtn);
   }
 
-  // Primary action: Restore (in Removed view) or Create listing
+  // Primary action: Restore (in Removed view) or the listing button
   if (isRemovedView) {
     const restoreBtn = document.createElement("button");
     restoreBtn.type = "button";
@@ -1026,11 +1023,23 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     createBtn.type = "button";
     createBtn.dataset.lkey = listingKeyOf(product);
     createBtn.setAttribute("aria-haspopup", "dialog");
-    // A kept listing opens in the dialog; otherwise the product goes to eBay as a draft, where the panel writes its listing.
-    createBtn.addEventListener("click", () => (listingsCache[createBtn.dataset.lkey] || listingJobs.has(`${currentSheetId()}:${createBtn.dataset.lkey}`) ? openListing(product) : listOnEbayFromCard(product)));
+    // A kept listing opens in the inspector; otherwise the product goes to eBay as a draft, where the panel writes its listing.
+    // A queued or failed one opens the inspector too, on its Listing section.
+    createBtn.addEventListener("click", () => (listingsCache[createBtn.dataset.lkey] || queuedListings[createBtn.dataset.lkey] || listingJobs.has(`${currentSheetId()}:${createBtn.dataset.lkey}`) ? openInspector(product, createBtn) : listOnEbayFromCard(product)));
     setListingButton(createBtn);
     actions.append(createBtn);
   }
+
+  // Inspect: the eye opens the inspector (numbers, then listing).
+  const eyeBtn = document.createElement("button");
+  eyeBtn.type = "button";
+  eyeBtn.className = "icon-btn card-eye";
+  eyeBtn.setAttribute("aria-label", `Inspect ${product.sku || product.title}`);
+  eyeBtn.setAttribute("aria-haspopup", "dialog");
+  eyeBtn.title = "Inspect";
+  eyeBtn.append(createSvgPath("18", "18", "M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"));
+  eyeBtn.addEventListener("click", () => openInspector(product, eyeBtn));
+  actions.append(eyeBtn);
 
   card.append(actions);
   return card;
@@ -2479,42 +2488,46 @@ function setupDialogForms() {
   setupOrderForm();
   setupAddOrderForm();
   setupMoveForm();
-  setupListingDialog();
+  setupInspector();
   setupDeleteDialog();
 }
 
 /* ==========================================================================
-   Listing dialog. One listing per product, written by Gemini in the service worker (generateListing) and kept
-   in storage.local; the title and description can be edited here (saveListing). Text only ever goes in with
-   textContent or .value.
+   Inspector. One product's numbers (cost and sell price, editable; fees, profit and margin follow as you type) and its
+   listing, written by the AI in the service worker (generateListing) and kept in storage.local; the title and
+   description can be edited here (saveListing). Text only ever goes in with textContent or .value.
    ========================================================================== */
 
 const COPY_PATH = "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
 const CHECK_PATH = "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
 const WARN_PATH = "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z";
 
-// What the dialog is showing: the product, the sheet it belongs to, its kept listing, and which opening this is
-// (a reply that comes back to an older opening only updates the cards).
-const ls = { session: 0, product: null, sheetId: "", key: "", record: null, rendered: null, timer: 0 };
+// What the inspector is showing: the product, the sheet it belongs to, its kept listing, the prices last saved, the
+// button that opened it, and which opening this is (a reply that comes back to an older opening only updates the cards).
+const ls = { session: 0, product: null, sheetId: "", key: "", record: null, rendered: null, timer: 0, prices: {}, opener: null };
 const lsEl = (id) => document.getElementById(id);
 const lsLabel = (product) => product?.sku || String(product?.title ?? "").slice(0, 32) || "product";
 
-// The kept listings of `products`: { key: record }. Only the keys asked for are read.
+// The kept listings of `products`: { key: record }. Only the keys asked for are read. Also refreshes queuedListings.
 async function loadListings(sheetId, products) {
   if (typeof chrome === "undefined" || !chrome.storage?.local) return {};
-  const prefix = `listing:${sheetId}:`;
+  const prefix = "listing:";
   const slots = Object.fromEntries(products.map(listingKeyOf).filter(Boolean).map((key) => [prefix + key, null]));
-  const found = await chrome.storage.local.get(slots).catch(() => ({}));
+  const found = await chrome.storage.local.get({ ...slots, aiQueue: [] }).catch(() => ({}));
+  queuedListings = Object.fromEntries((found.aiQueue ?? []).map((job) => [job.itemId, job]));
+  delete found.aiQueue;
   return Object.fromEntries(Object.entries(found).filter(([, record]) => record).map(([slot, record]) => [slot.slice(prefix.length), record]));
 }
 
-// A card's listing button: "Create listing" while there is none, "Generating..." while one is being written,
-// "View listing" once there is one. The calmer look once the action is no longer needed.
+// A card's listing button: "List on eBay" while there is none, "Writing listing..." while the queue has it or one is
+// being written here, "Retry listing" when the queue gave up, "View listing" once there is one. The calmer look once
+// the action is no longer needed.
 function setListingButton(btn) {
   const key = btn.dataset.lkey;
-  const state = listingJobs.has(`${currentSheetId()}:${key}`) ? "busy" : listingsCache[key] ? "view" : "create";
-  btn.textContent = { busy: "Generating...", view: "View listing", create: "List on eBay" }[state];
-  btn.className = state === "create" ? "btn btn-sm" : "btn btn-quiet btn-sm";
+  const job = queuedListings[key];
+  const state = listingJobs.has(`${currentSheetId()}:${key}`) ? "busy" : listingsCache[key] ? "view" : job ? (job.failed ? "failed" : "busy") : "create";
+  btn.textContent = { busy: "Writing listing...", view: "View listing", failed: "Retry listing", create: "List on eBay" }[state];
+  btn.className = state === "create" || state === "failed" ? "btn btn-sm" : "btn btn-quiet btn-sm";
 }
 
 function syncListingButtons() {
@@ -2550,6 +2563,7 @@ function copyRow(label, value, copyLabel, text) {
 function setListingBusy(on) {
   clearTimeout(ls.timer);
   lsEl("lsBusy").hidden = !on;
+  if (on) lsEl("lsNone").hidden = true;
   lsEl("lsBusyMsg").textContent = ls.record ? "Writing a new version..." : "Writing your listing...";
   if (on) {
     lsEl("lsError").hidden = true;
@@ -2557,7 +2571,7 @@ function setListingBusy(on) {
   }
   lsEl("lsContent").inert = on;
   const regen = lsEl("lsRegen");
-  regen.textContent = on && ls.record ? "Regenerating..." : "Regenerate";
+  regen.textContent = on && ls.record ? "Rewriting..." : "Rewrite listing";
   if (on) regen.dataset.state = "loading";
   else delete regen.dataset.state;
   regen.setAttribute("aria-disabled", String(on));
@@ -2568,15 +2582,24 @@ function syncListingFooter() {
   lsEl("lsRegen").hidden = lsEl("lsCopyAll").hidden = lsEl("lsEbay").hidden = !ls.record;
 }
 
-function showListingError({ message, detail, retry, settings }) {
+function showListingError({ text, retry, settings }) {
   setListingBusy(false);
+  lsEl("lsNone").hidden = true;
   lsEl("lsError").hidden = false;
-  lsEl("lsErrorMsg").textContent = message;
-  lsEl("lsErrorDetail").textContent = detail;
-  lsEl("lsErrorDetail").hidden = !detail;
+  lsEl("lsErrorMsg").textContent = text;
   lsEl("lsRetry").hidden = !retry;
   lsEl("lsSettings").hidden = !settings;
   lsEl("lsContent").hidden = !ls.record;
+  syncListingFooter();
+}
+
+// No listing and nothing running: what the queue says about this product, and a button that writes it now.
+function showNoListing() {
+  const job = queuedListings[ls.key];
+  lsEl("lsNoneMsg").textContent = job?.failed ? "The queue gave up on this listing after several tries." : job ? "Waiting in the queue. It writes itself a few minutes after you add a product." : "No listing yet.";
+  lsEl("lsWrite").textContent = job?.failed ? "Try again" : "Write now";
+  lsEl("lsNone").hidden = false;
+  lsEl("lsContent").hidden = true;
   syncListingFooter();
 }
 
@@ -2591,6 +2614,7 @@ function renderListing() {
   const { listing, limited, warnings } = ls.record;
   setListingBusy(false);
   lsEl("lsError").hidden = true;
+  lsEl("lsNone").hidden = true;
   lsEl("lsLimited").hidden = !limited;
   const notes = (warnings ?? []).filter(Boolean);
   lsEl("lsWarn").hidden = !notes.length;
@@ -2709,7 +2733,7 @@ async function generateListing(force) {
   syncListingButtons();
   const res = await listingJobs.get(id);
 
-  const dlg = lsEl("listingDialog");
+  const dlg = lsEl("inspector");
   const shown = dlg.open && ls.key === key && ls.sheetId === sheetId;
   const mine = shown && session === ls.session;
   if (res.success) {
@@ -2722,70 +2746,186 @@ async function generateListing(force) {
       liveSay(`Listing for ${lsLabel(product)} is ready.`);
     } else if (!shown) {
       toast(`Listing ready for ${lsLabel(product)}.`, {
-        action: { label: "View listing", onClick: () => openListing(product) },
+        action: { label: "View listing", onClick: () => openInspector(product) },
       });
     }
     return;
   }
   syncListingButtons();
-  if (mine) showListingError(listingError(res));
+  if (mine) showListingError(failView(res, "write"));
   else if (!shown) {
-    const { message, detail } = listingError(res);
-    toast(message, { kind: "error", detail, action: { label: "Open", onClick: () => openListing(product) } });
+    toast(failView(res, "write").text, { kind: "error", action: { label: "Open", onClick: () => openInspector(product) } });
   }
 }
 
-// A card's "List on eBay": the product becomes a Draft and eBay's listing start page opens. Its listing is written there, by
-// the AliSwift panel, when the seller presses Create listing.
+// A card's "List on eBay": the product becomes a Draft and eBay's listing start page opens. The AliSwift panel there offers
+// the product (its listing is written first if the queue hasn't yet).
 async function listOnEbayFromCard(product) {
   const res = await sendMessage({ action: "listOnEbay", sheetId: currentSheetId(), key: listingKeyOf(product), product: listingProductOf(product), status: product.status });
   if (!res.success) return toast("Couldn't open eBay.", { kind: "error", detail: res.error });
-  toast("Opened eBay.", { kind: "neutral", detail: "Choose it in the AliSwift panel and press Create listing." });
+  toast("Opened eBay.", { kind: "neutral", detail: "Choose it in the AliSwift panel and press Fill form." });
   loadProductsData();
 }
 
-function openListing(product) {
-  const dlg = lsEl("listingDialog");
+// Opens the inspector on `product`. `opener` is the button that asked, which gets the focus back on close.
+function openInspector(product, opener = null) {
+  const dlg = lsEl("inspector");
   const key = listingKeyOf(product);
   const sheetId = currentSheetId();
-  Object.assign(ls, { session: ls.session + 1, product, sheetId, key, record: listingsCache[key] ?? null, rendered: null });
-  lsEl("lsTitle").textContent = `Listing for ${product.sku || "this product"}`;
-  lsEl("lsSub").textContent = product.title || "";
+  Object.assign(ls, { session: ls.session + 1, product, sheetId, key, record: listingsCache[key] ?? null, rendered: null, opener, prices: { price: product.price, salePrice: product.salePrice } });
+
+  lsEl("insTitle").textContent = product.title || "Untitled product";
+  lsEl("insSku").textContent = product.sku || "";
+  const status = lsEl("insStatus");
+  status.hidden = !product.status || !sheetHasStatus();
+  status.textContent = product.status || "";
+  status.dataset.tone = getStatusTone(product.status);
+  const link = httpsUrl(product.link);
+  lsEl("insLink").hidden = !link;
+  if (link) lsEl("insLink").href = link;
+  const photo = lsEl("insPhoto");
+  const src = httpsUrl(product.image);
+  photo.hidden = !src;
+  photo.replaceChildren();
+  if (src) photo.append(Object.assign(new Image(), { src, alt: "", referrerPolicy: "no-referrer" }));
+  renderNumbers();
+  if (sheetId !== "local" && !product.locked) loadLocks(product, ls.session);
+
   lsEl("lsConfirm").hidden = true;
   lsEl("lsActions").hidden = false;
-  lsEl("lsContent").hidden = true;
-  lsEl("lsError").hidden = true;
-  lsEl("lsLimited").hidden = true;
-  lsEl("lsWarn").hidden = true;
-  lsEl("lsBusy").hidden = true;
+  for (const id of ["lsContent", "lsError", "lsNone", "lsLimited", "lsWarn", "lsBusy"]) lsEl(id).hidden = true;
   syncListingFooter();
   dlg.showModal();
 
   if (!key) {
-    showListingError({ message: "This product has no SKU or AliExpress link to keep a listing under.", detail: "", retry: false, settings: false });
-  } else if (listingJobs.has(`${sheetId}:${key}`) || !ls.record) {
-    generateListing(false); // joins a running request, or writes the first one
-  } else {
+    showListingError({ text: "This product has no AliExpress link to keep a listing under.", retry: false, settings: false });
+  } else if (listingJobs.has(`${sheetId}:${key}`)) {
+    generateListing(false); // joins the running request
+  } else if (ls.record) {
     renderListing();
-    lsEl("lsTitleIn").focus();
+  } else {
+    showNoListing();
   }
 }
 
-function setupListingDialog() {
-  const dlg = lsEl("listingDialog");
+// The two prices and what follows from them. The library has a cost only: its sell price is set by the sheet it is moved to.
+function renderNumbers() {
+  const { product, sheetId } = ls;
+  const lib = sheetId === "local";
+  const code = product.currency || getSheetCurrency();
+  const field = (id, label, value) => {
+    lsEl(id).value = value ?? "";
+    lsEl(`${id}Label`).textContent = code ? `${label} (${code})` : label;
+  };
+  field("insCost", lib ? "Cost" : "Cost with shipping", product.price);
+  field("insSell", "Sell price", product.salePrice);
+  applyLocks();
+  lsEl("insSellBox").hidden = lsEl("insSum").hidden = lsEl("insFeeNote").hidden = lib;
+  const sheet = feeSheet();
+  lsEl("insFeeNote").textContent = `eBay fees: ${sheet.feePercent}% + ${sheet.feeFixed.toFixed(2)} per order. Change them in Settings, Pricing.`;
+  updateSum();
+}
+
+// A price that a sheet formula sets is read-only and says so.
+function applyLocks() {
+  const locked = ls.product.locked ?? [];
+  for (const [field, id] of [["price", "insCost"], ["salePrice", "insSell"]]) {
+    lsEl(id).readOnly = locked.includes(field);
+    lsEl(`${id}Note`).hidden = !locked.includes(field);
+  }
+}
+
+// Asks the worker which of the product's price cells hold a formula, once per product. If it can't tell, updateProduct
+// still refuses a formula cell when a price is saved.
+async function loadLocks(product, session) {
+  const res = await sendMessage({ action: "priceLocks", sheetId: ls.sheetId, row: product.row });
+  if (!res.success) return;
+  product.locked = res.locked;
+  if (session === ls.session) applyLocks();
+}
+
+// Fees come from the active sheet's settings; a sheet saved before they existed uses the defaults.
+const feeSheet = () => ({ ...SHEET_DEFAULTS, ...activeSheet });
+
+// Fees, profit and margin from what is typed, before anything is saved.
+function updateSum() {
+  const code = ls.product?.currency || getSheetCurrency();
+  const r = productProfit(lsEl("insCost").value, lsEl("insSell").value, feeSheet());
+  lsEl("insFees").textContent = r ? formatCurrency(r.fees, code) : "-";
+  lsEl("insProfit").textContent = r ? formatCurrency(r.profit, code) : "-";
+  const tone = r && marginTone(Math.max(-1, r.margin));
+  const tag = lsEl("insMargin");
+  tag.hidden = !tone;
+  lsEl("insMarginNone").hidden = Boolean(tone);
+  if (tone) {
+    tag.dataset.tone = tone.tone;
+    tag.textContent = `${tone.percent} · ${tone.word}`;
+  }
+}
+
+// The updateProduct request: which row (as setStatus names it) and the prices that changed.
+function buildUpdateProductRequest(sheetId, product, patch) {
+  return { action: "updateProduct", sheetId, key: { sku: product.sku, row: product.row, link: product.link, title: product.title }, ...patch };
+}
+
+// Saves the prices that were changed. Runs one after another, like the listing edits. A failure puts the fields back
+// and says why. Returns false on a failed save.
+let priceSaves = Promise.resolve(true);
+function savePrices() {
+  priceSaves = priceSaves.catch(() => {}).then(writePrices);
+  return priceSaves;
+}
+
+async function writePrices() {
+  const { product, sheetId, session } = ls;
+  if (!product) return true;
+  const patch = {};
+  for (const [field, id] of [["price", "insCost"], ["salePrice", "insSell"]]) {
+    const input = lsEl(id);
+    const typed = input.value.trim();
+    if (input.readOnly || input.closest("[hidden]") || typed === "") continue;
+    if (Number(typed) !== Number(ls.prices[field] ?? NaN)) patch[field] = typed;
+  }
+  if (!Object.keys(patch).length) return true;
+  const res = await sendMessage(buildUpdateProductRequest(sheetId, product, patch));
+  if (!res.success) {
+    toast("Couldn't save your prices.", { kind: "error", detail: failView(res, "save").text });
+    if (session === ls.session) renderNumbers();
+    return false;
+  }
+  for (const field of ["price", "salePrice"]) if (field in res) product[field] = res[field];
+  if (session === ls.session) ls.prices = { price: product.price, salePrice: product.salePrice };
+  const card = [...document.querySelectorAll("#productsContainer .card")].find((c) => c.dataset.key === (product.sku || `row-${product.row}`));
+  if (card && sheetId === currentSheetId()) fillPriceRow(card.querySelector(".card-price"), product, getSheetCurrency());
+  return true;
+}
+
+function setupInspector() {
+  const dlg = lsEl("inspector");
   lsEl("lsCopyTitleSlot").replaceWith(copyButton("title", () => lsEl("lsTitleIn").value));
   lsEl("lsCopyDescSlot").replaceWith(copyButton("description", () => lsEl("lsDesc").value));
 
-  lsEl("lsCloseX").onclick = lsEl("lsDone").onclick = () => dlg.close();
-  // Edits are kept as they are made (on leaving a field) and once more when the dialog closes.
+  lsEl("inspectorForm").addEventListener("submit", (e) => e.preventDefault());
+  lsEl("insClose").onclick = lsEl("lsDone").onclick = () => dlg.close();
+  let pressed; // a drag that starts in a field and ends on the backdrop is not a click on it
+  dlg.addEventListener("pointerdown", (e) => (pressed = e.target));
+  dlg.addEventListener("click", (e) => e.target === dlg && pressed === dlg && dlg.close());
+  // Edits are kept as they are made (on leaving a field) and once more when the inspector closes.
   dlg.addEventListener("close", () => {
+    savePrices();
     saveListingEdits();
     clearTimeout(ls.timer);
+    if (ls.opener?.isConnected) ls.opener.focus();
   });
+  for (const id of ["insCost", "insSell"]) {
+    lsEl(id).addEventListener("input", updateSum);
+    lsEl(id).addEventListener("change", savePrices);
+  }
   lsEl("lsTitleIn").addEventListener("input", updateTitleCount);
   for (const id of ["lsTitleIn", "lsDesc"]) lsEl(id).addEventListener("change", saveListingEdits);
 
   lsEl("lsRetry").onclick = () => generateListing(Boolean(ls.record));
+  lsEl("lsWrite").onclick = () => generateListing(false);
 
   const askReplace = (on) => {
     lsEl("lsConfirm").hidden = !on;
@@ -3273,6 +3413,17 @@ function setupEventListeners() {
   });
 }
 
+// The background queue wrote a listing, or its state changed: the cards follow.
+if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !Object.keys(changes).some((k) => k === "aiQueue" || k.startsWith("listing:"))) return;
+    loadListings(currentSheetId(), currentProducts).then((listings) => {
+      listingsCache = listings;
+      syncListingButtons();
+    });
+  });
+}
+
 // Global bootstrap
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", async () => {
@@ -3301,11 +3452,12 @@ if (typeof module !== "undefined" && module.exports) {
     buildOrderKey,
     buildOrderPatchRequest,
     buildSetStatusRequest,
+    buildUpdateProductRequest,
     orderEditPatch,
     undoOrderStatus,
     listingKeyOf,
     listingProductOf,
-    listingError,
+    failView,
     scoreBand,
     listingCopyText,
   };

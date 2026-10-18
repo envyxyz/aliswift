@@ -270,7 +270,7 @@ test("addColumns ignores header format refusal and saves settings", async () => 
   assert.equal(syncStore.sheets[0].imageCol, "G");
 });
 
-test("addColumns moves listings filed under item number to product SKU", async () => {
+test("addColumns leaves listings where they are: they are filed by item number", async () => {
   const replies = [
     { json: { sheets: [{ properties: { sheetId: 7, title: "Inventory", gridProperties: { columnCount: 26 } } }] } },
     {
@@ -284,17 +284,15 @@ test("addColumns moves listings filed under item number to product SKU", async (
     { json: {} },
     { json: {} },
   ];
-  const oldKey = `listing:${baseSheet.id}:1005001234567890`;
-  const newKey = `listing:${baseSheet.id}:SKU-01`;
+  const key = "listing:1005001234567890";
   const { listener, store } = setup(baseSheet, replies, {
-    local: { [oldKey]: { listing: { title: "x" } } },
+    local: { [key]: { listing: { title: "x" } } },
   });
 
   const reply = await ask(listener, { action: "addColumns", sheetId: baseSheet.id, columns: ["skuCol"] }, options);
 
   assert.equal(reply.success, true);
-  assert.deepEqual(plain(store[newKey]), { listing: { title: "x" } });
-  assert.equal(oldKey in store, false);
+  assert.deepEqual(plain(store[key]), { listing: { title: "x" } });
 });
 
 test("addColumns validates sender, sheetId and columns input", async () => {

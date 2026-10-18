@@ -6,7 +6,7 @@ const vm = require("node:vm");
 
 // The page gets these from lib/shared.js, loaded before it. Here they are put on globalThis first.
 const shared = require("../lib/shared.js");
-Object.assign(globalThis, shared);
+Object.assign(globalThis, shared, require("../lib/errors.js")); // errorView comes from lib/errors.js
 const {
   httpsUrl,
   parseSheetDate,
@@ -34,7 +34,8 @@ const {
   undoOrderStatus,
   listingKeyOf,
   listingProductOf,
-  listingError,
+  failView,
+  buildUpdateProductRequest,
   scoreBand,
   listingCopyText,
 } = require("../dashboard/dashboard.js");
@@ -294,9 +295,9 @@ test("filterProducts correctly filters by search, status, and listing", () => {
   assert.equal(noStatusCol.length, 5);
 
   // Listing filter
-  const withListing = filterProducts(products, {
+  const withListing = filterProducts([{ ...products[0], link: "https://www.aliexpress.com/item/1005001111111111.html" }, ...products.slice(1)], {
     hasListing: true,
-    listingsMap: { "SKU-01": true },
+    listingsMap: { 1005001111111111: true },
   });
   assert.equal(withListing.length, 1);
   assert.equal(withListing[0].sku, "SKU-01");
@@ -578,13 +579,13 @@ test("undoOrderStatus never gives back a blank or unknown status", () => {
 });
 
 // 17. Listing dialog logic (P5)
-test("listingKeyOf files a listing under the SKU, or the AliExpress item number, as background.js does", () => {
-  assert.equal(listingKeyOf({ sku: " SKU-01 ", link: "https://www.aliexpress.com/item/1005001111111111.html" }), "SKU-01");
+test("listingKeyOf files a listing under the AliExpress item number, as background.js does", () => {
+  assert.equal(listingKeyOf({ sku: " SKU-01 ", link: "https://www.aliexpress.com/item/1005001111111111.html" }), "1005001111111111");
   assert.equal(listingKeyOf({ sku: "", link: "https://www.aliexpress.com/item/1005001111111111.html" }), "1005001111111111");
   assert.equal(listingKeyOf({ link: "https://www.aliexpress.com/x?productId=1005002222222222" }), "1005002222222222");
   assert.equal(listingKeyOf({ sku: "", link: "https://example.com/" }), "");
   assert.equal(listingKeyOf(null), "");
-  assert.equal(listingKeyOf({ sku: "S".repeat(60) }).length, 40);
+  assert.equal(listingKeyOf({ sku: "SKU-01" }), ""); // no link, nowhere to keep a listing
 });
 
 test("a product without a SKU still finds its listing in the Has listing filter", () => {
@@ -599,21 +600,30 @@ test("listingProductOf sends what the writer may see and never the cost price", 
   assert.ok(!("price" in sent) && !("profit" in sent) && !("margin" in sent));
 });
 
-test("listingError maps each failure to a sentence, and says where the fix is", () => {
-  const nokey = listingError({ code: "nokey", error: "Add a Gemini key in the AI tab." });
+test("failView takes the sentence from the error table and says where the fix is", () => {
+  const nokey = failView({ code: "nokey" }, "write");
+  assert.match(nokey.text, /No AI key/);
   assert.deepEqual([nokey.retry, nokey.settings], [false, true]);
-  const bad = listingError({ code: "invalid-key" });
+  const bad = failView({ code: "invalid-key", provider: "groq" }, "write");
+  assert.match(bad.text, /Groq key was rejected/);
   assert.deepEqual([bad.retry, bad.settings], [false, true]);
-  const gone = listingError({ code: "bad-output", status: 404, model: "gemini-9" });
-  assert.match(gone.detail, /“gemini-9” isn't available/);
-  assert.deepEqual([gone.retry, gone.settings], [false, true]);
-  assert.match(listingError({ code: "rate" }).message, /limit for now/);
-  assert.equal(listingError({ code: "timeout" }).detail, "It took too long to answer.");
-  const generic = listingError({ code: "bad-output", error: "x".repeat(300) });
-  assert.equal(generic.message, "Couldn't write the listing.");
-  assert.equal(generic.detail.length, 140); // cut to 140 characters
-  assert.equal(generic.retry, true);
-  assert.equal(listingError(undefined).message, "Couldn't write the listing.");
+  const rate = failView({ code: "rate" }, "write");
+  assert.deepEqual([rate.retry, rate.settings], [true, false]);
+  assert.deepEqual(failView({ code: "formula" }, "save").text, errorView({ code: "formula" }).text);
+  // A reply with no code carries the worker's own sentence, cut to 140 characters; one with neither names the step.
+  assert.equal(failView({ error: "x".repeat(300) }, "save").text.length, 140);
+  assert.equal(failView(undefined, "save").text, "Something went wrong while saving your changes.");
+  assert.equal(failView({ code: "weird-new-code", error: "raw provider text" }, "write").text, "Something went wrong while writing the listing.");
+});
+
+test("buildUpdateProductRequest names the row the way setStatus does and carries only the changed prices", () => {
+  const product = { sku: "SKU-02", row: 4, link: "L", title: "T", price: 1, salePrice: 2, status: "Listed" };
+  assert.deepEqual(buildUpdateProductRequest("sheet-1", product, { salePrice: "7.5" }), {
+    action: "updateProduct",
+    sheetId: "sheet-1",
+    key: { sku: "SKU-02", row: 4, link: "L", title: "T" },
+    salePrice: "7.5",
+  });
 });
 
 test("scoreBand and listingCopyText follow the design: Strong from 75, Fair from 50, and a plain copy-all text", () => {
@@ -634,10 +644,10 @@ test("scoreBand and listingCopyText follow the design: Strong from 75, Fair from
 
 test("dev stub keeps listings like background.js: cached unless forced, and edits are kept", async () => {
   const send = mockChrome.runtime.sendMessage;
-  const product = { sku: "SKU-02", title: "Snake Open Ring", salePrice: 4.99 };
+  const product = { sku: "SKU-02", title: "Snake Open Ring", salePrice: 4.99, link: "https://www.aliexpress.com/item/1005002222222222.html" };
   const first = await send({ action: "generateListing", sheetId: "sheet-uk-primary", product });
   assert.equal(first.success, true);
-  assert.equal(first.key, "SKU-02");
+  assert.equal(first.key, "1005002222222222");
   assert.ok(first.listing.title.length <= 80 && first.listing.description);
   assert.ok(Array.isArray(first.listing.itemSpecifics) && Array.isArray(first.listing.variants));
   assert.equal(typeof first.limited, "boolean");
@@ -647,7 +657,7 @@ test("dev stub keeps listings like background.js: cached unless forced, and edit
   const forced = await send({ action: "generateListing", sheetId: "sheet-uk-primary", product, force: true });
   assert.ok(!forced.cached);
 
-  const saved = await send({ action: "saveListing", sheetId: "sheet-uk-primary", key: "SKU-02", title: "My own title", description: "My words" });
+  const saved = await send({ action: "saveListing", sheetId: "sheet-uk-primary", key: "1005002222222222", title: "My own title", description: "My words" });
   assert.equal(saved.success, true);
   assert.equal(saved.listing.title, "My own title");
   const kept = await send({ action: "generateListing", sheetId: "sheet-uk-primary", product });
@@ -665,7 +675,7 @@ const readFile = (file) => fs.readFileSync(path.join(__dirname, "..", file), "ut
 test("dashboard.html loads only local scripts that exist, and never the dev stub", () => {
   const html = readFile("dashboard/dashboard.html");
   const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/ui.js", "dashboard.js"]); // shared first: dashboard.js needs it
+  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/ui.js", "../lib/errors.js", "dashboard.js"]); // shared first: dashboard.js needs it
   for (const url of [...scripts, ...[...html.matchAll(/<link[^>]*\shref="([^"]+)"/g)].map((m) => m[1])]) {
     assert.ok(!/^https?:/.test(url), url);
     assert.ok(fs.existsSync(path.join(__dirname, "..", "dashboard", url)), url);
@@ -691,7 +701,7 @@ test("the popup and the settings page both link to the dashboard", () => {
   assert.match(readFile("popup/popup.js"), /getURL\("dashboard\/dashboard\.html"\)/);
   assert.match(readFile("options/options.html"), /href="\.\.\/dashboard\/dashboard\.html"/);
   const manifest = JSON.parse(readFile("manifest.json"));
-  assert.deepEqual(manifest.permissions, ["storage", "identity"]); // an extension page needs no permission to open
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]); // an extension page needs no permission to open
 });
 
 test("shared.js, ui.js and dashboard.js load together in one page without a redeclared name", () => {
@@ -709,8 +719,8 @@ test("shared.js, ui.js and dashboard.js load together in one page without a rede
 test("the dashboard only sends the messages it should, and never puts data into innerHTML", () => {
   const js = readFile("dashboard/dashboard.js");
   const actions = new Set([...js.matchAll(/action: "(\w+)"/g)].map((m) => m[1]));
-  // Nothing here can delete a row or clear a cell: removing is setStatus, and the rest only reads or adds.
-  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "setRate", "generateListing", "saveListing", "listOnEbay", "fillPhotos"];
+  // Nothing here can delete a row or clear a cell: removing is setStatus, and the rest only reads, adds or changes a product's two prices.
+  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "setRate", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks"];
   for (const action of actions) assert.ok(allowed.includes(action), `unexpected message ${action}`);
   assert.ok(actions.has("generateListing") && actions.has("saveListing"));
   for (const [line] of js.matchAll(/^.*\.innerHTML.*$/gm)) assert.match(line, /\.innerHTML = "";?\s*$/, line); // only ever cleared

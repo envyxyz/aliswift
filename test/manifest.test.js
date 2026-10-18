@@ -69,16 +69,18 @@ test("the eBay panel runs on the listing form of every marketplace in REGIONS, a
   const orders = manifest.content_scripts.find((c) => c.js.includes("content-orders.js"));
   assert.deepEqual(hostsOf(orders.matches), hosts);
   for (const m of orders.matches) assert.match(m, /^https:\/\/www\.ebay\.[a-z.]+\/sh\/ord\*$/);
-  assert.deepEqual(orders.js, ["lib/panel.js", "lib/orders.js", "content-orders.js"]);
+  assert.deepEqual(orders.js, ["lib/panel.js", "lib/errors.js", "lib/orders.js", "content-orders.js"]);
 });
 
 test("sign-in asks for no extra permission: no email, and only the two scopes the features need", () => {
-  assert.deepEqual(manifest.permissions, ["storage", "identity"]); // not identity.email, which warns "Know your email address"
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]); // not identity.email, which warns "Know your email address"
   // spreadsheets: read and write the sheets the user added. drive.metadata.readonly: list their spreadsheets' names
   // and dates for the import picker, never a file's content. Not drive, drive.file or drive.readonly.
   assert.deepEqual(manifest.oauth2.scopes, ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.metadata.readonly"]);
   // The hosts the service worker calls: Sheets, Drive's file list and Gemini. No wildcard over all of Google.
   assert.deepEqual(manifest.host_permissions.filter((h) => /google/.test(h)), ["https://sheets.googleapis.com/*", "https://www.googleapis.com/drive/*", "https://generativelanguage.googleapis.com/*"]);
+  // Error reports go out through CORS (the function allows any origin): no host permission, no install warning.
+  assert.equal(manifest.host_permissions.some((h) => /supabase/.test(h)), false);
 });
 
 test("popup.js only uses ids that exist in popup.html, and so do the popup's references", () => {

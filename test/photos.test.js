@@ -50,6 +50,7 @@ function setup({ local = {}, sync = {}, downloads, images = {}, gemini = [], she
     tabs: { create: async (opts) => void tabs.push(opts.url) },
     identity: { getAuthToken: (opts, cb) => cb("token"), removeCachedAuthToken: (opts, cb) => cb() },
     storage: {
+      session: (() => { const s = {}; return { get: async (d) => ({ ...d, ...s }), set: async (i) => void Object.assign(s, i) }; })(), // AI key cooldowns
       sync: {
         get: async (d) => ({ ...d, ...synced }),
         set: async (items) => void Object.assign(synced, items),
@@ -448,7 +449,7 @@ test("A6. generateListing's kept product meta carries image (https only)", async
     PAGE,
   );
 
-  const kept = t.store[`listing:${SHEET}:SKU-01`];
+  const kept = t.store[`listing:1005001234567890`];
   assert.equal(kept.product.image, IMG_A);
 
   // Non-https image becomes empty string
@@ -464,7 +465,7 @@ test("A6. generateListing's kept product meta carries image (https only)", async
     },
     PAGE,
   );
-  assert.equal(tNonHttps.store[`listing:${SHEET}:SKU-02`].product.image, "");
+  assert.equal(tNonHttps.store[`listing:1005001234567890`].product.image, "");
 });
 
 /* B. lib/ebayform.js helpers with fake DOM nodes */
@@ -626,7 +627,7 @@ test("C9. validateImport accepts boolean includeImages and rejects non-boolean; 
 test("C10. manifest.json permissions and optional_permissions declare downloads without adding host permissions", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   assert.deepEqual(manifest.optional_permissions, ["downloads"]);
-  assert.deepEqual(manifest.permissions, ["storage", "identity"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
   assert.ok(!manifest.host_permissions.some((h) => h.includes("download")));
 });
 

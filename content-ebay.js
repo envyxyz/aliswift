@@ -1,8 +1,11 @@
-// The AliSwift panel on eBay's listing form (/lstng). It shows the products that have a listing, fills the title, custom
-// label, description and price from the one the seller picks, then the item specifics through Gemini (the worker does the
-// asking), and shows everything it could not fill as a row to copy. Idle on every other eBay page. It never presses
+// The AliSwift panel on eBay's listing form (/lstng). It shows the products that have a listing (or one being written),
+// fills the title, custom label, description and price from the one the seller picks, then the item specifics (the
+// listing's own first, then the AI through the worker), and shows everything it could not fill as a row to copy. Each
+// step keeps its own result, and the footer follows them (endState in lib/errors.js). Idle on every other eBay page. It never presses
 // List it, Save for later or Preview, and never touches Condition. Needs lib/panel.js and lib/ebayform.js (loaded first
 // by the manifest). The names of eBay's boxes come from a saved copy of its form (test/fixtures/ebay-form-basics.html).
+
+reportCrashes(); // lib/errors.js
 
 (() => {
   // Row status -> [word, tag tone, icon]
@@ -17,34 +20,44 @@
   const wide = matchMedia("(min-width:1180px)");
   const q = (selector) => document.querySelector(selector);
 
-  let ctx = null; // the worker's answer to ebayContext: { target, listing }
+  let ctx = null; // the worker's answer to ebayContext: { target, listing, queued? }
   let ui = null; // the panel's elements, once it is on the page
-  let phase = "idle"; // idle, reading, asking, filling or done
-  let notice = null; // { tone, text, retry?, settings? }
+  let phase = "idle"; // idle, reading, writing, asking, filling or done
+  let notice = null; // { tone, text }: a message outside the Fill steps (a card that couldn't be picked, Listed)
+  let logsNote = ""; // what Send logs did
   let asking = 0; // fields sent to the AI in this pass
   let dismissed = false;
   let collapsed = false;
   let timer;
+  let tick; // the Try again countdown
   let resizer;
-  let products = []; // the cards the worker offers: { sheetId, key, sku, title, price, currency }
+  let products = []; // the cards the worker offers: { sheetId, key, sku, title, price, currency, state }
   let current = null; // { sheetId, key } of the card in use
   let ai = null; // the AI's reading of this form, asked at most once per Fill press: { list, pick } or {}
   const found = {}; // intent -> "page" | "ai" | "missing", for the report
   const rows = new Map(); // id -> { id, label, value, status, field?, hint? }
+  const results = {}; // step (write, basics, specifics, photos) -> true, or the failed reply: one per step, never overwritten by another
   const saved = {}; // the page's own padding, put back on Done
+  const cardEls = new Map(); // "sheetId:key" -> { sig, el }: a card is drawn again only when its data changed
 
-  // A page left open across an extension reload throws at once (not a rejected promise): that answers like any failure.
+  // A page left open across an extension reload throws at once (not a rejected promise): that is "reloaded".
   const send = async (message) => {
     try {
       return await chrome.runtime.sendMessage(message);
     } catch (error) {
-      return { success: false, error: error.message };
+      const gone = !chrome.runtime?.id || /context invalidated/i.test(error.message);
+      return { success: false, error: error.message, ...(gone && { code: "reloaded" }) };
     }
   };
 
   /* State */
 
-  const ready = () => Boolean(ctx?.target); // a product is chosen; its listing is written by Create listing, if it has none yet
+  const STEPS = ["write", "basics", "specifics", "photos"];
+  const BASICS = ["title", "sku", "description", "price", "format", "condition"];
+  const stepOf = (id) => (BASICS.includes(id) ? "basics" : id === "photos" || id === "variants" ? "photos" : "specifics");
+  const end = () => endState(Object.fromEntries(STEPS.filter((s) => s in results).map((s) => [s, results[s]]))); // lib/errors.js
+
+  const ready = () => Boolean(ctx?.target); // a product is chosen; with no listing yet, Write now writes it first
   const running = () => ["reading", "writing", "asking", "filling"].includes(phase);
   const counts = () => {
     const c = { filled: 0, copy: 0, needs: 0 };
@@ -54,8 +67,8 @@
   const row = (id, label, value, status, extra = {}) => rows.set(id, { id, label, value, status, ...extra });
 
   function summary() {
-    if (!ctx?.success) return "AliSwift didn't answer. Reload this page.";
-    if (!ctx.target) return products.length ? "Choose the product to list." : "No drafts yet.";
+    if (!ctx?.success) return ctx?.code === "reloaded" ? errorView(ctx).text : "AliSwift didn't answer. Reload this page.";
+    if (!ctx.target) return products.length ? "Choose the product to list." : "No listings yet.";
     if (phase === "reading") return "Reading the form...";
     if (phase === "writing") return "Writing the listing...";
     if (phase === "asking") return `Asking AI to match ${asking} fields...`;
@@ -65,7 +78,12 @@
       const need = n ? `, ${n} need you` : "";
       return !f ? `Nothing filled, ${c} to copy${need}.` : !c && !n ? `All ${f} fields filled.` : `${f} filled, ${c} to copy${need}`;
     }
-    return `Pick your category on eBay, then press ${ctx.listing ? "Fill form" : "Create listing"}.`;
+    if (ctx.listing) return "Pick your category on eBay, then press Fill form.";
+    const q = ctx.queued;
+    if (q?.failed) return `The listing isn't written yet. ${q.code ? errorView({ step: "write", code: q.code }).text : ""}`.trim();
+    if (!q) return "No listing yet. Press Write now.";
+    const mins = Math.max(1, Math.ceil((q.at - Date.now()) / 60000));
+    return `Writing the listing, ready in about ${mins} ${mins === 1 ? "minute" : "minutes"}.`;
   }
 
   // A product picked for another marketplace than the one this form is on: its price is never typed in.
@@ -84,15 +102,18 @@
 
   const isCurrent = (card) => current?.sheetId === card.sheetId && current?.key === card.key;
 
+  // A card's tag: its sell price once the listing is written, else where the listing stands.
+  const cardTag = (card) => (card.state === "queued" ? "Writing listing…" : card.state === "failed" ? "Not written" : money(card));
+
   function cardEl(card) {
-    const price = money(card);
+    const tag = cardTag(card);
     return h(
       "li",
       {},
       h(
         "button",
         { type: "button", class: "ali-card", "aria-pressed": String(isCurrent(card)), onclick: () => choose(card) },
-        h("span", { class: "ali-card-top" }, h("strong", { text: card.sku }), price && h("span", { class: "tag", text: price })),
+        h("span", { class: "ali-card-top" }, h("strong", { text: card.sku }), tag && h("span", { class: "tag", text: tag })),
         h("span", { class: "ali-card-title", text: card.title }),
       ),
     );
@@ -102,12 +123,21 @@
     const words = ui.search.value.trim().toLowerCase();
     const shown = products.filter((c) => !words || `${c.sku} ${c.title}`.toLowerCase().includes(words));
     ui.search.hidden = products.length < 6;
-    ui.cards.replaceChildren(...shown.map(cardEl));
+    const els = shown.map((c) => {
+      const sig = JSON.stringify([c, isCurrent(c)]);
+      const id = `${c.sheetId}:${c.key}`;
+      let kept = cardEls.get(id);
+      if (kept?.sig !== sig) cardEls.set(id, (kept = { sig, el: cardEl(c) }));
+      return kept.el;
+    });
+    const now = ui.cards.children;
+    if (els.length !== now.length || els.some((el, i) => now[i] !== el)) ui.cards.replaceChildren(...els);
     ui.pickNote.textContent = !products.length
-      ? "Only drafts are listed here. Press Create Listing on an AliExpress product page, or List on eBay on the dashboard."
+      ? "Products you add from AliExpress show here once their listing is written."
       : !shown.length ? "Nothing matches." : "";
   }
 
+  // The cards come from AliSwift's own storage (no sheet is read), so this is quick enough for every open of the list.
   async function loadProducts() {
     const res = await send({ action: "ebayProducts" });
     products = res.success ? res.products : [];
@@ -115,20 +145,22 @@
     if (ui) render();
   }
 
-  // The seller clicked a card: the worker makes it the product, and the panel starts over with it.
+  // The seller clicked a card: the worker makes it the product and answers its context, and the panel starts over with it.
   async function choose(card) {
     if (running()) return;
     const res = await send({ action: "ebaySelect", sheetId: card.sheetId, key: card.key });
     if (!res.success) {
-      notice = { tone: "error", text: res.error ?? "Couldn't pick that product." };
+      notice = { tone: "error", text: res.code ? errorView(res).text : res.error ?? "Couldn't pick that product." };
       return render();
     }
     current = { sheetId: card.sheetId, key: card.key };
-    ctx = await send({ action: "ebayContext" });
+    ctx = res;
     rows.clear();
+    for (const s of Object.keys(results)) delete results[s];
     if (ready()) idleRows();
     phase = "idle";
     notice = null;
+    logsNote = "";
     ui.pickOpen = false;
     render();
   }
@@ -190,26 +222,67 @@
 
     const all = [...rows.values()];
     ui.list.replaceChildren(...["needs", "copy", "pending", "filling"].flatMap((s) => all.filter((r) => r.status === s)).map(rowEl));
-    const done = all.filter((r) => r.status === "filled");
-    ui.filled.hidden = !done.length;
-    ui.filledCount.textContent = done.length;
-    ui.filledList.replaceChildren(...done.map(rowEl));
+    const filledRows = all.filter((r) => r.status === "filled");
+    ui.filled.hidden = !filledRows.length;
+    ui.filledCount.textContent = filledRows.length;
+    ui.filledList.replaceChildren(...filledRows.map(rowEl));
 
-    const shown = notice ?? (otherSite() && phase !== "done" ? { tone: "warn", text: `This product is for ${ctx.target.host}. You are on ${location.hostname}, so its price is not typed in.` } : null);
+    // The message: the first failed step's (lib/errors.js) once a Fill is done, else a note outside the steps.
+    const done = phase === "done";
+    const state = done ? end() : null;
+    const failedBefore = !ctx?.success && ctx?.code === "reloaded" ? errorView(ctx) : null;
+    const shown = state?.text
+      ? { tone: "warn", text: state.text, fixes: state.fixes }
+      : failedBefore ? { tone: "error", text: failedBefore.text, fixes: failedBefore.buttons }
+      : notice ?? (otherSite() && !done ? { tone: "warn", text: `This product is for ${ctx.target.host}. You are on ${location.hostname}, so its price is not typed in.` } : null);
     ui.notice.hidden = !shown;
     ui.notice.replaceChildren();
     if (shown) {
       ui.notice.dataset.tone = shown.tone;
-      ui.notice.append(icon(shown.tone === "error" ? PATH.error : PATH.warn, "", 16), h("div", { text: shown.text }));
-      if (shown.settings) ui.notice.append(h("button", { type: "button", class: "btn btn-quiet btn-sm", text: "Open settings", onclick: () => send({ action: "openPage", page: "settings" }) }));
+      ui.notice.append(icon(shown.tone === "error" ? PATH.error : PATH.warn, "", 16), h("div", { text: shown.text }, logsNote && h("p", { class: "ali-hint", text: logsNote })));
+      for (const fix of shown.fixes ?? []) if (FIXES[fix]) ui.notice.append(h("button", { type: "button", class: "btn btn-quiet btn-sm", text: FIXES[fix][0], onclick: FIXES[fix][1] }));
     }
 
+    // The footer: one button at rest; once done, Done, Try again, or Send logs and Try again (endState).
     const busy = running();
-    ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Working..." : notice?.retry ? "Try again" : phase === "done" && !notice?.settings ? "Fill again" : ctx.listing ? "Fill form" : "Create listing";
-    ui.listed.hidden = !(ready() && phase === "done");
+    const foot = state?.footer ?? [];
+    ui.fill.hidden = done;
+    ui.done.hidden = !foot.includes("done");
+    ui.logs.hidden = !foot.includes("logs");
+    ui.retry.hidden = !foot.includes("retry");
+    const secs = Math.ceil(((state?.retryAt ?? 0) - Date.now()) / 1000);
+    clearTimeout(tick);
+    if (!ui.retry.hidden && secs > 0) tick = setTimeout(render, 1000);
+    ui.retry.textContent = secs > 0 ? `Try again in ${secs} s` : "Try again";
+    ui.retry.setAttribute("aria-disabled", String(secs > 0));
+    ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Working..." : ctx.listing ? "Fill form" : "Write now";
     ui.fill.setAttribute("aria-disabled", String(busy || (!ready() && products.length > 0)));
     if (busy) ui.fill.dataset.state = "loading";
     else delete ui.fill.dataset.state;
+  }
+
+  // The buttons a message offers to fix what failed (the table's settings, keys, signin, reload): [words, action].
+  const openSettings = () => send({ action: "openPage", page: "settings" });
+  const FIXES = {
+    settings: ["Open settings", openSettings],
+    keys: ["Get API keys", openSettings],
+    signin: ["Open settings", openSettings],
+    reload: ["Reload page", () => location.reload()],
+  };
+
+  // Try again runs only the steps that failed; all of them when the listing or the form itself was the failure.
+  function retry() {
+    if (running() || ui.retry.getAttribute("aria-disabled") === "true") return;
+    const failed = STEPS.filter((s) => s in results && results[s] !== true);
+    fillForm(failed.includes("write") || results.basics?.code === "noform" ? null : new Set(failed));
+  }
+
+  // Send logs: this run's report goes to the developer, with a reference to quote; when it can't be sent it is copied.
+  async function sendLogs() {
+    const res = await send({ action: "sendLogs", report: report() });
+    const copied = !res.success && (await copyToClipboard(res.report ?? JSON.stringify(report(), null, 1)));
+    logsNote = res.success ? `Sent. Quote ${res.ref} if you write to the developer.` : copied ? errorView({ code: "logs-unsent" }).text : "The report couldn't be sent or copied.";
+    render();
   }
 
   // Room for the panel so it never covers the form: padding on <html>, the only change made to eBay's layout.
@@ -271,8 +344,9 @@
       filledCount: h("span", { class: "muted" }),
       filledList: h("ul", { class: "ali-rows", role: "list" }),
       fill: h("button", { type: "button", class: "btn btn-sm", id: "ali-fill" }),
-      listed: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-listed", text: "Mark listed", title: "Press after you have published it on eBay: the product becomes Listed", hidden: true, onclick: () => markListed(true) }),
-      report: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-report", text: "Copy report", title: "Copies the form's boxes and what happened, to send with a bug report" }),
+      done: h("button", { type: "button", class: "btn btn-sm", id: "ali-done", text: "Done", hidden: true, onclick: finish }),
+      logs: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-logs", text: "Send logs", title: "Sends this run's report (the form's boxes and what happened, never your keys) to the developer", hidden: true, onclick: sendLogs }),
+      retry: h("button", { type: "button", class: "btn btn-sm", id: "ali-retry", text: "Try again", hidden: true, onclick: retry }),
     };
     ui.pickList = h("div", { class: "ali-pick-list", id: "ali-pick-list" }, ui.search, ui.cards, ui.pickNote);
     ui.filled = h("details", { class: "disclosure ali-filled", hidden: true }, h("summary", {}, "Filled ", ui.filledCount), ui.filledList);
@@ -294,7 +368,7 @@
         h(
           "footer",
           { class: "ali-foot" },
-          h("div", { class: "actions" }, ui.report, h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-done", text: "Done", onclick: finish }), ui.listed, ui.fill),
+          h("div", { class: "actions" }, ui.logs, ui.retry, ui.done, ui.fill),
         ),
       ),
     );
@@ -319,16 +393,12 @@
       } else if (!running()) fillForm();
     });
     ui.pickBtn.addEventListener("click", () => {
+      if (!ready()) return; // the list stays open while no product is chosen
       ui.pickOpen = !ui.pickOpen;
       if (ui.pickOpen) loadProducts();
       render();
     });
     ui.search.addEventListener("input", renderCards);
-    ui.report.addEventListener("click", async () => {
-      const ok = await copyToClipboard(report());
-      ui.report.textContent = ok ? "Copied" : "Press Ctrl+C";
-      setTimeout(() => (ui.report.textContent = "Copy report"), 1800);
-    });
     toggle.addEventListener("click", (e) => {
       e.stopPropagation();
       setCollapsed(!collapsed, true);
@@ -368,6 +438,7 @@
   function finish() {
     dismissed = true;
     clearInterval(timer);
+    clearTimeout(tick);
     resizer.disconnect();
     wide.removeEventListener("change", reserve);
     Object.assign(document.documentElement.style, { paddingRight: saved.right, paddingBottom: saved.bottom });
@@ -376,21 +447,18 @@
     send({ action: "ebayDone" });
   }
 
-  // What to send with a bug report: this form's boxes (names and words, never what is typed in them) and what the pass did.
+  // What Send logs sends: this form's boxes (names and words, never what is typed in them) and what the pass did.
   function report() {
-    return JSON.stringify(
-      {
-        report: "AliSwift form report",
-        page: `${location.hostname}${location.pathname}`,
-        target: ctx?.target ? { host: ctx.target.host, currency: ctx.target.currency } : null,
-        photos: ctx?.photos ? { on: ctx.photos.on, count: ctx.photos.count } : null,
-        found,
-        rows: [...rows.values()].map((r) => [r.id, r.status]),
-        controls: listControls(document).map(({ el, ...c }) => c),
-      },
-      null,
-      1,
-    );
+    return {
+      report: "AliSwift form report",
+      page: `${location.hostname}${location.pathname}`,
+      target: ctx?.target ? { host: ctx.target.host, currency: ctx.target.currency } : null,
+      photos: ctx?.photos ? { on: ctx.photos.on, count: ctx.photos.count } : null,
+      steps: Object.fromEntries(Object.entries(results).map(([s, r]) => [s, r === true ? "ok" : r.code ?? "unknown"])),
+      found,
+      rows: [...rows.values()].map((r) => [r.id, r.status]),
+      controls: listControls(document).map(({ el, ...c }) => c),
+    };
   }
 
   /* Filling */
@@ -405,6 +473,9 @@
       const list = listControls(document);
       const res = await send({ action: "aiMap", task: "controls", items: list.map(({ el, ...c }) => c) });
       ai = res.success ? { list, pick: res.answer } : {};
+      if (!res.success) {
+        found.aiError = [res.code, res.status, res.model, res.error].filter(Boolean).join(" | ");
+      }
     }
     const el = ai.list?.[ai.pick?.[intent]]?.el ?? null;
     if (el) found[intent] = "ai";
@@ -475,29 +546,33 @@
     return Boolean(await until(shows, 1500));
   }
 
+  // True when a box with a value couldn't be filled (the step failed; its rows are there to copy).
   async function fillBasics() {
     const { target: t, listing: l } = ctx;
+    let missed = false;
     const basics = [
       ["title", "Title", l.title, () => locate("title"), fillBasic],
       ["sku", "Custom label", t.sku, customLabel, fillBasic],
-      ["description", "Description", l.description, () => locate("description"), (box) => fillDescription(box, l.html)],
+      ["description", "Description", l.description, () => locate("description"), async (box) => (l.html ? fillDescription(box, l.html) : false)],
       // A price for another marketplace is never typed in.
       ["price", `Price (${t.currency})`, t.price, () => (otherSite() || !t.price ? null : priceBox()), fillBasic],
     ];
     for (const [id, label, value, find, fill] of basics) {
-      if (dismissed) return;
+      if (dismissed) return missed;
       if (rows.get(id)?.status === "filled" || (!value && id === "sku")) continue; // a second pass leaves what it filled alone
       row(id, label, value, "filling");
       render();
       const field = await find();
       const ok = Boolean(value && field && (await fill(field, value).catch(() => false)));
-      const hint = !value ? "Choose a value on eBay." : id === "price" && otherSite() ? `This is ${location.hostname}, the product is for ${t.host}: type the price yourself if it applies.` : !field ? "AliSwift couldn't find this box. Copy it, or send the report." : undefined;
+      const hint = !value ? "Choose a value on eBay." : id === "price" && otherSite() ? `This is ${location.hostname}, the product is for ${t.host}: type the price yourself if it applies.` : !field ? "AliSwift couldn't find this box. Copy it." : undefined;
       row(id, label, value, ok ? "filled" : value ? "copy" : "needs", { field, ...(hint && { hint }) });
+      if (value && !ok && !(id === "price" && otherSite())) missed = true;
     }
     const cond = q('button[name="condition"]');
     const shown = clean(cond?.textContent);
     if (cond && !/^new/i.test(shown)) row("condition", "Condition", shown, "needs", { field: cond, hint: "Check that this is right." });
     render();
+    return missed;
   }
 
   /* Photos (the setting "Include images"). They go to eBay's own uploader as files, the way a seller's choice in the file
@@ -515,6 +590,7 @@
     row("variants", "Variant photos", `${n} ${n === 1 ? "variant" : "variants"}`, saved.success ? "filled" : "needs", { hint });
   }
 
+  // True when the form took them, else the failure: unfilled (saved to a folder, or not) or permission.
   async function addPhotos() {
     const count = ctx.photos.count;
     const variants = ctx.photos.variants ?? 0;
@@ -525,7 +601,7 @@
       const res = await send({ action: "ebayPhoto", n });
       if (res.success && res.image) files.push(toFile(res.image));
     }
-    if (dismissed) return;
+    if (dismissed) return true;
     const input = await until(() => photoBox(document), 4000);
     const zone = photoZone(document);
     // The file box first, then a drop on the drop zone. A try counts when the form shows more photos than before.
@@ -541,7 +617,7 @@
     if (ok) {
       row("photos", "Photos", photoWords(files.length), "filled");
       if (variants) await saveVariants(variants);
-      return;
+      return true;
     }
     const saved = await send({ action: "ebayPhotosSave" });
     const more = variants ? ` The ${variants === 1 ? "variant's photo is" : "variants' photos are"} in folders named after ${variants === 1 ? "it" : "them"}.` : "";
@@ -552,6 +628,7 @@
         : `The form didn't take them. ${saved.error ?? "Add them yourself."}`;
     found.photos += saved.success ? ", saved to a folder" : ", not saved";
     row("photos", "Photos", photoWords(count), "needs", { field: zone, hint });
+    return { code: saved.code === "permission" ? "permission" : "unfilled" };
   }
 
   // Lazily drawn parts of the form (the price, the description) only exist once they have scrolled into view.
@@ -562,36 +639,33 @@
     scrollTo({ top, behavior: "instant" });
   }
 
-  // Why the AI step failed, as the panel says it.
-  function failure(res, step = "match") {
-    if (step === "write") {
-      if (res.code === "nokey" || res.code === "invalid-key") return { tone: "error", text: "AI isn't set up. Check your Gemini key in AliSwift settings.", settings: true };
-      const why = { timeout: "Gemini took too long.", network: "Couldn't reach Gemini.", rate: "Gemini is busy or over its limit." }[res.code] ?? res.error ?? "";
-      return { tone: "warn", text: `Couldn't write the listing. ${why} Try again.`, retry: true };
-    }
-    if (res.code === "nokey" || res.code === "invalid-key") return { tone: "error", text: "AI isn't set up. Check your Gemini key in AliSwift settings.", settings: true };
-    if (res.code === "rate") return { tone: "warn", text: "Gemini is busy or over its limit. Try again in a minute.", retry: true };
-    const why = { timeout: "Gemini took too long.", network: "Couldn't reach Gemini." }[res.code] ?? (res.error ? `Gemini said: ${res.error}` : "");
-    return { tone: "warn", text: `AI couldn't match this form. ${why} Your listing's own fields are filled; the rest are ready to copy.`.replace("  ", " "), retry: true };
-  }
-
-  async function fillForm() {
-    for (const [id, r] of rows) if (r.status !== "filled") rows.delete(id);
+  // A Fill press, or Try again with `only` the steps that failed (rows and results of the other steps stay). The listing
+  // is written first when the product has none yet (Write now).
+  async function fillForm(only = null) {
+    const runs = (step) => !only || only.has(step);
+    for (const [id, r] of rows) if (r.status !== "filled" && runs(stepOf(id))) rows.delete(id);
+    for (const s of Object.keys(results)) if (runs(s)) delete results[s];
     phase = "reading";
     notice = null;
+    logsNote = "";
     ai = null;
     for (const k of Object.keys(found)) delete found[k];
     render();
-    ctx = await send({ action: "ebayContext" }); // asked again: another product may have been picked
+    const fresh = await send({ action: "ebayContext" }); // asked again: another product may have been picked
+    if (!fresh.success) {
+      results.basics = fresh; // the worker is gone (reloaded) or didn't answer
+      phase = "done";
+      return render();
+    }
+    ctx = fresh;
     if (ready() && !ctx.listing) {
-      // The listing is written now, for the product picked (kept with it: the dashboard shows it, and a second press reuses it).
       phase = "writing";
       render();
-      const made = await send({ action: "ebayCreateListing" });
+      const made = await send({ action: "ebayWriteNow" });
       if (!made.success) {
-        found.aiError = [made.code, made.status, made.model, made.error].filter(Boolean).join(" | ");
+        found.aiError = [made.code, made.provider, made.error].filter(Boolean).join(" | ");
+        results.write = made; // Try again writes it again, then fills
         phase = "done";
-        notice = failure(made, "write");
         return render();
       }
       ctx = await send({ action: "ebayContext" });
@@ -604,55 +678,65 @@
     }
     await reveal();
     if (!(await locate("title", 6000))) {
+      results.basics = { code: "noform" };
       phase = "done";
-      notice = { tone: "error", text: "Couldn't find the listing form. Choose a category on eBay, then press Fill form again.", retry: true };
       return render();
     }
-    await fillBasics();
+    if (runs("basics")) results.basics = (await fillBasics()) ? { code: "unfilled" } : true;
 
-    const cat = q('button[name="categoryId"]');
-    const category = clean(`${cat?.textContent ?? ""} ${cat?.parentElement?.querySelector(".value-secondary")?.textContent ?? ""}`);
-    const tried = new Set();
-    // One more look after filling: a value can reveal a field (Metal reveals Metal Purity). ponytail: one extra pass, not a loop.
-    if (await fillSpecifics(category, tried)) {
-      await wait(500);
-      await fillSpecifics(category, tried);
+    if (runs("specifics")) {
+      const cat = q('button[name="categoryId"]');
+      const category = clean(`${cat?.textContent ?? ""} ${cat?.parentElement?.querySelector(".value-secondary")?.textContent ?? ""}`);
+      const tried = new Set();
+      results.specifics = true;
+      // One more look after filling, for fields that weren't on the form the first time: a value can reveal one (Metal
+      // reveals Metal Purity). ponytail: one extra pass, not a loop.
+      if (await fillSpecifics(category, tried)) {
+        await wait(500);
+        await fillSpecifics(category, tried);
+      }
     }
-    if (ctx.photos?.count && !dismissed && rows.get("photos")?.status !== "filled") {
+    if (runs("photos") && ctx.photos?.count && !dismissed && rows.get("photos")?.status !== "filled") {
       phase = "filling";
-      await addPhotos();
+      results.photos = await addPhotos();
     }
     phase = "done";
     render();
   }
 
-  // One look at the form's item specifics: the AI is asked about the empty ones not tried yet, and what it answers is
-  // filled. True when it asked and got an answer (so a second look may find more).
+  // One look at the form's item specifics: the AI is asked about the empty ones that weren't on the form at an earlier
+  // look, and what it answers is filled. A failure goes into results.specifics (the first one stays). True when it asked
+  // and got an answer (so a second look may find more).
   async function fillSpecifics(category, tried) {
     if (dismissed) return false;
     const { fields } = extractFields(document);
     const open = fields.filter((f) => !f.value && !tried.has(f.name));
-    if (!fields.length) notice = { tone: "warn", text: "No item specifics found. Choose a category on eBay, then press Fill form again.", retry: true };
+    for (const f of fields) tried.add(f.name);
+    const failed = (r) => results.specifics === true && (results.specifics = r);
+    if (!fields.length) failed({ code: "noform" });
     if (!open.length) return false;
-    for (const f of open) tried.add(f.name);
     phase = "asking";
     asking = open.length;
     render();
     const wire = open.map(({ el, block, ...f }) => f); // what leaves the page holds no element
     const plan = await send({ action: "planFill", fields: wire, category });
+    const why = plan.success ? plan.aiError : plan;
+    if (why) found.aiError = [why.code, why.provider, why.error].filter(Boolean).join(" | "); // for the report
     if (!plan.success) {
-      found.aiError = [plan.code, plan.status, plan.model, plan.error].filter(Boolean).join(" | "); // for the report
-      notice = failure(plan);
+      failed(plan);
       for (const s of ctx.listing.specifics ?? []) row(`spec:${s.name}`, s.name, s.value, "copy");
       for (const f of open) if (f.required) row(f.name, f.label, "", "needs", { field: f.el, hint: "Required. Choose a value on eBay." });
       return false;
     }
-    await applyPlan(open, plan.answers);
+    if (why) failed(why); // the listing's own specifics were filled, the AI's part failed
+    if (!(await applyPlan(open, plan.answers))) failed({ code: "unfilled" });
     return true;
   }
 
+  // True when every answer went into its box.
   async function applyPlan(open, reply) {
     phase = "filling";
+    let all = true;
     const byName = new Map(open.map((f) => [f.name, f]));
     const answers = reply.filter((a) => byName.has(a.name)); // the worker has checked these; a name it never sent is skipped anyway
     for (const { name, value } of answers) row(name, byName.get(name).label, value, "pending", { field: byName.get(name).el });
@@ -660,7 +744,7 @@
     // ponytail: three menus in a row that take no value mean the menu mechanism itself fails: the rest are copy rows at once.
     let misses = 0;
     for (const { name, value } of answers) {
-      if (dismissed) return;
+      if (dismissed) return all;
       const f = byName.get(name);
       const menu = f.kind === "menu" || f.kind === "multi";
       const give = !menu || misses < 3;
@@ -668,21 +752,23 @@
       render();
       const ok = give && (await fillSpecific(f, value));
       if (menu) misses = ok ? 0 : misses + 1;
+      all &&= ok;
       row(name, f.label, value, ok ? "filled" : "copy", { field: f.el });
       render();
     }
     for (const f of open) if (f.required && !rows.has(f.name)) row(f.name, f.label, "", "needs", { field: f.el, hint: "Required. Choose a value on eBay." });
+    return all;
   }
 
   /* Listed: the product becomes Listed only after eBay says it is published. The confirmation page is recognised by its words,
-     an item link, and the product's own SKU or title on it (so another listing's page never counts). The panel's
-     "Mark listed" button is the same thing by hand, for when eBay words that page differently. Unverified on live eBay. */
+     an item link, and the product's own SKU or title on it (so another listing's page never counts). When eBay words that
+     page differently, the status is set on the dashboard. Unverified on live eBay. */
 
-  async function markListed(manual) {
+  async function markListed() {
     const res = await send({ action: "ebayListed" });
-    if (!ui) return;
-    notice = res.success ? { tone: "info", text: "Marked as Listed on the dashboard." } : { tone: "warn", text: `Couldn't mark it Listed. ${res.error ?? ""}`.trim() };
-    if (manual || res.success) render();
+    if (!ui || !res.success) return;
+    notice = { tone: "info", text: "Marked as Listed on the dashboard." };
+    render();
   }
 
   let published = false;
@@ -694,7 +780,7 @@
     const mine = [target?.sku, (listing?.title ?? target?.title ?? "").slice(0, 30)].filter((x) => x && x.length > 3);
     if (!mine.some((x) => body.toLowerCase().includes(x.toLowerCase()))) return;
     published = true;
-    await markListed(false);
+    await markListed();
   }
   setInterval(watchPublished, 3000);
 

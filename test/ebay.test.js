@@ -61,6 +61,14 @@ test("an answer is mapped onto the full list case-insensitively, a custom value 
   for (const junk of [null, "text", 5, {}, { answers: "x" }]) assert.deepEqual(F.validateFillPlan(junk, FIELDS), []);
 });
 
+test("directFillPlan matches listing item specifics directly, skipping empty or unspecified values", () => {
+  const listing = { itemSpecifics: [{ name: "Brand", value: "Unbranded" }, { name: "Metal", value: "Stainless Steel" }, { name: "Color", value: "Not specified" }] };
+  const res = F.directFillPlan(FIELDS, listing);
+  assert.deepEqual(res, [
+    { name: "attributes.Brand", value: "Unbranded" },
+  ]);
+});
+
 test("cleanFields keeps item specifics only, cuts what is too long and falls back to safe values", () => {
   const long = "x".repeat(500);
   const [a, ...rest] = F.cleanFields([{ name: "attributes.Ring Size", label: long, kind: "banana", options: ["A\n", " B", "", 5], max: -3, required: "yes", custom: 1 }, { name: "title" }, null, { name: "universalProductCode" }]);
@@ -88,6 +96,7 @@ const LISTING = {
 };
 const PRODUCT = { sku: "SKU-01", title: "Skull ring", link: "https://www.aliexpress.com/item/1005001234567890.html", salePrice: 8.99, currency: "GBP" };
 const answer = (obj) => ({ json: { candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] } });
+const named = (name, message) => Object.assign(new Error(message), { name });
 
 function setup({ local = {}, gemini = [] } = {}) {
   const calls = [];
@@ -101,6 +110,7 @@ function setup({ local = {}, gemini = [] } = {}) {
     tabs: { create: async (opts) => void tabs.push(opts.url) },
     identity: { getAuthToken: (opts, cb) => cb("token"), removeCachedAuthToken: (opts, cb) => cb() },
     storage: {
+      session: (() => { const s = {}; return { get: async (d) => ({ ...d, ...s }), set: async (i) => void Object.assign(s, i) }; })(), // AI key cooldowns
       sync: { get: async (d) => ({ ...d, ...synced }) },
       local: {
         get: async (d) => (d === null ? { ...store } : { ...d, ...Object.fromEntries(Object.keys(d).filter((k) => k in store).map((k) => [k, store[k]])) }),
@@ -116,6 +126,7 @@ function setup({ local = {}, gemini = [] } = {}) {
     fetch: async (url, init) => {
       calls.push({ url, body: init?.body && JSON.parse(init.body) });
       const r = queue.shift();
+      if (r?.throw) throw r.throw;
       const status = r.status ?? 200;
       return { ok: status < 400, status, json: async () => r.json ?? {} };
     },
@@ -129,15 +140,16 @@ function setup({ local = {}, gemini = [] } = {}) {
   return { ask, calls, tabs, store };
 }
 
-const picked = { sheetId: SHEET, key: "SKU-01" };
-const listOn = (extra = {}) => ({ action: "listOnEbay", sheetId: SHEET, key: "SKU-01", product: PRODUCT, ...extra });
-const withListing = (more = {}) => ({ local: { geminiKey: KEY, [`listing:${SHEET}:SKU-01`]: LISTING, ...more } });
+const ID = "1005001234567890"; // PRODUCT's item number: what its listing is filed under
+const picked = { sheetId: SHEET, key: ID };
+const listOn = (extra = {}) => ({ action: "listOnEbay", sheetId: SHEET, key: ID, product: PRODUCT, ...extra });
+const withListing = (more = {}) => ({ local: { geminiKey: KEY, [`listing:${ID}`]: LISTING, ...more } });
 
 test("List on eBay remembers the product, opens the marketplace's listing start page, and needs no saved listing yet", async () => {
-  const t = setup(withListing({ [`listing:${SHEET_US}:SKU-01`]: LISTING, "listing:local:L-01": LISTING }));
+  const t = setup(withListing());
   const uk = await t.ask(listOn());
   assert.deepEqual(uk, { success: true, region: "UK" });
-  assert.deepEqual(plain(t.store.ebayTarget), { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Skull ring", price: 8.99, region: "UK", link: PRODUCT.link, image: "", at: t.store.ebayTarget.at });
+  assert.deepEqual(plain(t.store.ebayTarget), { sheetId: SHEET, key: ID, sku: "SKU-01", title: "Skull ring", price: 8.99, region: "UK", link: PRODUCT.link, image: "", at: t.store.ebayTarget.at });
   assert.deepEqual(t.tabs, ["https://www.ebay.co.uk/sl/prelist/suggest"]);
 
   assert.equal((await t.ask(listOn({ sheetId: SHEET_US, product: { ...PRODUCT, currency: "USD", salePrice: 11.5 } }))).region, "US");
@@ -193,7 +205,7 @@ test("the panel is told the product, the price in the marketplace's currency, an
   assert.equal((await t.ask({ action: "ebayContext" }, FORM)).target.price, ""); // the form's price row then asks the seller
 
   // A listing that was removed since: the target stays, the listing is null.
-  delete t.store[`listing:${SHEET}:SKU-01`];
+  delete t.store[`listing:${ID}`];
   const gone = await t.ask({ action: "ebayContext" }, FORM);
   assert.equal(gone.target.sku, "SKU-01");
   assert.equal(gone.listing, null);
@@ -221,7 +233,7 @@ test("planFill sends Gemini the empty fields and the listing, and answers only w
 });
 
 test("planFill says why it failed, like the listing writer: no key, a busy Gemini, an unreadable answer", async () => {
-  const noKey = setup({ local: { [`listing:${SHEET}:SKU-01`]: LISTING } });
+  const noKey = setup({ local: { [`listing:${ID}`]: LISTING } });
   await noKey.ask(listOn());
   const fields = [field("Color", { options: ["Black"] })];
   assert.equal((await noKey.ask({ action: "planFill", fields }, FORM)).code, "nokey");
@@ -235,11 +247,25 @@ test("planFill says why it failed, like the listing writer: no key, a busy Gemin
   await junk.ask(listOn());
   assert.equal((await junk.ask({ action: "planFill", fields }, FORM)).code, "bad-output");
 
+  // A timeout is not retried.
+  const timedOut = setup({ ...withListing(), gemini: [{ throw: named("TimeoutError", "timed out") }] });
+  await timedOut.ask(listOn());
+  assert.equal((await timedOut.ask({ action: "planFill", fields }, FORM)).code, "timeout");
+  assert.equal(timedOut.calls.length, 1);
+
   // Nothing to ask: no call at all.
   const none = setup(withListing());
   await none.ask(listOn());
   assert.deepEqual(await none.ask({ action: "planFill", fields: [field("Color", { value: "Black" })] }, FORM), { success: true, answers: [] });
   assert.equal(none.calls.length, 0);
+});
+
+test("planFill matches direct listing specifics without calling Gemini if all fields are matched", async () => {
+  const t = setup({ local: { [`listing:${ID}`]: { listing: { title: "Ring", description: "Desc", itemSpecifics: [{ name: "Brand", value: "Unbranded" }] } } } });
+  await t.ask(listOn());
+  const reply = await t.ask({ action: "planFill", fields: [field("Brand", { options: BRANDS, custom: true })] }, FORM);
+  assert.deepEqual(reply, { success: true, answers: [{ name: "attributes.Brand", value: "Unbranded" }] });
+  assert.equal(t.calls.length, 0);
 });
 
 test("Done forgets the product, and the panel can open the dashboard and the AI settings but nothing else", async () => {
@@ -260,7 +286,7 @@ test("Done forgets the product, and the panel can open the dashboard and the AI 
 test("the panel is a content script on eBay's listing pages only, with its two stylesheets exposed to them and no new host permission", () => {
   const manifest = JSON.parse(read("manifest.json"));
   const script = manifest.content_scripts.find((c) => c.js.includes("content-ebay.js"));
-  assert.deepEqual(script.js, ["lib/panel.js", "lib/ebayform.js", "content-ebay.js"]);
+  assert.deepEqual(script.js, ["lib/panel.js", "lib/errors.js", "lib/ebayform.js", "content-ebay.js"]);
   // Which sites: manifest.test.js checks them against REGIONS. Here, only that each one is a listing path.
   assert.ok(script.matches.every((m) => /^https:\/\/www\.ebay\.[a-z.]+\/(lstng\*|sl\/\*)$/.test(m)));
   const [war, ...more] = manifest.web_accessible_resources;
@@ -268,7 +294,7 @@ test("the panel is a content script on eBay's listing pages only, with its two s
   assert.ok(war.matches.every((m) => /^https:\/\/www\.ebay\.[a-z.]+\/\*$/.test(m)));
   for (const file of [...script.js, ...war.resources]) assert.ok(fs.existsSync(path.join(__dirname, "..", file)), file);
   assert.equal(manifest.host_permissions.some((h) => /ebay/.test(h)), false);
-  assert.deepEqual(manifest.permissions, ["storage", "identity"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
 });
 
 test("the page script builds its panel without markup strings, never reaches for the buttons that publish, and loads the worker's lists", () => {
@@ -295,82 +321,81 @@ test("the eBay part of the worker never touches a sheet: no Google call, no writ
   assert.doesNotMatch(section, /sheetsFetch|googleFetch|putCells|writeRows?|batchUpdate|values:|deleteDimension|clear|\.remove\(|enqueue/); // the one write is setStatus, the worker's own status change
 });
 
-/* Create Listing from an AliExpress page, and the panel's product cards */
+/* A product saved from an AliExpress page and sent to eBay, and the panel's product cards */
 
 const ALI = "https://www.aliexpress.com/item/1005001234567890.html";
 const SAVE = { title: "Skull ring", price: "8.99", salePrice: "", link: ALI, currency: "GBP", image: "", dest: "local" };
 const written = answer({ title: "Skull Ring Men Biker", description: "A heavy ring.\n\nMaterial & features\n- Steel", itemSpecifics: [], variants: [], analysis: { score: 80, summary: "ok", redFlags: [] } });
 
-test("Create Listing saves the product as a Draft and opens eBay in one request, and a second press adds nothing again", async () => {
+// Save to the library from the AliExpress page, then List on eBay from the dashboard (what Create Listing did in one).
+async function saveAndPick(t, data = SAVE) {
+  const saved = await t.ask({ action: "appendToSheet", data }, ALI);
+  const product = { sku: saved.sku, title: data.title, link: data.link, salePrice: null, currency: data.currency };
+  return { saved, picked: await t.ask({ action: "listOnEbay", sheetId: "local", key: ID, product, status: "Not Listed" }) };
+}
+
+test("a library product sent to eBay becomes a Draft; saving it again adds nothing; no AI call on the way", async () => {
   const t = setup({ local: { geminiKey: KEY }, gemini: [] });
-  const first = await t.ask({ action: "quickList", data: SAVE }, ALI);
-  assert.deepEqual(first, { success: true, sku: "L-01", existed: false, region: "UK" });
-  assert.equal(t.store.library.length, 1);
+  const { saved, picked: sent } = await saveAndPick(t);
+  assert.deepEqual([saved.success, saved.sku, sent.region], [true, "L-01", "UK"]);
   assert.equal(t.store.library[0].status, "Draft");
-  assert.equal(t.store["listing:local:L-01"], undefined); // the listing is written on eBay's form, by the panel
   assert.deepEqual(t.tabs, ["https://www.ebay.co.uk/sl/prelist/suggest"]);
   const target = plain(t.store.ebayTarget);
-  assert.deepEqual([target.sheetId, target.key, target.sku, target.title, target.region, target.price], ["local", "L-01", "L-01", "Skull ring", "UK", null]); // a library save has no sell price
-  assert.equal(t.calls.length, 0); // no Gemini call here
-
-  const again = await t.ask({ action: "quickList", data: SAVE }, ALI);
-  assert.deepEqual(again, { success: true, sku: "L-01", existed: true, region: "UK" });
+  assert.deepEqual([target.sheetId, target.key, target.sku, target.title, target.region, target.price], ["local", ID, "L-01", "Skull ring", "UK", null]); // a library save has no sell price
+  assert.equal(t.calls.length, 0);
+  const again = await t.ask({ action: "appendToSheet", data: SAVE }, ALI);
+  assert.deepEqual([again.success, again.existed, again.sku], [true, true, "L-01"]);
   assert.equal(t.store.library.length, 1); // not added twice
-  assert.equal(t.tabs.length, 2); // eBay opens again
-
-  // A removed product saved again is a new one.
-  t.store.library[0].status = "Discontinued";
-  t.store.library = t.store.library.slice();
-  const fresh = await t.ask({ action: "quickList", data: SAVE }, ALI);
-  assert.deepEqual([fresh.success, fresh.existed, fresh.sku], [true, false, "L-02"]);
-});
-
-test("Create Listing needs no Gemini key (the panel writes the listing), and a failed save does not open eBay", async () => {
-  const noKey = setup({});
-  const reply = await noKey.ask({ action: "quickList", data: SAVE }, ALI);
-  assert.deepEqual([reply.success, reply.sku], [true, "L-01"]);
-  assert.equal(noKey.store.library.length, 1);
-  assert.equal(noKey.tabs.length, 1);
-
-  // Nothing was saved: the answer is the save's own, without `saved`.
-  const bad = await noKey.ask({ action: "quickList", data: { ...SAVE, dest: "sheet" } }, ALI);
-  assert.equal(bad.success, false);
-  assert.equal(noKey.tabs.length, 1);
-  assert.equal(bad.saved, undefined);
 });
 
 test("the marketplace of a library product follows its currency, with eBay Germany, Australia and Canada among them", async () => {
   for (const [currency, region, host] of [["USD", "US", "www.ebay.com"], ["EUR", "DE", "www.ebay.de"], ["AUD", "AU", "www.ebay.com.au"], ["CAD", "CA", "www.ebay.ca"], ["PKR", "UK", "www.ebay.co.uk"]]) {
     const t = setup({ local: { geminiKey: KEY }, gemini: [written] });
-    const reply = await t.ask({ action: "quickList", data: { ...SAVE, currency } }, ALI);
-    assert.equal(reply.region, region, currency);
+    const { picked } = await saveAndPick(t, { ...SAVE, currency });
+    assert.equal(picked.region, region, currency);
     assert.deepEqual(t.tabs, [`https://${host}/sl/prelist/suggest`], currency);
   }
 });
 
-test("the panel's cards are the Draft products (and the one just sent), each with its SKU, name and sell price", async () => {
-  const cache = { at: 1, products: [{ sku: "SKU-02", title: "Other", salePrice: 5, status: "Listed" }, { sku: "SKU-01", title: "Skull ring", link: ALI, salePrice: 8.99, status: "Draft" }, { sku: "SKU-03", title: "New", status: "Not Listed" }] };
-  // The sheets can't be read in this test, so the dashboard's last list stands in. A listing of a sheet no longer in the settings is not offered.
-  const t = setup({ local: { geminiKey: KEY, [`cache:${SHEET}`]: cache, "listing:gone-sheet-12345678:SKU-9": LISTING } });
-  await t.ask({ action: "quickList", data: SAVE }, ALI); // the library's L-01 becomes a Draft
+test("the panel's cards are the products with a listing or a queued one, from storage only: no sheet read, no AI call", async () => {
+  const OTHER = "1005002222222222";
+  const QUEUED = "1005003333333333";
+  const local = {
+    [`listing:${ID}`]: { ...LISTING, sheetId: SHEET, createdAt: 5, product: { sku: "SKU-01", title: "Skull ring", salePrice: 8.99, currency: "GBP", link: ALI } },
+    // an older listing names no sheet: the sheet's index places it, and gives its SKU (a formula SKU is read back there)
+    [`listing:${OTHER}`]: { ...LISTING, createdAt: 3, product: { title: "Other", salePrice: 5, link: `https://www.aliexpress.com/item/${OTHER}.html` } },
+    [`index:${SHEET_US}`]: { at: 1, items: { [OTHER]: { sku: "US-07", row: 9 } } },
+    "listing:9999999999": { ...LISTING, sheetId: "gone-sheet-12345678" }, // its sheet was removed from the settings
+    aiQueue: [
+      { itemId: QUEUED, sheetId: SHEET, product: { sku: "SKU-03", title: "New", link: `https://www.aliexpress.com/item/${QUEUED}.html` }, notBefore: 9, tries: 0, error: "" },
+      { itemId: ID, sheetId: SHEET, product: PRODUCT, notBefore: 1, tries: 0, error: "" }, // written already: the listing's card stands
+    ],
+  };
+  const t = setup({ local });
   const { products, current } = await t.ask({ action: "ebayProducts" }, FORM);
-  assert.deepEqual(current, { sheetId: "local", key: "L-01" });
+  assert.equal(current, null);
   assert.deepEqual(products, [
-    { sheetId: "local", key: "L-01", sku: "L-01", title: "Skull ring", price: null, currency: "GBP" },
-    { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Skull ring", price: 8.99, currency: "GBP" },
-  ]); // not the Listed one, not the Not Listed one
-  assert.ok(!JSON.stringify(products).includes("listing")); // cards carry no listing text, only what they show
+    { sheetId: SHEET, key: QUEUED, sku: "SKU-03", title: "New", price: null, currency: "GBP", state: "queued" },
+    { sheetId: SHEET, key: ID, sku: "SKU-01", title: "Skull ring", price: 8.99, currency: "GBP", state: "ready" },
+    { sheetId: SHEET_US, key: OTHER, sku: "US-07", title: "Other", price: 5, currency: "USD", state: "ready" },
+  ]);
+  assert.ok(!JSON.stringify(products).includes("Material")); // cards carry no listing text, only what they show
+  assert.equal(t.calls.length, 0);
 
-  // The product just sent is offered even when its status is not Draft (a sheet with no Status column).
-  const t2 = setup({ local: { [`cache:${SHEET}`]: cache } });
-  await t2.ask(listOn({ key: "SKU-03", product: { sku: "SKU-03", title: "New", link: ALI, currency: "GBP" } }));
-  assert.deepEqual((await t2.ask({ action: "ebayProducts" }, FORM)).products.map((c) => c.key), ["SKU-03", "SKU-01"]);
+  // 60 products open at once, still with no request.
+  const many = {};
+  for (let n = 0; n < 60; n++) many[`listing:${1005004000000000 + n}`] = { ...LISTING, sheetId: SHEET, createdAt: n, product: { sku: `S-${n}`, title: `P ${n}`, link: `https://www.aliexpress.com/item/${1005004000000000 + n}.html` } };
+  const big = setup({ local: many });
+  const list = (await big.ask({ action: "ebayProducts" }, FORM)).products;
+  assert.equal(list.length, 60);
+  assert.equal(list[0].sku, "S-59"); // newest first
+  assert.equal(big.calls.length, 0);
 });
 
 test("Mark listed sets the picked product to Listed once, and only for a product that was picked", async () => {
   const t = setup({ local: {} });
   assert.equal((await t.ask({ action: "ebayListed" }, FORM)).success, false); // nothing picked
-  await t.ask({ action: "quickList", data: SAVE }, ALI);
+  await saveAndPick(t);
   assert.equal(t.store.library[0].status, "Draft");
   assert.equal((await t.ask({ action: "ebayListed" }, FORM)).success, true);
   assert.equal(t.store.library[0].status, "Listed");
@@ -380,38 +405,56 @@ test("Mark listed sets the picked product to Listed once, and only for a product
   assert.equal(t.store.library[0].status, "Draft");
 });
 
-test("Create listing on the panel writes the listing for the picked product and keeps it with the product", async () => {
+test("Write now writes the picked product's listing at once, ahead of the queue, and says why when it can't", async () => {
   const t = setup({ local: { geminiKey: KEY }, gemini: [written] });
-  assert.equal((await t.ask({ action: "ebayCreateListing" }, FORM)).success, false); // nothing picked
-  await t.ask({ action: "quickList", data: SAVE }, ALI);
-  assert.equal((await t.ask({ action: "ebayContext" }, FORM)).listing, null);
-  assert.equal((await t.ask({ action: "ebayCreateListing" }, FORM)).success, true);
-  assert.equal(t.store["listing:local:L-01"].listing.title, "Skull Ring Men Biker");
+  assert.equal((await t.ask({ action: "ebayWriteNow" }, FORM)).success, false); // nothing picked
+  await saveAndPick(t);
+  const later = { itemId: "1005009999999999", sheetId: "local", product: {}, notBefore: 0, tries: 0, error: "" };
+  t.store.aiQueue = [later, { itemId: ID, sheetId: "local", product: { link: ALI, title: "Skull ring" }, notBefore: Date.now() + 180000, tries: 0, error: "" }];
+  const ctx = await t.ask({ action: "ebayContext" }, FORM);
+  assert.equal(ctx.listing, null);
+  assert.deepEqual([ctx.queued.failed, ctx.queued.code], [false, ""]);
+  assert.equal((await t.ask({ action: "ebayWriteNow" }, FORM)).success, true);
+  assert.equal(t.store[`listing:${ID}`].listing.title, "Skull Ring Men Biker");
+  assert.deepEqual(plain(t.store.aiQueue).map((j) => j.itemId), [later.itemId]); // this one went first; the other waits
   assert.equal((await t.ask({ action: "ebayContext" }, FORM)).listing.title, "Skull Ring Men Biker");
-  assert.equal((await t.ask({ action: "ebayCreateListing" }, FORM)).success, true); // the kept one again
-  assert.equal(t.calls.length, 1); // Gemini once
+  assert.equal((await t.ask({ action: "ebayWriteNow" }, FORM)).success, true); // the kept one again
+  assert.equal(t.calls.length, 1); // the AI once
+
+  // No key: nokey at once. A busy key: rate, with the time the job runs again. Nothing queued yet: queued now.
+  const none = setup({});
+  await saveAndPick(none);
+  assert.equal((await none.ask({ action: "ebayWriteNow" }, FORM)).code, "nokey");
+  const busy = setup({ local: { geminiKey: KEY }, gemini: [{ status: 429, json: { error: { details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "30s" }] } } }] });
+  await saveAndPick(busy);
+  const r = await busy.ask({ action: "ebayWriteNow" }, FORM);
+  assert.equal(r.code, "rate");
+  assert.ok(r.retryAt > Date.now());
+  assert.equal(busy.store.aiQueue[0].itemId, ID);
 });
 
 test("clicking a card makes it the product: the price comes from AliSwift's own list, never from the page", async () => {
-  const cache = { at: 1, products: [{ sku: "SKU-01", title: "Skull ring", link: ALI, salePrice: 8.99, status: "Draft" }] };
-  const cacheUs = { at: 1, products: [{ sku: "SKU-01", title: "Skull ring", link: ALI, status: "Draft" }] };
-  const t = setup({ local: { geminiKey: KEY, [`cache:${SHEET}`]: cache, [`cache:${SHEET_US}`]: cacheUs } });
-  const reply = await t.ask({ action: "ebaySelect", sheetId: SHEET, key: "SKU-01", price: 0.01, product: { salePrice: 0.01 } }, FORM);
-  assert.deepEqual(reply, { success: true });
+  const US = "1005005555555555";
+  const t = setup({ local: { geminiKey: KEY,
+    [`listing:${ID}`]: { ...LISTING, sheetId: SHEET, product: { sku: "SKU-01", title: "Skull ring", link: ALI, salePrice: 8.99, currency: "GBP" } },
+    [`listing:${US}`]: { ...LISTING, sheetId: SHEET_US, product: { sku: "SKU-05", title: "Skull ring", link: `https://www.aliexpress.com/item/${US}.html` } } } });
+  const reply = await t.ask({ action: "ebaySelect", sheetId: SHEET, key: ID, price: 0.01, product: { salePrice: 0.01 } }, FORM);
+  assert.equal(reply.success, true);
   assert.deepEqual([t.store.ebayTarget.price, t.store.ebayTarget.region], [8.99, "UK"]);
-  const ctx = await t.ask({ action: "ebayContext" }, FORM);
-  assert.deepEqual(ctx.target, { sku: "SKU-01", title: "Skull ring", price: "8.99", currency: "GBP", host: "www.ebay.co.uk" });
+  // The answer is the context, so the panel needs no second message.
+  assert.deepEqual(reply.target, { sku: "SKU-01", title: "Skull ring", price: "8.99", currency: "GBP", host: "www.ebay.co.uk" });
+  assert.equal(reply.listing.title, "Skull Ring Men Biker");
 
   // A listing of the US sheet with no price known: the card is picked, the price stays empty.
-  await t.ask({ action: "ebaySelect", sheetId: SHEET_US, key: "SKU-01" }, FORM);
+  await t.ask({ action: "ebaySelect", sheetId: SHEET_US, key: US }, FORM);
   assert.equal(t.store.ebayTarget.price, null);
   assert.equal(t.store.ebayTarget.region, "US");
 
-  for (const bad of [{ sheetId: SHEET, key: "SKU-99" }, { sheetId: "nope-nope-nope-1", key: "SKU-01" }, {}, { sheetId: "local", key: "L-01" }]) {
+  for (const bad of [{ sheetId: SHEET, key: "SKU-99" }, { sheetId: "nope-nope-nope-1", key: ID }, {}, { sheetId: "local", key: ID }]) {
     assert.equal((await t.ask({ action: "ebaySelect", ...bad }, FORM)).success, false, JSON.stringify(bad));
   }
   assert.equal(t.store.ebayTarget.sheetId, SHEET_US); // the failed picks changed nothing
-  assert.deepEqual(await t.ask({ action: "ebaySelect", sheetId: SHEET, key: "SKU-01" }, PAGE), { success: false, error: "Not allowed." });
+  assert.deepEqual(await t.ask({ action: "ebaySelect", sheetId: SHEET, key: ID }, PAGE), { success: false, error: "Not allowed." });
 });
 
 test("the AI points at things the page listed: its answer comes back checked, and Gemini is told the page's text is data", async () => {
@@ -459,3 +502,46 @@ test("listing page collapses into circle ball, expands on click, and does NOT cl
   assert.doesNotMatch(code, /document\.addEventListener\(["']click["']/);
 });
 
+
+/* The panel's end states (lib/errors.js endState): one result per step, its message and buttons from the error table */
+
+test("every error code in every panel step shows its own message and buttons; the footer is Done, Try again, or Send logs and Try again", () => {
+  const { endState, errorView, ERROR_TABLE } = require("../lib/errors.js");
+  assert.deepEqual(endState({ basics: true, specifics: true, photos: true }), { text: "", fixes: [], footer: ["done"], retryAt: 0 });
+  for (const step of ["write", "basics", "specifics", "photos"]) {
+    for (const code of [...Object.keys(ERROR_TABLE), "never-heard-of-it"]) {
+      const view = errorView({ step, code });
+      const retry = view.buttons.includes("retry");
+      const logs = view.buttons.includes("logs");
+      const fixes = view.buttons.filter((b) => b !== "retry" && b !== "logs");
+      const at = `${step}/${code}`;
+      // All steps failed (here the only one): Send logs and Try again, or Done for a failure no retry can help.
+      const all = endState({ [step]: { code, error: "raw provider text" } });
+      assert.equal(all.text, view.text, at);
+      assert.doesNotMatch(all.text, /raw provider text/, at);
+      assert.deepEqual(all.fixes, fixes, at);
+      assert.deepEqual(all.footer, retry ? ["logs", "retry"] : logs ? ["logs", "done"] : ["done"], at);
+      // Some failed: Try again only (Send logs too when the code asks for it). The working step never takes the message.
+      const some = endState({ basics: true, [step === "basics" ? "specifics" : step]: { code } });
+      assert.equal(some.text, errorView({ step: step === "basics" ? "specifics" : step, code }).text, at);
+      assert.deepEqual(some.footer, [...(logs ? ["logs"] : []), retry ? "retry" : "done"], at);
+    }
+  }
+  // The first failed step's message stands; a busy key's time comes back for the countdown.
+  const at = Date.now() + 42000;
+  const two = endState({ write: true, basics: { code: "unfilled" }, specifics: { code: "rate", retryAt: at } });
+  assert.equal(two.text, "Some boxes couldn't be filled. Copy them from the list below.");
+  assert.equal(two.retryAt, at);
+  assert.match(endState({ photos: { code: "unfilled" } }).text, /didn't take the photos/);
+  assert.equal(endState({ write: { code: "nokey" } }).fixes.join(), "settings,keys");
+  assert.equal(endState({ basics: { code: "reloaded" } }).fixes.join(), "reload");
+});
+
+test("the panel's footer has no Copy report, no always-there Done and no Mark listed; Write now replaces Create listing", () => {
+  const code = read("content-ebay.js").replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(code, /Copy report|Mark listed|Create listing|ebayCreateListing/);
+  assert.match(code, /action: "ebayWriteNow"/);
+  assert.match(code, /endState\(/);
+  assert.match(code, /code: "reloaded"/);
+  assert.doesNotMatch(read("background.js"), /ebayCreateListing/);
+});

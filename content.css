@@ -28,7 +28,7 @@
   cursor: pointer;
 }
 
-.aliswift-btn-list {
+.aliswift-btn[data-mode="remove"] {
   background: #1d1b20;
 }
 

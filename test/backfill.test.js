@@ -645,7 +645,7 @@ test("10. Manifest: host_permissions include aliexpress.com and aliexpress-media
   assert.ok(manifest.host_permissions.includes("https://*.aliexpress.com/*"));
   assert.ok(manifest.host_permissions.includes("https://*.aliexpress-media.com/*"));
 
-  assert.deepEqual(manifest.permissions, ["storage", "identity"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
 });
 
 /* ================================================================

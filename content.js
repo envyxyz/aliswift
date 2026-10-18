@@ -1,4 +1,6 @@
-// Runs on AliExpress product pages. Depends on lib/shared.js (loaded first by the manifest).
+// Runs on AliExpress product pages. Depends on lib/shared.js and lib/errors.js (loaded first by the manifest).
+
+reportCrashes();
 
 const PRICE_SELECTORS = [
   '[class*="price-default--current"]',
@@ -14,7 +16,10 @@ const SHIPPING_SELECTORS = [
 // Where a click saves: "sheet", or "local" (the on-device library) when signed out or without a sheet.
 // authState is asked on inject and when the tab becomes visible; the library lives in storage a page can't read.
 const LABELS = { sheet: "Add to Sheet", local: "Save to library" };
+const REMOVE = { sheet: "Remove from Sheet", local: "Remove from library" };
 let dest = "sheet";
+let inSheet = false; // the product on this page is saved where a click goes: the first button removes it
+let confirmUntil = 0; // Remove's second click counts until then
 let resetTimer;
 
 // A page left open while the extension reloads or updates is cut off from it: sendMessage then throws at once (a .catch on
@@ -27,12 +32,20 @@ const ask = (message) => {
   }
 };
 
+// Where a click saves, and whether the product is already there (the sheet's own word, through the worker's index, so
+// it is right even after a row was deleted by hand).
 async function refreshDest() {
   const state = await ask({ action: "authState" });
   if (!state) return; // the worker didn't answer: keep what is known
   dest = destination(state.signedIn, await getActiveSheet());
+  inSheet = Boolean((await ask({ action: "inSheet", link: getLink(), dest }))?.inSheet);
   const btn = document.getElementById("aliswift-page-btn");
-  if (btn && !btn.dataset.state) btn.textContent = LABELS[dest]; // never over a Saving... or result text
+  if (btn && !btn.dataset.state) showLabel(btn); // never over a Saving... or result text
+}
+
+function showLabel(btn) {
+  btn.textContent = (inSheet ? REMOVE : LABELS)[dest];
+  btn.dataset.mode = inSheet ? "remove" : "add";
 }
 
 // First number found in the first matching element, with the text it came from (the currency is read
@@ -212,14 +225,18 @@ async function scrapeRow(where = dest) {
   return row;
 }
 
-/* The three buttons: Add to Sheet (just the save), Create Listing (the save, the AI listing and eBay's form, in one),
-   and Download Photos (saves gallery and variant images to a folder). */
+/* The two buttons: Add to Sheet, which is Remove from Sheet while the product is in the sheet (the worker writes its
+   listing in the background a few minutes after an add), and Download Photos (gallery and variant images to a folder).
+   What a failure says comes from lib/errors.js. */
 
 const ACTIONS = {
   add: { id: "aliswift-page-btn", busy: { sheet: "Adding...", local: "Saving..." }, done: "Added" },
-  list: { id: "aliswift-list-btn", busy: { sheet: "Working...", local: "Working..." }, done: "Listed", label: "Create Listing" },
   download: { id: "aliswift-dl-btn", busy: { sheet: "Saving...", local: "Saving..." }, done: "Saved", icon: true },
 };
+const STEPS = { add: "add", download: "download" };
+
+// A failed reply's sentence: lib/errors.js's for its code; one with no code is the worker's or this page's own sentence.
+const failText = (result, step) => (result?.code ? errorView({ step, ...result }).text : result?.error ?? errorView({ step }).text);
 const buttons = () => Object.fromEntries(Object.entries(ACTIONS).map(([k, a]) => [k, document.getElementById(a.id)]));
 const note = (text, tone = "") => {
   const el = document.getElementById("aliswift-note");
@@ -243,24 +260,39 @@ function priceNote(row) {
   return row.kind === "unset" ? `, ${row.currency}` : row.kind === "unknown" ? ". Currency unknown." : "";
 }
 
-// What a failed Create Listing says: how far it got, then why, and what to do about it.
-function listFailure(result) {
-  if (!result.saved) return result.error ?? "Something went wrong";
-  const kept = `Saved as ${result.sku || "a new row"}, but no listing was made. `;
-  if (result.code === "nokey" || result.code === "invalid-key") return `${kept}Check your Gemini key in AliSwift settings (AI tab), then press Create Listing again.`;
-  if (result.code === "rate") return `${kept}Gemini is busy. Press Create Listing again in a minute.`;
-  return `${kept}${result.error ?? ""} Press Create Listing again to retry.`;
+// Remove asks for a second click, saying first when an order uses the product's SKU; the second click clears the
+// product's cells in the sheet (or takes it out of the library).
+async function remove(btn) {
+  const place = dest === "local" ? "library" : "sheet";
+  if (Date.now() > confirmUntil) {
+    btn.disabled = true;
+    const check = dest === "local" ? null : await ask({ action: "removeCheck", link: getLink(), dest });
+    confirmUntil = Date.now() + 6000;
+    setState(btn, "confirm", "Click again to remove");
+    const warn = check?.orderSku ? `An order uses ${check.orderSku}. Removing this product can mix up records later. Remove anyway?` : "";
+    note(warn || `Click again to remove it from your ${place}.`, warn ? "error" : "");
+    resetTimer = setTimeout(reset, 6000);
+    return;
+  }
+  confirmUntil = 0;
+  setState(btn, "loading", "Removing...");
+  const result = (await ask({ action: "removeFromSheet", link: getLink(), dest })) ?? { code: "reloaded" };
+  if (result.success) inSheet = false;
+  setState(btn, result.success ? "success" : "error", result.success ? "Removed" : "Try again");
+  note(result.success ? `Removed from your ${place}.` : failText(result, "remove"), result.success ? "ok" : "error");
+  resetTimer = setTimeout(() => (reset(), refreshDest()), result.success ? 3500 : 6000);
 }
 
 async function run(kind) {
+  clearTimeout(resetTimer);
+  if (kind === "add" && inSheet) return remove(buttons().add);
   const action = ACTIONS[kind];
   const all = buttons();
   const btn = all[kind];
-  clearTimeout(resetTimer);
   const where = dest;
   for (const b of Object.values(all)) if (b) b.disabled = true;
   setState(btn, "loading", action.busy[where]);
-  note(kind === "list" ? "Saving, writing the listing and opening eBay..." : kind === "download" ? "Downloading photos..." : "");
+  note(kind === "download" ? "Downloading photos..." : "");
   let result;
   let row = {};
   try {
@@ -268,7 +300,7 @@ async function run(kind) {
       const details = getDetails();
       const title = document.querySelector('h1[data-pl="product-title"]')?.textContent ?? "";
       const image = getImage() || details.images?.[0] || "";
-      result = await chrome.runtime.sendMessage({ action: "downloadPhotos", data: { link: getLink(), image, title, details } });
+      result = await chrome.runtime.sendMessage({ action: "downloadPhotos", data: { link: getLink(), image, title, details, dest: where } });
     } else {
       row = await scrapeRow(where);
       const { title, price, salePrice, link, currency, image } = row;
@@ -279,13 +311,13 @@ async function run(kind) {
         const details = getDetails();
         const finalImage = image || details.images?.[0] || details.variants?.[0]?.image || "";
         result = await chrome.runtime.sendMessage({
-          action: kind === "list" ? "quickList" : "appendToSheet",
+          action: "appendToSheet",
           data: { title, price, salePrice, link, currency, image: finalImage, dest: where, details },
         });
       }
     }
   } catch (e) {
-    result = { error: /context invalidated/i.test(e.message) ? "AliSwift was updated. Reload this page and try again." : e.message };
+    result = /context invalidated/i.test(e.message) ? { code: "reloaded" } : { error: e.message };
   }
 
   let message;
@@ -296,9 +328,8 @@ async function run(kind) {
     if (kind === "download") {
       message = `Saved ${result.saved} of ${result.total} photo${result.total === 1 ? "" : "s"} to ${result.folder}.`;
     } else {
-      message = kind === "list"
-        ? `${result.existed ? "Already in your" : "Saved to your"} ${place}${sku}. Marked Draft; eBay is opening. Pick it in the AliSwift panel there.`
-        : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
+      inSheet = true;
+      message = result.existed ? `Already in your ${place}${sku}.` : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
     }
   } else if (result?.code === "permission") {
     setState(btn, "error", "Permission");
@@ -307,7 +338,7 @@ async function run(kind) {
       el.textContent = "";
       el.dataset.tone = "error";
       const span = document.createElement("span");
-      span.textContent = "Downloads not allowed: ";
+      span.textContent = `${errorView({ step: "download", code: "permission" }).text} `;
       const link = document.createElement("button");
       link.type = "button";
       link.textContent = "Open Settings to Allow";
@@ -324,18 +355,21 @@ async function run(kind) {
     message = "Signed out. Click again to save to your library.";
   } else {
     setState(btn, "error", "Try again");
-    message = kind === "list" ? listFailure(result ?? {}) : (result?.error ?? "Something went wrong");
+    message = failText(result ?? { code: "reloaded" }, STEPS[kind]);
   }
   for (const b of Object.values(all)) if (b) b.disabled = false;
   note(message, result?.success ? "ok" : "error");
-  resetTimer = setTimeout(() => reset(), result?.success ? (kind === "list" ? 6000 : 3500) : 6000);
+  resetTimer = setTimeout(() => reset(), result?.success ? 3500 : 6000);
 }
 
 // All buttons back to their words, and the note emptied.
 function reset() {
   const all = buttons();
-  if (all.add) setState(all.add, "", LABELS[dest]);
-  if (all.list) setState(all.list, "", ACTIONS.list.label);
+  confirmUntil = 0;
+  if (all.add) {
+    setState(all.add, "", "");
+    showLabel(all.add);
+  }
   if (all.download) setState(all.download, "", "");
   note("");
 }
@@ -370,8 +404,8 @@ function injectButton() {
       svg.append(path);
       btn.append(svg);
     } else {
-      btn.className = kind === "list" ? "aliswift-btn aliswift-btn-list" : "aliswift-btn";
-      btn.textContent = kind === "list" ? ACTIONS.list.label : LABELS[dest];
+      btn.className = "aliswift-btn";
+      showLabel(btn);
     }
     // A click the page's own script makes (element.click()) is not the seller's: it must not save, write or open anything.
     btn.addEventListener("click", (e) => e.isTrusted && run(kind));

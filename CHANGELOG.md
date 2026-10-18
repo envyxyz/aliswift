@@ -4,9 +4,33 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-18
+
+### Added
+
+- **Remove from Sheet**: on an AliExpress product page, **Add to Sheet** becomes **Remove from Sheet** once the product is in your sheet (AliSwift keeps a small index of the sheet's items, refreshed every 5 minutes and after every add or remove). Remove asks for a second click, then clears only the cells AliSwift wrote in that row (formulas stay), drops the queued or kept listing, and the next Add reuses the row. Adding a product that is already in the sheet no longer adds a second row. If the SKU column is a formula, AliSwift reads the SKU back after the add.
+- **Listings are written in the background**: about 3 minutes after an Add (your window to change your mind), one product a minute, by a saved queue that survives the browser closing. A rate limit makes a job wait exactly as long as the provider says; after 5 tries it is marked failed. The dashboard card shows Writing listing..., View listing or Retry listing.
+- **Inspector on the dashboard**: an eye button on each card opens a side sheet (a bottom sheet on a phone) with the product's cost, sell price, eBay fees, profit and margin, and its listing (score, red flags, title, item specifics, description). Cost and sell price are editable and save only the cell that changed; a price your sheet calculates with a formula is shown read-only and never overwritten. **View listing** opens the same sheet, which replaces the old listing dialog. A product with no listing yet shows its queue state and **Write now**.
+- **eBay fees per sheet**: Settings, Pricing has a fee percentage and a fixed fee (starting at 13.6% and 0.40, eBay US's usual figures; set your own marketplace's). Used only for the inspector's profit.
+- **Error reports**: errors and timings from AI requests, failed actions and crashes are queued on your device and sent every 5 minutes to the developer's database; turn them off in Settings, General. Prompts and answers are included only if you opt in, or when you press **Send logs** on a failed run, which also shows a reference to quote. Keys, sheet names and order data are never sent. See PRIVACY.md. If a report can't be sent, Send logs copies it instead.
+- **One list of error messages**: every page says the same true sentence for the same failure, names the step that failed, and offers the button that fixes it (Open settings, Sign in, Reload page, Try again with a countdown).
+- **AI key pool**: the AI tab holds several keys from Gemini, Groq and OpenRouter, each marked Free or Paid, with a status (Ready, Busy until, Daily limit, Rejected). Free keys are used first; a Paid key takes over when every free key is busy. **Check** asks the provider which models the key can use. A **Get API keys** guide says where to get each. Your old Gemini key moves into the pool as a Free key.
+- **Send product photos to the AI**: a setting, off by default (Gemini keys only); at most 2 small photos.
+- **Sheet selector for order imports**: A sheet dropdown on the Seller Hub order import panel allows choosing which connected sheet receives imported orders when multiple sheets are configured.
+- **Automated test suite**: Node test coverage for background service worker handlers, dashboard components, order extraction, and panel operations.
+
 ### Changed
 
-- **Listings are written on eBay, not on the dashboard**: a card's button is now **List on eBay** (the product becomes a Draft and eBay opens); the AliExpress page's Create Listing also saves the product as a Draft and opens eBay without calling Gemini. The AliSwift panel on eBay's form lists the Draft products (and the one just sent), and its **Create listing** button writes the listing with Gemini, keeps it with the product (the dashboard's View listing shows it), and fills the form. The product becomes Listed only after eBay's published page is seen, or when you press **Mark listed**. A sheet with no Status column still offers the product just sent.
+- **Create Listing is gone** from AliExpress pages (and the dashboard card's List on eBay opens eBay without calling the AI): the listing is already written by the queue.
+- **The eBay panel is instant and clearer**: its product list comes from saved listings only, with no Google Sheets reads when it opens or when you pick a product. A product still in the queue shows Writing listing... and **Write now**. After **Fill form**, the footer shows Done when every step worked, **Try again** (only the steps that failed) when some did not, and **Send logs** with Try again when all failed. A later step can no longer hide an earlier step's error. **Copy report** and **Mark listed** are gone (eBay's published page is still detected automatically; change a status on the dashboard).
+- **Listings are kept under the AliExpress item number**, not the sheet and SKU, so a product has one listing wherever it is. Existing listings move on update.
+- **Photos download into the product's real SKU folder**, including a SKU your sheet's formula makes.
+- **Item specifics the listing already names are filled without asking the AI**; the AI is asked only about the rest, and leaves out fields it can't fill.
+- **AI requests wait their turn**: one at a time, at least 4 seconds apart on one key. A busy key rests for exactly as long as the provider says, and Gemini's daily limit is told apart from a busy minute. A timeout is no longer retried on the same key: the next key is tried.
+- **Default model is Gemini 3.5 Flash-Lite** (Google no longer offers 2.5 Flash-Lite to new keys); a listing answer that fails the checks is asked once more on Gemini 3.8 Flash. The Model box is gone: each key has its own model. Following Google's Gemini 3 guidance, no temperature is sent to 3.x models and Flash-Lite keeps its default (minimal) thinking.
+- **Groq and OpenRouter defaults**: Groq now preselects `openai/gpt-oss-120b` with low reasoning (Llama 3.3 70B is no longer offered), OpenRouter preselects the free `nvidia/nemotron-3-super-120b-a12b:free` with reasoning off, which brings an answer from about 80 seconds to about 10. **Check** on OpenRouter lists only models that can answer in JSON. All three providers pass the live listing and item-specifics test.
+- **A key that times out, can't be reached or lacks its model no longer stops the request**: the next key is tried (a missing model rests that key for 10 minutes), and the message shown is a busy key's countdown if there is one, else the first failure. A failed retry on the fallback model reports the first answer's problem and never rests the key.
+- **A queued listing stops for a key problem instead of using up its tries**: no key, a rejected key or a missing model marks it Retry listing, and it runs again by itself as soon as you change your keys.
 
 ## [0.7.1] - 2026-10-12
 
@@ -120,7 +144,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/envyxyz/aliswift/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/envyxyz/aliswift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/envyxyz/aliswift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/envyxyz/aliswift/releases/tag/v0.6.0

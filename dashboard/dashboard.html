@@ -255,95 +255,129 @@
     </form>
   </dialog>
 
-  <!-- Listing dialog: one listing per product, written by Gemini. Everything inside is filled with textContent. -->
-  <dialog id="listingDialog" aria-labelledby="lsTitle" style="--dialog-w:640px">
-    <form id="listingForm">
-      <header class="dialog-head" data-close>
-        <div>
-          <h2 id="lsTitle">Listing</h2>
-          <p class="dialog-sub" id="lsSub"></p>
+  <!-- Inspector: one product's numbers and its listing, in a side sheet (a bottom sheet on a phone). Everything inside is
+       filled with textContent or .value. -->
+  <dialog id="inspector" class="sheet" aria-labelledby="insTitle">
+    <form id="inspectorForm" method="dialog">
+      <header class="dialog-head ins-head">
+        <div class="ins-photo" id="insPhoto" aria-hidden="true"></div>
+        <div class="ins-id">
+          <h2 id="insTitle"></h2>
+          <p class="ins-sub">
+            <span id="insSku"></span>
+            <span class="tag" id="insStatus"></span>
+            <a id="insLink" href="#" target="_blank" rel="noopener" hidden>AliExpress page</a>
+          </p>
         </div>
-        <button type="button" class="icon-btn" id="lsCloseX" aria-label="Close">
+        <button type="button" class="icon-btn" id="insClose" aria-label="Close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
           </svg>
         </button>
       </header>
       <div class="dialog-body" id="lsBody">
-        <div id="lsError" class="notice" data-tone="error" role="alert" hidden>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-          </svg>
-          <div>
-            <p id="lsErrorMsg"></p>
-            <p id="lsErrorDetail"></p>
+        <section id="insNumbers" aria-labelledby="h-nums">
+          <h3 id="h-nums">Numbers</h3>
+          <div class="ins-grid">
+            <div>
+              <label for="insCost" id="insCostLabel">Cost</label>
+              <input id="insCost" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="insCostNote">
+              <p class="note" id="insCostNote" hidden>From your sheet's formula</p>
+            </div>
+            <div id="insSellBox">
+              <label for="insSell" id="insSellLabel">Sell price</label>
+              <input id="insSell" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="insSellNote">
+              <p class="note" id="insSellNote" hidden>From your sheet's formula</p>
+            </div>
           </div>
-          <a class="btn btn-quiet btn-sm" id="lsSettings" href="../options/options.html#ai" target="_blank" rel="noopener" hidden>Open settings</a>
-          <button type="button" class="btn btn-quiet btn-sm" id="lsRetry">Try again</button>
-        </div>
-        <div id="lsBusy" class="notice" role="status" hidden>
-          <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-          </svg>
-          <div id="lsBusyMsg">Writing your listing...</div>
-        </div>
-        <div id="lsLimited" class="notice" role="note" hidden>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
-          </svg>
-          <div>Written from the product name and image only, so check the details before you list.</div>
-        </div>
-        <div id="lsWarn" class="notice" data-tone="warn" role="note" hidden>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-          </svg>
-          <div id="lsWarnText"></div>
-        </div>
-        <div id="lsContent" hidden>
-          <section class="score" aria-labelledby="h-score">
-            <div class="score-line">
-              <h3 id="h-score">Listing score</h3>
-              <span class="tag" id="lsScore" hidden></span>
+          <dl class="ins-sum" id="insSum" aria-live="polite">
+            <div><dt>eBay fees</dt><dd id="insFees">-</dd></div>
+            <div><dt>Profit</dt><dd id="insProfit">-</dd></div>
+            <div><dt>Margin</dt><dd><span class="tag" id="insMargin" hidden></span><span id="insMarginNone">-</span></dd></div>
+          </dl>
+          <p class="note" id="insFeeNote"></p>
+        </section>
+
+        <section id="insListing" aria-labelledby="h-listing">
+          <h3 id="h-listing">Listing</h3>
+          <div id="lsError" class="notice" data-tone="error" role="alert" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <div>
+              <p id="lsErrorMsg"></p>
             </div>
-            <p class="muted" id="lsSummary"></p>
-            <div id="lsFlags"></div>
-          </section>
-          <section>
-            <div class="field-head">
-              <label for="lsTitleIn">Title</label>
-              <span class="counter" id="lsCount" aria-hidden="true">0/80</span>
-            </div>
-            <div class="input-row">
-              <input id="lsTitleIn" maxlength="80" autocomplete="off" aria-describedby="lsCountSr">
-              <span id="lsCopyTitleSlot"></span>
-            </div>
-            <span class="sr-only" id="lsCountSr"></span>
-          </section>
-          <section id="lsSpecs" aria-labelledby="h-specs">
-            <h3 id="h-specs">Item specifics</h3>
-            <div class="kv-list" id="lsSpecList"></div>
-          </section>
-          <section id="lsVariants" aria-labelledby="h-variants">
-            <div class="field-head"><h3 id="h-variants">Variants</h3></div>
-            <div class="kv-list" id="lsVariantList"></div>
-          </section>
-          <section>
-            <div class="field-head">
-              <label for="lsDesc">Description</label>
-              <span id="lsCopyDescSlot"></span>
-            </div>
-            <textarea id="lsDesc" rows="8"></textarea>
-          </section>
-        </div>
+            <a class="btn btn-quiet btn-sm" id="lsSettings" href="../options/options.html#ai" target="_blank" rel="noopener" hidden>Open settings</a>
+            <button type="button" class="btn btn-quiet btn-sm" id="lsRetry">Try again</button>
+          </div>
+          <div id="lsBusy" class="notice" role="status" hidden>
+            <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+            </svg>
+            <div id="lsBusyMsg">Writing your listing...</div>
+          </div>
+          <div id="lsNone" class="notice" role="note" hidden>
+            <div id="lsNoneMsg"></div>
+            <button type="button" class="btn btn-sm" id="lsWrite">Write now</button>
+          </div>
+          <div id="lsLimited" class="notice" role="note" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+            </svg>
+            <div>Written from the product name and image only, so check the details before you list.</div>
+          </div>
+          <div id="lsWarn" class="notice" data-tone="warn" role="note" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+            </svg>
+            <div id="lsWarnText"></div>
+          </div>
+          <div id="lsContent" hidden>
+            <section class="score" aria-labelledby="h-score">
+              <div class="score-line">
+                <h3 id="h-score">Listing score</h3>
+                <span class="tag" id="lsScore" hidden></span>
+              </div>
+              <p class="muted" id="lsSummary"></p>
+              <div id="lsFlags"></div>
+            </section>
+            <section>
+              <div class="field-head">
+                <label for="lsTitleIn">Title</label>
+                <span class="counter" id="lsCount" aria-hidden="true">0/80</span>
+              </div>
+              <div class="input-row">
+                <input id="lsTitleIn" maxlength="80" autocomplete="off" aria-describedby="lsCountSr">
+                <span id="lsCopyTitleSlot"></span>
+              </div>
+              <span class="sr-only" id="lsCountSr"></span>
+            </section>
+            <section id="lsSpecs" aria-labelledby="h-specs">
+              <h3 id="h-specs">Item specifics</h3>
+              <div class="kv-list" id="lsSpecList"></div>
+            </section>
+            <section id="lsVariants" aria-labelledby="h-variants">
+              <div class="field-head"><h3 id="h-variants">Variants</h3></div>
+              <div class="kv-list" id="lsVariantList"></div>
+            </section>
+            <section>
+              <div class="field-head">
+                <label for="lsDesc">Description</label>
+                <span id="lsCopyDescSlot"></span>
+              </div>
+              <textarea id="lsDesc" rows="8"></textarea>
+            </section>
+          </div>
+        </section>
       </div>
       <footer class="dialog-foot">
         <div class="ls-confirm" id="lsConfirm" hidden>
           <p role="alert">Replace your edits with a new version?</p>
           <button type="button" class="btn btn-quiet" id="lsKeep">Keep my edits</button>
-          <button type="button" class="btn" id="lsRegenGo">Regenerate</button>
+          <button type="button" class="btn" id="lsRegenGo">Rewrite</button>
         </div>
         <div class="actions ls-actions" id="lsActions">
-          <button type="button" class="btn btn-quiet" id="lsRegen">Regenerate</button>
+          <button type="button" class="btn btn-quiet" id="lsRegen">Rewrite listing</button>
           <button type="button" class="btn btn-quiet" id="lsCopyAll">Copy all</button>
           <button type="button" class="btn btn-quiet" id="lsEbay">List on eBay</button>
           <button type="button" class="btn" id="lsDone">Done</button>
@@ -402,6 +436,7 @@
   <!-- Scripts -->
   <script src="../lib/shared.js"></script>
   <script src="../lib/ui.js"></script>
+  <script src="../lib/errors.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

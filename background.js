@@ -1,4 +1,4 @@
-importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/gemini.js", "lib/listing.js", "lib/fillplan.js", "lib/aimap.js");
+importScripts("lib/shared.js", "lib/template.js", "lib/importmap.js", "lib/diag.js", "lib/ai.js", "lib/listing.js", "lib/fillplan.js", "lib/aimap.js");
 
 // The saved library, rates and sign-in state are for AliSwift's own pages and this worker, never a web page's script.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -11,9 +11,11 @@ chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 // A sheetId of "local" means the on-device library (no sheet, no sign-in).
 const handlers = {
   appendToSheet: { aliOk: true, run: (request) => appendRow(request.data) },
-  downloadPhotos: { aliOk: true, run: (request) => downloadPhotos(request.data) },
+  downloadPhotos: { aliOk: true, run: (request) => savePhotos({ ...request.data, sheetId: request.data?.dest === LOCAL ? LOCAL : undefined }) },
+  inSheet: { aliOk: true, run: (request) => inSheet(request) },
+  removeCheck: { aliOk: true, run: (request) => removeCheck(request) },
+  removeFromSheet: { aliOk: true, run: (request) => removeFromSheet(request) },
   openOptions: { aliOk: true, run: (request) => openOptions(request?.tab) },
-  quickList: { aliOk: true, run: (request) => quickList(request.data) },
   createSheet: { pagesOnly: true, run: (request) => createSheet(request.data) },
   authState: { run: () => authState() },
   signIn: { pagesOnly: true, run: () => signIn() },
@@ -22,6 +24,8 @@ const handlers = {
   setRate: { pagesOnly: true, run: (request) => setRate(request.data) },
   listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
   setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
+  priceLocks: { pagesOnly: true, run: (request) => priceLocks(request) },
+  updateProduct: { pagesOnly: true, run: (request) => updateProduct(request) },
   listOrders: { pagesOnly: true, run: (request) => listOrders(request.sheetId) },
   addOrder: { pagesOnly: true, run: (request) => addOrder(request.sheetId, request.order) },
   updateOrder: { pagesOnly: true, run: (request) => updateOrder(request) },
@@ -37,16 +41,18 @@ const handlers = {
   listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
   ebayContext: { ebaySell: true, run: () => ebayContext() },
   ebayProducts: { ebayOnly: true, run: () => ebayProducts() },
-  ebayCreateListing: { ebayOnly: true, run: () => ebayCreateListing() },
+  ebayWriteNow: { ebayOnly: true, run: () => ebayWriteNow() },
   ebayListed: { ebaySell: true, run: () => ebayListed() },
   ebayPhoto: { ebayOnly: true, run: (request) => ebayPhoto(request.n) },
-  ebayPhotosSave: { ebayOnly: true, run: (request) => savePhotos(request.variantsOnly === true) },
+  ebayPhotosSave: { ebayOnly: true, run: (request) => ebayPhotosSave(request.variantsOnly === true) },
   importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
   aiMap: { aiTask: true, run: (request, sender) => aiMap(request, sender) },
   ebaySelect: { ebayOnly: true, run: (request) => ebaySelect(request) },
   planFill: { ebayOnly: true, run: (request) => planFill(request) },
   ebayDone: { ebayOnly: true, run: () => chrome.storage.local.remove("ebayTarget").then(() => ({ success: true })) },
   openPage: { ebayOnly: true, run: (request) => openPage(request.page) },
+  sendLogs: { logsOk: true, run: async (request) => ({ success: true, ref: await diagReport(request.report) }) },
+  diagCrash: { run: (request) => diagCrash(request) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
@@ -56,6 +62,9 @@ const fail = (error) => ({
   error: error.message,
   ...(error.code && { code: error.code }),
   ...(error.model && { model: error.model, status: error.status }),
+  ...(error.provider && { provider: error.provider }),
+  ...(error.retryAt && { retryAt: error.retryAt }),
+  ...(error.report && { report: error.report }),
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -69,6 +78,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     : handler.ebaySell ? onListingForm(url) || onSellFlow(url)
     : handler.ordersOnly ? onOrdersPage(url)
     : handler.aiTask ? onAliExpress(url) || onListingForm(url) || onOrdersPage(url)
+    : handler.logsOk ? own || onListingForm(url)
     : true;
   if (!allowed) {
     sendResponse({ success: false, error: "Not allowed." });
@@ -76,9 +86,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   Promise.resolve()
     .then(() => handler.run(request, sender))
-    .catch(fail)
+    .catch((error) => {
+      diagError(request.action, error);
+      return fail(error);
+    })
     .then(sendResponse);
   return true;
+});
+
+/* Diagnostics (lib/diag.js): failed requests and crashes, besides the AI requests lib/ai.js reports. */
+
+// A failed request: which one and its code. A message only when there is no code, with anything quoted (a tab or sheet
+// name) taken out. ponytail: an unquoted name in a message would still go; every message here quotes them.
+function diagError(action, error) {
+  const message = error.code ? "" : String(error.message ?? "").replace(/"[^"]*"|“[^”]*”/g, '"…"').slice(0, 200);
+  diagEvent({ kind: "error", action: String(action).slice(0, 40), code: String(error.code ?? ""), ...(message && { message }) });
+}
+
+// A crash in a content script, as reportCrashes (lib/errors.js) sends it.
+async function diagCrash({ message, stack } = {}) {
+  await diagEvent({ kind: "crash", where: "page", message: String(message ?? "").slice(0, 500), stack: String(stack ?? "").slice(0, 4000) });
+  return { success: true };
+}
+
+if (typeof self !== "undefined" && self.addEventListener) {
+  for (const type of ["error", "unhandledrejection"]) {
+    self.addEventListener(type, (e) => {
+      const err = e.error ?? e.reason;
+      diagEvent({ kind: "crash", where: "worker", message: String(err?.message ?? err ?? "").slice(0, 500), stack: String(err?.stack ?? "").slice(0, 4000) });
+    });
+  }
+}
+
+// Alarms survive the worker stopping; they are made once and checked on every start (a browser restart can drop them).
+const ALARMS = { diag: 5, "ai-queue": 1 }; // minutes; Chrome's shortest is 1
+for (const [name, every] of Object.entries(ALARMS)) chrome.alarms?.get(name).then((a) => a || chrome.alarms.create(name, { periodInMinutes: every }));
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name === "diag") diagFlush();
+  if (alarm.name === "ai-queue") runAiQueue();
 });
 
 // One write at a time: two adds racing would pick the same next row or SKU, and every library change
@@ -101,6 +146,8 @@ async function appendRow(data) {
   if (result.success) {
     await saveDetails(data);
     if (!local) await enqueue(() => rememberPhotos([data]));
+    const sheetId = local ? LOCAL : (await getActiveSheet())?.id;
+    if (sheetId && !result.existed) await queueListing(sheetId, { sku: result.sku, title: data.title, link: data.link, salePrice: money(data.salePrice), image: httpsUrl(data.image), currency: text(data.currency) });
   }
   return result;
 }
@@ -203,18 +250,26 @@ async function setRate({ from, to, rate } = {}) {
 }
 
 // Calls a Google API with the user's token. A 401 means the cached token is stale or revoked: drop it and retry
-// once with a fresh one. A failed reply throws an Error carrying the HTTP `status`.
+// once with a fresh one. A failed reply throws an Error carrying the HTTP `status` and a `code` lib/errors.js knows
+// (forbidden, sheet-rate; offline when Google couldn't be reached; sheet-error, said as "something went wrong", else).
 async function googleFetch(url, init = {}) {
   for (let attempt = 0; ; attempt++) {
     const token = await getToken();
-    const res = await fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
+    let res;
+    try {
+      res = await fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` } });
+    } catch (error) {
+      if (error.name !== "TimeoutError" && error.name !== "AbortError") error.code ??= "offline";
+      throw error;
+    }
     if (res.status === 401 && attempt === 0) {
       await new Promise((r) => chrome.identity.removeCachedAuthToken({ token }, r));
       continue;
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw Object.assign(new Error(body.error?.message ?? `Google Sheets error ${res.status}`), { status: res.status });
+      const code = res.status === 429 ? "sheet-rate" : [403, 404].includes(res.status) ? "forbidden" : "sheet-error";
+      throw Object.assign(new Error(body.error?.message ?? `Google Sheets error ${res.status}`), { status: res.status, code });
     }
     return res.json();
   }
@@ -302,13 +357,14 @@ function guardCurrency(sheet, currency) {
 }
 
 // Reads { name: column letter } fields from `from` down: { name: [cell, ...] }, cell i being row from + i.
-// Unformatted, so numbers come back as numbers and dates as serials. A field with no column reads as [].
-async function readFields(id, tab, fields, from) {
+// Unformatted, so numbers come back as numbers and dates as serials ("FORMULA" as `render` brings formulas as typed).
+// A field with no column reads as [].
+async function readFields(id, tab, fields, from, render = "UNFORMATTED_VALUE") {
   const names = Object.keys(fields).filter((k) => fields[k]);
   const out = Object.fromEntries(Object.keys(fields).map((k) => [k, []]));
   if (!names.length) return out;
   const ranges = names.map((k) => `ranges=${encodeURIComponent(`${quote(tab)}!${fields[k]}${from}:${fields[k]}`)}`).join("&");
-  const { valueRanges = [] } = await sheetsFetch(`/${id}/values:batchGet?${ranges}&majorDimension=COLUMNS&valueRenderOption=UNFORMATTED_VALUE`);
+  const { valueRanges = [] } = await sheetsFetch(`/${id}/values:batchGet?${ranges}&majorDimension=COLUMNS&valueRenderOption=${render}`);
   names.forEach((k, i) => (out[k] = valueRanges[i]?.values?.[0] ?? []));
   return out;
 }
@@ -323,56 +379,187 @@ async function putCells(id, tab, cells) {
 
 /* Saving */
 
+const noSheet = () => Object.assign(new Error("No sheet yet. Add one in AliSwift settings."), { code: "nosheet" });
+
+// A product already in the sheet is not added again: { existed: true, sku } (the button then offers Remove).
 async function writeRow(data) {
   try {
     const sheet = await getActiveSheet();
-    if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+    if (!sheet) throw noSheet();
     guardCurrency(sheet, data.currency); // the one place every save to a sheet passes
-    const { skus } = await writeRows(sheet, [data]);
-    return { success: true, ...(skus[0] && { sku: skus[0] }) };
+    const { skus, dupeSkus } = await writeRows(sheet, [data]);
+    const sku = skus[0] ?? dupeSkus[0];
+    return { success: true, ...(dupeSkus.length && { existed: true }), ...(sku && { sku }) };
   } catch (error) {
     return fail(error);
   }
 }
 
-// Writes items below the last used row: one read, one write, whatever the count. The next row and the SKUs
-// come from the SKU and keywords columns only (input columns, so pre-filled formulas never count as data).
-// With skipExisting, an item whose link and title are already in the sheet is left out and returned as `dupes`.
+// Writes items into rows AliSwift cleared earlier (Remove) that are still empty, lowest first, then below the last used
+// row: one read, one write, whatever the count. The next row and the SKUs come from the SKU and keywords columns only
+// (input columns, so pre-filled formulas never count as data); a reused row gets the SKU it always had (nextSku numbers
+// by row). An item already in the sheet (the same AliExpress item, else the same link and title) is left out and
+// returned in `dupes`, its SKU in `dupeSkus`. A formula SKU column (skuFormula) is never written: the SKUs it shows are
+// read back after the write. The sheet's index (sheetIndex) is rebuilt from the same read.
 // ponytail: auto sheets have 1000 rows; past that Google's error is shown. Upgrade: appendDimension, then repeatCell.
-async function writeRows(sheet, items, skipExisting = false) {
-  const read = [sheet.skuCol, sheet.keywordsCol, ...(skipExisting ? [sheet.linkCol] : [])].filter(Boolean);
+async function writeRows(sheet, items) {
+  const read = [...new Set([sheet.skuCol, sheet.keywordsCol, sheet.linkCol].filter(Boolean))];
   const ranges = read.map((c) => `ranges=${encodeURIComponent(`${quote(sheet.sheetTab)}!${c}:${c}`)}`).join("&");
   const { valueRanges = [] } = await sheetsFetch(`/${sheet.id}/values:batchGet?${ranges}`);
-  const column = (c) => valueRanges[read.indexOf(c)]?.values ?? [];
+  const column = (c) => (c ? valueRanges[read.indexOf(c)]?.values ?? [] : []);
+  const cell = (c, r) => text(column(c)[r - 1]?.[0]);
+  const skuIn = sheet.skuFormula ? "" : sheet.skuCol; // a formula column shows something in every row: it can't tell used rows
 
-  const seen = new Set(skipExisting ? column(sheet.linkCol).map((r, i) => `${text(r[0])}\n${text(column(sheet.keywordsCol)[i]?.[0])}`) : []);
-  const fresh = skipExisting ? items.filter((x) => !seen.has(`${text(x.link)}\n${text(x.title)}`) && seen.add(`${text(x.link)}\n${text(x.title)}`)) : items;
+  const keyOf = (link, title) => itemIdOf(link) || `${text(link)}\n${text(title)}`;
+  const have = new Map(); // key -> its row (0: earlier in this batch)
+  for (let r = sheet.startRow; r <= column(sheet.linkCol).length; r++) {
+    const key = cell(sheet.linkCol, r) && keyOf(cell(sheet.linkCol, r), cell(sheet.keywordsCol, r));
+    if (key && !have.has(key)) have.set(key, r);
+  }
+  const fresh = [];
+  const dupeSkus = [];
+  for (const x of items) {
+    const key = keyOf(x.link, x.title);
+    if (have.has(key)) dupeSkus.push(cell(sheet.skuCol, have.get(key)));
+    else (fresh.push(x), have.set(key, 0));
+  }
   const dupes = items.filter((x) => !fresh.includes(x));
-  if (!fresh.length) return { fresh, dupes, skus: [] };
 
-  const row = nextRow(column(sheet.skuCol), column(sheet.keywordsCol), sheet.startRow);
-  const skus = [];
-  const cells = fresh.flatMap((x, i) => {
-    const r = row + i;
-    const sku = sheet.skuCol ? nextSku([...column(sheet.skuCol).map((c) => c[0]), ...skus], sheet.skuPrefix, r, sheet.startRow) : "";
-    skus.push(sku);
-    return [
-      [sheet.keywordsCol, x.title],
-      [sheet.priceCol, toNumber(x.price)],
-      [sheet.salePriceCol, toNumber(x.salePrice)],
-      [sheet.linkCol, x.link],
-      [sheet.skuCol, sku],
-      [sheet.imageCol, httpsUrl(x.image)],
-    ]
-      .filter(([col]) => col)
-      .map(([col, value]) => [`${col}${r}`, value]);
+  const clearedKey = `cleared:${sheet.id}`;
+  const cleared = (await chrome.storage.local.get({ [clearedKey]: [] }))[clearedKey];
+  const used = (r) => [skuIn, sheet.keywordsCol, sheet.linkCol].some((c) => cell(c, r));
+  let next = nextRow(column(skuIn), column(sheet.keywordsCol), sheet.startRow);
+  const reuse = cleared.filter((r) => r < next && !used(r)).sort((a, b) => a - b);
+  const rows = fresh.map(() => reuse.shift() ?? next++);
+  let skus = [];
+  if (fresh.length) {
+    const cells = fresh.flatMap((x, i) => {
+      const r = rows[i];
+      const sku = skuIn ? nextSku([...column(skuIn).map((c) => c[0]), ...skus], sheet.skuPrefix, r, sheet.startRow) : "";
+      skus.push(sku);
+      return [
+        [sheet.keywordsCol, x.title],
+        [sheet.priceCol, toNumber(x.price)],
+        [sheet.salePriceCol, toNumber(x.salePrice)],
+        [sheet.linkCol, x.link],
+        [skuIn, sku],
+        [sheet.imageCol, httpsUrl(x.image)],
+      ]
+        .filter(([col]) => col)
+        .map(([col, value]) => [`${col}${r}`, value]);
+    });
+    await putCells(sheet.id, sheet.sheetTab, cells);
+    if (sheet.skuFormula && sheet.skuCol) {
+      const back = rows.map((r) => `ranges=${encodeURIComponent(`${quote(sheet.sheetTab)}!${sheet.skuCol}${r}`)}`).join("&");
+      const { valueRanges: got = [] } = await sheetsFetch(`/${sheet.id}/values:batchGet?${back}`);
+      skus = rows.map((r, i) => text(got[i]?.values?.[0]?.[0]));
+    }
+  }
+
+  const index = {};
+  for (const [key, r] of have) if (r && /^\d+$/.test(key)) index[key] = { sku: cell(sheet.skuCol, r), row: r };
+  fresh.forEach((x, i) => itemIdOf(x.link) && (index[itemIdOf(x.link)] = { sku: skus[i], row: rows[i] }));
+  await chrome.storage.local.set({ [`index:${sheet.id}`]: { at: Date.now(), items: index }, [clearedKey]: cleared.filter((r) => r < next && !used(r) && !rows.includes(r)) });
+  return { fresh, dupes, skus, dupeSkus };
+}
+
+/* The sheet's index: which AliExpress items it has, so the page's button says Add or Remove at once, and a download
+   finds the SKU. index:<sheetId> = { at, items: { itemId: { sku, row } } }, rebuilt by every write (writeRows) and read
+   again (link and SKU columns, one request) when older than 5 minutes. */
+
+const INDEX_TTL = 5 * 60000;
+
+async function sheetIndex(sheet) {
+  const slot = `index:${sheet.id}`;
+  const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
+  if (kept && Date.now() - kept.at < INDEX_TTL) return kept.items;
+  const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol, sku: sheet.skuCol }, sheet.startRow);
+  const items = {};
+  c.link.forEach((l, i) => {
+    const id = itemIdOf(l);
+    if (id && !items[id]) items[id] = { sku: text(c.sku[i]), row: sheet.startRow + i };
   });
-  await putCells(sheet.id, sheet.sheetTab, cells);
-  return { fresh, dupes, skus };
+  await chrome.storage.local.set({ [slot]: { at: Date.now(), items } });
+  return items;
+}
+
+// The library's record of an AliExpress item, if it is saved there (and not removed).
+async function libraryItem(itemId) {
+  const { library } = await chrome.storage.local.get({ library: [] });
+  return library.find((x) => x.status !== "Discontinued" && itemIdOf(x.link) === itemId) ?? null;
+}
+
+// Is the page's product in the active sheet (or, with dest "local", the library)? { inSheet, sku }.
+async function inSheet({ link, dest } = {}) {
+  const id = itemIdOf(link);
+  if (!id) return { success: true, inSheet: false };
+  if (dest === LOCAL) {
+    const rec = await libraryItem(id);
+    return { success: true, inSheet: Boolean(rec), sku: rec?.sku ?? "" };
+  }
+  const sheet = await getActiveSheet();
+  const hit = sheet ? (await sheetIndex(sheet))[id] : null;
+  return { success: true, inSheet: Boolean(hit), sku: hit?.sku ?? "" };
+}
+
+// Before Remove asks for its second click: { sku, orderSku } where orderSku is set when a row of the Orders tab uses the
+// product's SKU (one read of that tab's SKU column). An order tab that can't be read warns about nothing.
+async function removeCheck({ link, dest } = {}) {
+  const id = itemIdOf(link);
+  const sheet = dest === LOCAL || !id ? null : await getActiveSheet();
+  if (!sheet) return { success: true, sku: "", orderSku: "" };
+  const sku = (await sheetIndex(sheet))[id]?.sku ?? "";
+  const cols = { ...SHEET_DEFAULTS.oCols, ...sheet.oCols };
+  if (!sku || !sheet.oTab || !cols.sku) return { success: true, sku, orderSku: "" };
+  const f = await readFields(sheet.id, sheet.oTab, { sku: cols.sku }, sheet.oRow).catch(() => ({ sku: [] }));
+  return { success: true, sku, orderSku: f.sku.some((s) => text(s).toLowerCase() === sku.toLowerCase()) ? sku : "" };
+}
+
+// Remove: clears the cells AliSwift writes in the product's row (name, prices, link, photo, status, and the SKU unless a
+// formula makes it), so formulas in the row stay, and remembers the row for the next Add. The row is found by its link
+// inside the write queue, from a fresh read, so a sorted sheet never loses the wrong row: a product no longer there
+// fails with row-changed and nothing is cleared. The Orders tab is never touched. The queued listing and the listing go.
+async function removeFromSheet({ link, dest } = {}) {
+  const id = itemIdOf(link);
+  if (!id) throw new Error("That isn't an AliExpress product link.");
+  const changed = () => Object.assign(new Error("That product isn't there any more, so nothing was removed."), { code: "row-changed" });
+  if (dest === LOCAL) {
+    await enqueue(async () => {
+      const { library } = await chrome.storage.local.get({ library: [] });
+      const gone = library.filter((x) => x.status !== "Discontinued" && itemIdOf(x.link) === id).map((x) => x.id);
+      if (!gone.length) throw changed();
+      await chrome.storage.local.set({ library: libTake(library, gone) });
+    });
+  } else {
+    const sheet = await getActiveSheet();
+    if (!sheet) throw noSheet();
+    await enqueue(async () => {
+      const slot = `index:${sheet.id}`;
+      const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol }, sheet.startRow);
+      const i = c.link.findIndex((l) => itemIdOf(l) === id);
+      if (i < 0) {
+        await chrome.storage.local.remove(slot); // the index was out of date: read it again next time
+        throw changed();
+      }
+      const row = sheet.startRow + i;
+      const cols = [sheet.keywordsCol, sheet.priceCol, sheet.includeSalePrice && sheet.salePriceCol, sheet.linkCol, sheet.imageCol, sheet.statusCol, !sheet.skuFormula && sheet.skuCol];
+      const ranges = [...new Set(cols.filter(Boolean))].map((col) => `${quote(sheet.sheetTab)}!${col}${row}`);
+      await sheetsFetch(`/${sheet.id}/values:batchClear`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ ranges }) });
+      const clearedKey = `cleared:${sheet.id}`;
+      const kept = await chrome.storage.local.get({ [clearedKey]: [], [slot]: null });
+      const items = { ...kept[slot]?.items };
+      delete items[id];
+      await chrome.storage.local.set({ [clearedKey]: [...new Set([...kept[clearedKey], row])].slice(-500), ...(kept[slot] && { [slot]: { ...kept[slot], items } }) });
+    });
+  }
+  await dropListing(id);
+  return { success: true };
 }
 
 async function saveLocal(data) {
   try {
+    const known = itemIdOf(data?.link) && (await libraryItem(itemIdOf(data.link)));
+    if (known) return { success: true, local: true, existed: true, sku: known.sku };
     const { library } = await chrome.storage.local.get({ library: [] });
     const { lib, item } = libAdd(library, cleanSave(data), Date.now(), crypto.randomUUID());
     await chrome.storage.local.set({ library: lib });
@@ -465,6 +652,59 @@ async function setStatus(sheetId, key, status) {
     if (sharedBy[row]) throw new Error(`This status is shared by ${sharedBy[row]} variant rows. Change it in the sheet.`);
     await putCells(sheet.id, sheet.sheetTab, [[`${sheet.statusCol}${row}`, status]]);
     return { success: true };
+  });
+}
+
+// Which of the price cells in `row` hold a formula (["price", "salePrice"] or fewer): the sheet's to calculate, never
+// written over. The inspector asks when it opens, to show them read-only; updateProduct asks again before it writes.
+async function lockedPrices(sheet, row) {
+  const f = await readFields(sheet.id, sheet.sheetTab, { price: sheet.priceCol, salePrice: sheet.salePriceCol }, row, "FORMULA");
+  return ["price", "salePrice"].filter((k) => typeof f[k][0] === "string" && f[k][0].trim().startsWith("="));
+}
+
+// { sheetId, row } -> { locked }. The row is the dashboard's, as it read it a moment ago; only the display depends on it.
+async function priceLocks({ sheetId, row } = {}) {
+  if (sheetId === LOCAL || !Number.isInteger(row) || row < 1) return { success: true, locked: [] };
+  return { success: true, locked: await lockedPrices(await sheetById(sheetId), row) };
+}
+
+// The inspector's two prices: { sheetId, key, price?, salePrice? } -> { success, price, salePrice } as kept. Only the
+// fields sent are written. A price cell that holds a formula is the sheet's: that fails with `formula`, nothing written.
+async function updateProduct({ sheetId, key, price, salePrice } = {}) {
+  const clean = (v) => {
+    if (v === undefined) return undefined;
+    const n = v === null || v === "" ? NaN : Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 1e9) throw new Error("Enter a price of 0 or more.");
+    return round2(n);
+  };
+  const set = { price: clean(price), salePrice: clean(salePrice) };
+  if (set.price === undefined && set.salePrice === undefined) throw new Error("Say which price to change.");
+  const gone = () => Object.assign(new Error("That product isn't in the sheet any more."), { code: "gone" });
+  if (sheetId === LOCAL) {
+    return enqueue(async () => {
+      const { library } = await chrome.storage.local.get({ library: [] });
+      const row = findRow(libToProducts(library), key);
+      if (row < 0) throw gone();
+      const patch = Object.fromEntries(Object.entries(set).filter(([, v]) => v !== undefined));
+      await chrome.storage.local.set({ library: library.map((x, i) => (i === row - 1 ? { ...x, ...patch } : x)) });
+      return { success: true, ...patch };
+    });
+  }
+  const sheet = await sheetById(sheetId);
+  return enqueue(async () => {
+    // The row is found again here, inside the queue, from a fresh read: the sheet may have been sorted since.
+    const { products } = await readProducts(sheet);
+    const row = findRow(products, key);
+    if (row < 0) throw gone();
+    const cols = { price: sheet.priceCol, salePrice: sheet.salePriceCol };
+    const fields = Object.keys(set).filter((f) => set[f] !== undefined && cols[f]);
+    if (!fields.length) throw new Error("This sheet has no column for that price.");
+    const locked = await lockedPrices(sheet, row);
+    if (fields.some((f) => locked.includes(f))) {
+      throw Object.assign(new Error("That price is a formula in your sheet."), { code: "formula" });
+    }
+    await putCells(sheet.id, sheet.sheetTab, fields.map((f) => [`${cols[f]}${row}`, set[f]]));
+    return { success: true, ...Object.fromEntries(fields.map((f) => [f, set[f]])) };
   });
 }
 
@@ -561,7 +801,7 @@ async function updateOrder({ sheetId, orderNumber, key, patch }) {
 // come from the inventory's row for the SKU, like an order added on the dashboard.
 async function importOrders({ orders } = {}) {
   const sheet = await getActiveSheet();
-  if (!sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
+  if (!sheet) throw noSheet();
   const { cols } = await ordersOf(sheet.id);
   const { lines, rejected } = cleanOrderImport(orders);
   if (!lines.length) return { success: true, added: 0, skipped: 0, rejected, unknown: 0 };
@@ -710,16 +950,6 @@ async function fillPhotos(sheetId, links, retry) {
   return { success: true, photos: found, fetched: Object.keys(found).length, missed: missed.length };
 }
 
-// Listings are filed under a product's key: when the key changes (a library SKU becomes a sheet's, an item number
-// becomes a SKU), the listing follows it. `pairs` are [from, to]; a listing that is not there is skipped.
-async function moveListings(pairs) {
-  const found = await chrome.storage.local.get(Object.fromEntries(pairs.map(([from]) => [from, null])));
-  const kept = pairs.filter(([from]) => found[from] != null);
-  if (!kept.length) return;
-  await chrome.storage.local.set(Object.fromEntries(kept.map(([from, to]) => [to, found[from]])));
-  await chrome.storage.local.remove(kept.map(([from]) => from));
-}
-
 /* The setting "Include images when creating listings". The eBay panel gives the picked product's photos to eBay's own
    uploader (this worker fetches them: the panel cannot read AliExpress's image host). When eBay's form does not take
    them, the worker saves them with chrome.downloads, an optional permission the options page asks for when the setting is
@@ -736,12 +966,12 @@ const onPhotoHost = (u) => {
   }
 };
 
-// The picked product's photos, as { urls, variants }. urls: the gallery kept with its save (else its one photo), at most
-// PHOTOS_PER_LISTING. variants: the options that have a photo of their own (colour, style), [{ group, name, image }], at
-// most VARIANTS_MAX. Only addresses on AliExpress's image hosts, at full size (the same rule as the photos Gemini sees).
-async function photoSet(target) {
+// A product's photos, as { urls, variants }. urls: its gallery (the page's `details` when given, else those kept with its
+// save, else its one photo), at most PHOTOS_PER_LISTING. variants: the options that have a photo of their own (colour,
+// style), [{ group, name, image }], at most VARIANTS_MAX. Only addresses on AliExpress's image hosts, at full size.
+async function photoSet(target, pageDetails = null) {
   const id = itemIdOf(target.link);
-  const details = id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null;
+  const details = pageDetails ?? (id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null);
   const urls = [...new Set((details?.images?.length ? details.images : [target.image]).map((u) => fullSizePhoto(u)).filter(onPhotoHost))].slice(0, PHOTOS_PER_LISTING);
   const seen = new Set();
   const variants = [];
@@ -803,18 +1033,31 @@ async function photoExt(url) {
   return m ? `.${m === "jpeg" ? "jpg" : m}`: ".jpg";
 }
 
-// Saves the picked product's photos to Downloads/<sheet name>/<SKU>/img-01.jpg and so on, and each variant's photo to
-// Downloads/<sheet name>/<SKU>/<variant name>/img-01.jpg. variantsOnly: just the variants (the gallery was attached to
-// the form, a variant's photo has no place on it). Needs the downloads permission.
-async function savePhotos(variantsOnly = false) {
-  const { target, urls, variants } = await photoTarget();
+// The eBay panel's photos for the picked product (variantsOnly: the gallery went onto the form, a variant's photo has
+// no place on it).
+async function ebayPhotosSave(variantsOnly) {
+  const { target } = await photoTarget();
+  return savePhotos({ sheetId: target.sheetId, link: target.link, image: target.image, sku: target.sku || target.key, variantsOnly });
+}
+
+// Saves a product's photos to Downloads/<sheet name>/<SKU>/img-01.jpg and so on, and each variant's photo to
+// Downloads/<sheet name>/<SKU>/<variant name>/img-01.jpg. The sheet is `sheetId`'s (LOCAL: Library), else the active
+// one. The SKU is the one the sheet's index (or the library) has for the item, so a formula SKU names the folder too;
+// else `sku`, else the title. `details` are what the AliExpress page sends. variantsOnly: just the variants. Needs the
+// downloads permission. The AliExpress page's button and the eBay panel both come here.
+async function savePhotos({ sheetId, link, image, title, sku, details, variantsOnly = false } = {}) {
   if (!chrome.downloads?.download) throw Object.assign(new Error("Allow downloads in AliSwift's settings to save photos to a folder."), { code: "permission" });
-  const store = target.sheetId === LOCAL ? "Library" : (await sheetById(target.sheetId)).name;
-  const folder = `${safeName(store)}/${safeName(target.sku || target.key)}`;
+  const sheet = sheetId === LOCAL ? null : sheetId ? await sheetById(sheetId) : await getActiveSheet();
+  const id = itemIdOf(link);
+  const known = !id ? "" : sheet ? (await sheetIndex(sheet).catch(() => ({})))[id]?.sku : (await libraryItem(id))?.sku;
+  const { urls, variants } = await photoSet({ link, image }, cleanDetails(details));
+  const store = sheet ? sheet.name : sheetId === LOCAL ? "Library" : "AliSwift";
+  const folder = `${safeName(store)}/${safeName(known || sku || title || id || "product")}`;
   const jobs = [
     ...(variantsOnly ? [] : urls.map((url, i) => ({ url, dir: folder, n: i }))),
-    ...variantFolders(variants).map(({ dir, image }) => ({ url: image, dir: `${folder}/${dir}`, n: 0 })),
+    ...variantFolders(variants).map(({ dir, image: url }) => ({ url, dir: `${folder}/${dir}`, n: 0 })),
   ];
+  if (!jobs.length) throw Object.assign(new Error("No photos found for this product."), { code: "nophotos" });
   let saved = 0;
   const stop = keepAlive(); // asking the host what each photo is, and saving, can take longer than the worker's 30 seconds
   try {
@@ -826,54 +1069,6 @@ async function savePhotos(variantsOnly = false) {
       } catch {
         // one photo that will not download does not stop the others
       }
-    }
-  } finally {
-    stop();
-  }
-  if (!saved) throw new Error("The photos couldn't be saved.");
-  return { success: true, folder: folder.replace("/", "\\"), saved, total: jobs.length, variants: variants.length };
-}
-
-// Downloads a product's photos from its AliExpress page to Downloads/<sheet>/<title>/ (gallery and variants).
-// Called from the AliExpress content script; uses the details saved when the product was added.
-async function downloadPhotos(data) {
-  if (!chrome.downloads?.download) throw Object.assign(new Error("Allow downloads in AliSwift's settings to save photos to a folder."), { code: "permission" });
-  const sheet = await getActiveSheet();
-  const store = sheet ? sheet.name : "AliSwift";
-  const id = itemIdOf(data?.link);
-  const details = data?.details || (id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null);
-  const rawImages = (details?.images?.length ? details.images : [data?.image]).filter(Boolean);
-  const images = [...new Set(rawImages.map((u) => fullSizePhoto(u)).filter(onPhotoHost))].slice(0, PHOTOS_PER_LISTING);
-  const seen = new Set();
-  const variants = [];
-  for (const v of details?.variants ?? []) {
-    const image = fullSizePhoto(v?.image);
-    if (!text(v?.name) || !onPhotoHost(image) || seen.has(image)) continue;
-    seen.add(image);
-    variants.push({ group: text(v.group), name: text(v.name), image });
-  }
-  let sku = data?.sku;
-  if (!sku && id) {
-    const { library = [] } = await chrome.storage.local.get({ library: [] });
-    const inLib = library.find((item) => itemIdOf(item?.link) === id);
-    if (inLib?.sku) sku = inLib.sku;
-  }
-  const label = safeName(sku || data?.title || "product").slice(0, 40);
-  const folder = `${safeName(store)}/${label}`;
-  const jobs = [
-    ...images.map((url, i) => ({ url, dir: folder, n: i })),
-    ...variantFolders(variants.slice(0, VARIANTS_MAX)).map(({ dir, image }) => ({ url: image, dir: `${folder}/${dir}`, n: 0 })),
-  ];
-  if (!jobs.length) throw new Error("No photos found for this product.");
-  let saved = 0;
-  const stop = keepAlive();
-  try {
-    const exts = await Promise.all(jobs.map((j) => photoExt(j.url)));
-    for (const [i, { url, dir, n }] of jobs.entries()) {
-      try {
-        await chrome.downloads.download({ url, filename: `${dir}/${photoName(n, exts[i])}`, conflictAction: "uniquify" });
-        saved++;
-      } catch {}
     }
   } finally {
     stop();
@@ -901,7 +1096,7 @@ const NEW_COLUMNS = { skuCol: "SKU", imageCol: "Image URL" };
 // columns?"), and the only place AliSwift changes a sheet's layout. It writes only into the new, empty columns, and the
 // new letters are saved in the sheet's settings. The products already there get SKUs numbered as the template does (the
 // prefix and their place in the list) and the photo link this device kept, if any. A listing written before the product
-// had a SKU was filed under its AliExpress item number: it follows the product to its SKU.
+// had a SKU stays where it is: listings are filed by AliExpress item number.
 async function addColumns(sheetId, wanted) {
   const keys = [...new Set(Array.isArray(wanted) ? wanted : [])].filter((k) => Object.hasOwn(NEW_COLUMNS, k));
   if (!keys.length) throw new Error("Choose a column to add.");
@@ -947,7 +1142,6 @@ async function addColumns(sheetId, wanted) {
       const requests = [{ copyPaste: { source: range(last, last + 1), destination: range(first, first + keys.length), pasteType: "PASTE_FORMAT" } }];
       await sheetsFetch(`/${sheet.id}:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests }) }).catch(() => {});
     }
-    if (columns.skuCol) await moveListings(rows.map((r) => [`listing:${sheet.id}:${itemIdOf(at(r, sheet.linkCol))}`, `listing:${sheet.id}:${sku(r)}`]).filter(([from]) => !from.endsWith(":")));
 
     const { sheets } = await chrome.storage.sync.get({ sheets: [] });
     await chrome.storage.sync.set({ sheets: sheets.map((s) => (s.id === sheet.id ? { ...s, ...columns } : s)) });
@@ -985,13 +1179,10 @@ async function moveLocal(sheetId) {
       }
     }
 
-    const { fresh, dupes, skus } = await writeRows(sheet, items, true);
+    const { fresh, dupes } = await writeRows(sheet, items);
     await rememberPhotos(fresh);
     const gone = [...fresh, ...dupes].map((x) => x.id);
     if (gone.length) await chrome.storage.local.set({ library: libTake(library, gone) });
-
-    // A generated listing follows its product to the new key. ponytail: a re-run after a crash skips this, the listing is then regenerated.
-    await moveListings(fresh.map((x, i) => [`listing:${LOCAL}:${x.sku}`, `listing:${sheetId}:${skus[i]}`]).filter(([, key]) => !key.endsWith(":")));
     return { success: true, moved: fresh.length, skipped: dupes.length, needRate };
   });
 }
@@ -1009,43 +1200,6 @@ function importLibrary(incoming, incomingPhotos = {}) {
   });
 }
 
-/* Page buttons: what the AliExpress page's buttons ask for */
-
-// The products already in the sheet or the library, for quickList's look.
-async function savedProducts(local, sheet) {
-  return local ? libToProducts((await chrome.storage.local.get({ library: [] })).library) : (await readProducts(sheet)).products;
-}
-
-// The AliExpress page's "Create Listing": saves the product, writes its eBay listing and opens eBay, in one request.
-// A product already saved from this link (in the sheet, or the library) keeps its SKU and is not added again, and its
-// listing is the one already kept. A failure after the save says how far it got (`saved`, `sku`): the row stays.
-// ponytail: the "already saved?" look and the save are two steps, so two tabs clicking at the same instant could both add. Upgrade: do both inside enqueue.
-async function quickList(data) {
-  const local = data?.dest === "local";
-  const sheet = local ? null : await getActiveSheet();
-  if (!local && !sheet) throw new Error("No sheet yet. Add one in AliSwift settings.");
-  const sheetId = local ? LOCAL : sheet.id;
-  const link = text(data?.link);
-  const known = link ? (await savedProducts(local, sheet)).find((x) => x.status !== "Discontinued" && x.link === link) : null;
-  let sku = known?.sku ?? "";
-  if (known) await saveDetails(data); // the listing is written from this visit's details
-  else {
-    const saved = await appendRow(data);
-    if (!saved.success) return saved; // nothing was saved: the page decides what to say
-    sku = saved.sku ?? "";
-  }
-  try {
-    const product = {
-      sku, title: known?.title || text(data.title), link, image: known?.image || httpsUrl(data.image),
-      salePrice: known ? known.salePrice : money(data.salePrice), currency: text(data.currency),
-    };
-    const { region } = await listOnEbay({ sheetId, key: listingKey(product), product, status: known?.status });
-    return { success: true, sku, existed: Boolean(known), region };
-  } catch (error) {
-    return { ...fail(error), saved: true, sku };
-  }
-}
-
 // Chrome stops a worker that has had no event for 30 seconds, and a Gemini call still running is no event. An extension
 // API call every 20 seconds counts as one. Returns the function that stops the pings.
 function keepAlive() {
@@ -1060,14 +1214,21 @@ const AI_SENDERS = { controls: onListingForm, orders: onOrdersPage, product: onA
 async function aiMap({ task, items } = {}, sender) {
   if (!Object.hasOwn(AI_TASKS, task) || !AI_SENDERS[task](sender?.url)) throw new Error("Not allowed.");
   const [build, check] = AI_TASKS[task];
-  const raw = await callGemini({ ...build(items), timeoutMs: 30000 });
+  const stop = keepAlive();
+  let raw;
+  try {
+    ({ answer: raw } = await callAi({ ...build(items), task, timeoutMs: 30000 }));
+  } finally {
+    stop();
+  }
   return { success: true, answer: check(raw, items) };
 }
 
-/* Listings (Gemini). One listing per product, kept under listing:<sheetId>:<key> in storage.local ("local" is the
-   library's sheetId). Nothing here reads or writes a sheet. */
+/* Listings (AI). One listing per product, kept under listing:<AliExpress item number> in storage.local, so a product's
+   listing never moves when its SKU or sheet changes. Nothing here reads or writes a sheet. */
 
-const IMAGES_MAX = 4; // photos Gemini looks at
+const IMAGES_MAX = 2; // photos the AI looks at, at AliExpress's small size (SMALL_PHOTO)
+const SMALL_PHOTO = "_350x350.jpg";
 const PHOTOS_PER_LISTING = 12; // photos kept with a save, and attached to an eBay listing
 const VARIANTS_MAX = 40; // variants with a photo of their own kept with a save
 // Photos are fetched here, not by the page, from AliExpress's own hosts only. 3 MB each keeps four of them, as
@@ -1079,8 +1240,8 @@ const IMAGE_BYTES = 3 * 1024 * 1024;
 // The AliExpress item number in a product link, or "".
 const itemIdOf = (link) => /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(link ?? ""))?.[1] ?? "";
 
-// What a listing is filed under: the SKU, or the item number when the sheet has no SKU column.
-const listingKey = (product) => text(product?.sku).slice(0, 40) || itemIdOf(product?.link);
+// What a listing is filed under: the product's AliExpress item number.
+const listingKey = (product) => itemIdOf(product?.link);
 
 // What a save may attach for the listing writer, as { fullTitle, specs: [[name, value]], description, images }, capped.
 // The page sends it, so it is cleaned like everything else the page sends. null when nothing usable is in it.
@@ -1127,30 +1288,32 @@ async function fetchImage(url) {
   }
 }
 
-// Writes a listing for one product with Gemini, or answers the one already kept (unless `force`).
+// Writes a listing for one product with the AI (lib/ai.js), or answers the one already kept (unless `force`).
 // `product` is a dashboard card's product ({ sku, title, link, salePrice, image, currency }). Only the sell price
-// goes to Gemini, never the cost. Answers { success, key, listing, limited, model, createdAt, warnings, cached? }.
-// `limited` means no saved details were found, so it was written from the sheet's name and photo alone.
-// A failed reply has `code`: nokey, invalid-key, rate, network, timeout or bad-output; with `status` 404 and `model`
-// when that model is gone.
+// goes to the AI, never the cost. Answers { success, key, listing, limited, model, createdAt, warnings, cached? }.
+// `limited` means no saved details were found, so it was written from the sheet's name alone. Photos go only with
+// the aiPhotos setting on. A failed reply has one of AI_CODES as `code`.
 async function generateListing({ sheetId, product, force } = {}) {
   const p = product && typeof product === "object" ? product : {};
   const key = listingKey(p);
-  if (!key) throw new Error("This product has no SKU or AliExpress link to keep its listing under.");
+  if (!key) throw new Error("This product has no AliExpress link to keep its listing under.");
   const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
-  const slot = `listing:${sheetId}:${key}`;
+  const slot = `listing:${key}`;
   if (!force) {
     const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
     if (kept) return { success: true, key, cached: true, ...kept };
   }
-  const { model } = await geminiSettings(); // no key: stop before any photo is fetched
+  const keys = await aiPool();
+  if (!keys.length) throw aiError("nokey", "Add an AI key in the AI tab."); // stop before any photo is fetched
 
   const id = itemIdOf(p.link);
   const details = id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null;
-  const urls = [...new Set((details?.images?.length ? details.images : [p.image]).map((u) => httpsUrl(u)).filter(Boolean))].slice(0, IMAGES_MAX);
+  const { aiInstructions, aiPhotos } = await chrome.storage.sync.get({ aiInstructions: "", aiPhotos: false });
+  // Photos only when the setting is on and a key can take them (Gemini).
+  const withPhotos = aiPhotos === true && keys.some((k) => AI_PROVIDERS[k.provider].images);
+  const urls = withPhotos ? [...new Set((details?.images?.length ? details.images : [p.image]).map((u) => fullSizePhoto(u)).filter(Boolean))].slice(0, IMAGES_MAX).map((u) => u + SMALL_PHOTO) : [];
   const photos = (await Promise.all(urls.map(async (url) => ({ url, image: await fetchImage(url) })))).filter((x) => x.image);
 
-  const { aiInstructions } = await chrome.storage.sync.get({ aiInstructions: "" });
   const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const wordsToLeaveOut = sheet?.excludeKeywords ?? "";
   const currency = sheet ? REGIONS[sheet.region]?.currency : p.currency;
@@ -1164,30 +1327,115 @@ async function generateListing({ sheetId, product, force } = {}) {
     },
     { region, marketplace: REGIONS[region].label, language: REGIONS[region].lang, wordsToLeaveOut, instructions: typeof aiInstructions === "string" ? aiInstructions : "" },
   );
-  // 90 s: a listing with photos takes a while. Not retried on a timeout (that would be three minutes); Regenerate is.
+  // 90 s: a listing with photos takes a while. Not retried on a timeout; the queue (or Regenerate) tries again.
+  const check = (raw) => {
+    const r = validateListing(raw, { wordsToLeaveOut });
+    if (!r.ok) throw aiError("bad-output", "The AI's answer had no usable title and description. Try again.");
+    return r;
+  };
   const stop = keepAlive();
-  let raw;
+  let reply;
   try {
-    raw = await callGemini({ ...request, images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000 });
+    reply = await callAi({ ...request, task: "listing", images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000, check });
   } finally {
     stop();
   }
-  const { listing, warnings, ok } = validateListing(raw, { wordsToLeaveOut });
-  if (!ok) throw Object.assign(new Error("Gemini's answer had no usable title and description. Try again."), { code: "bad-output" });
+  const { answer: { listing, warnings }, model } = reply;
 
   // `product` is what the eBay panel's cards show (SKU, name, sell price), kept with the listing so the panel needs no
   // sheet read. The cost price is never kept here.
   const meta = { sku: text(p.sku).slice(0, 50), title: text(p.title).slice(0, 200), salePrice: num(p.salePrice), currency: text(currency).slice(0, 3), link: text(p.link).slice(0, 2000), image: httpsUrl(p.image) };
-  const record = { listing, limited: !details, model, createdAt: Date.now(), warnings, product: meta };
+  const record = { listing, sheetId, limited: !details, model, createdAt: Date.now(), warnings, product: meta };
   await chrome.storage.local.set({ [slot]: record });
   return { success: true, key, ...record };
 }
+
+/* The listing queue. Add queues the product's listing 3 minutes ahead (the undo window: a product removed in that time
+   never costs a request), and the ai-queue alarm writes at most one a minute, so ten adds never meet a busy key. The
+   queue lives in storage.local, so it survives the worker stopping and the browser restarting.
+   aiQueue: [{ itemId, sheetId, product, notBefore, tries, error, failed? }] */
+
+const QUEUE_DELAY = 3 * 60000;
+const QUEUE_TRIES = 5;
+
+// One change of the queue at a time: `change` gets the list and returns the new one.
+let aiQueueLine = Promise.resolve();
+function editAiQueue(change) {
+  const run = aiQueueLine.then(async () => {
+    const { aiQueue } = await chrome.storage.local.get({ aiQueue: [] });
+    await chrome.storage.local.set({ aiQueue: change(aiQueue) });
+  });
+  aiQueueLine = run.catch(() => {});
+  return run;
+}
+
+// `product` as generateListing takes it. A product with no AliExpress link has nowhere to keep a listing: not queued.
+async function queueListing(sheetId, product) {
+  const itemId = itemIdOf(product?.link);
+  if (!itemId) return;
+  const job = { itemId, sheetId, product, notBefore: Date.now() + QUEUE_DELAY, tries: 0, error: "" };
+  await editAiQueue((q) => [...q.filter((j) => j.itemId !== itemId), job]);
+}
+
+// Remove: the queued job and the listing go.
+async function dropListing(itemId) {
+  if (!itemId) return;
+  await editAiQueue((q) => q.filter((j) => j.itemId !== itemId));
+  await chrome.storage.local.remove(`listing:${itemId}`);
+}
+
+// Writes the first due job's listing. A rate or quota error waits until the key is back; any other error waits two
+// minutes; the fifth failure marks the job failed (the dashboard's button then writes it). With no AI key nothing runs.
+// A key problem only settings can fix (KEY_FIXES) uses no try: the job stops until the keys change.
+// One run at a time: a call while one runs gets that run (the eBay panel's Write now waits on it).
+const KEY_FIXES = ["nokey", "invalid-key", "bad-model"];
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area === "local" && changes.aiKeys) editAiQueue((q) => q.map((j) => (j.failed && KEY_FIXES.includes(j.error) ? { ...j, failed: false, notBefore: Date.now() } : j)));
+});
+let aiQueueRun = null;
+function runAiQueue() {
+  return (aiQueueRun ??= runDueJob().finally(() => (aiQueueRun = null)));
+}
+async function runDueJob() {
+  const now = Date.now();
+  const { aiQueue } = await chrome.storage.local.get({ aiQueue: [] });
+  const job = aiQueue.find((j) => !j.failed && j.notBefore <= now);
+  if (!job || !(await aiPool()).length) return;
+  try {
+    await generateListing({ sheetId: job.sheetId, product: job.product });
+    await editAiQueue((q) => q.filter((j) => j.itemId !== job.itemId));
+  } catch (error) {
+    const keys = KEY_FIXES.includes(error.code);
+    const tries = job.tries + (keys ? 0 : 1);
+    const notBefore = error.retryAt > now ? error.retryAt : now + 2 * 60000;
+    await editAiQueue((q) => q.map((j) => (j.itemId === job.itemId ? { ...j, tries, error: error.code ?? "", provider: error.provider ?? "", notBefore, ...((keys || tries >= QUEUE_TRIES) && { failed: true }) } : j)));
+  }
+}
+
+// Listings were filed under listing:<sheetId>:<SKU or item number> before; each moves once to its item number. One
+// with no link and no item number for a key can't be placed and is dropped (its product's button writes it again).
+async function migrateListings() {
+  const all = await chrome.storage.local.get(null);
+  const moved = {};
+  const old = [];
+  for (const [k, record] of Object.entries(all)) {
+    const m = /^listing:[^:]+:(.+)$/.exec(k);
+    if (!m) continue;
+    old.push(k);
+    const id = itemIdOf(record?.product?.link) || (/^\d{6,}$/.test(m[1]) ? m[1] : "");
+    if (id && !all[`listing:${id}`] && !moved[`listing:${id}`]) moved[`listing:${id}`] = record;
+  }
+  if (!old.length) return;
+  await chrome.storage.local.set(moved);
+  await chrome.storage.local.remove(old);
+}
+chrome.runtime.onInstalled?.addListener(({ reason }) => reason === "update" && migrateListings());
 
 // Keeps the seller's edits to a listing's title and description (the dialog's two editable fields).
 // { sheetId, key, title?, description? } -> { success, listing }. The title is cut to 80 characters.
 async function saveListing({ sheetId, key, title, description } = {}) {
   if (sheetId !== LOCAL) await sheetById(sheetId);
-  const slot = `listing:${sheetId}:${text(key).slice(0, 40)}`;
+  const slot = `listing:${text(key).slice(0, 40)}`;
   const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
   if (!kept) throw new Error("That product has no saved listing. Create one first.");
   const listing = { ...kept.listing };
@@ -1286,12 +1534,11 @@ async function mapSheet(data) {
   let reason = "";
   if (!data.skipAi) {
     try {
-      const { mapping } = validateAiMapping(await callGemini(aiRequest(tabs)), tabs);
+      const { mapping } = validateAiMapping((await callAi({ ...aiRequest(tabs), task: "map" })).answer, tabs);
       if (!Object.keys(mapping.inv.fields).length) throw importError("bad-output", "Nothing usable in the answer.");
       ai = mapping;
     } catch (error) {
-      // A 404 is a model name Gemini doesn't know; the reply keeps code "bad-output" for the listing page.
-      reason = error.status === 404 ? "bad-model" : GEMINI_CODES.includes(error.code) ? error.code : "bad-output";
+      reason = AI_CODES.includes(error.code) ? error.code : "bad-output";
     }
   }
   const draft = buildDraft({
@@ -1356,7 +1603,7 @@ function onListingForm(url) {
 async function pickTarget(sheetId, key, product) {
   const sheet = sheetId === LOCAL ? null : await sheetById(sheetId);
   const id = text(key).slice(0, 40);
-  if (!id) throw new Error("This product has no SKU or AliExpress link to list it under.");
+  if (!id) throw new Error("This product has no AliExpress link to list it under.");
   const p = product && typeof product === "object" ? product : {};
   const region = REGIONS[sheet?.region] ? sheet.region : regionForCurrency(text(p.currency));
   const currency = REGIONS[sheet?.region] ? REGIONS[sheet.region].currency : text(p.currency);
@@ -1366,9 +1613,8 @@ async function pickTarget(sheetId, key, product) {
   return region;
 }
 
-// A product that is Not Listed becomes a Draft when it is sent to eBay: the panel on eBay offers the drafts. Best effort:
-// a sheet with no Status column (or a shared status) simply keeps the product out of the draft list, and the panel still
-// offers the one just picked.
+// A product that is Not Listed becomes a Draft when it is sent to eBay. Best effort: a sheet with no Status column (or a
+// shared status) keeps the status it has.
 async function markDraft(sheetId, product, status) {
   if (status && status !== "Not Listed") return;
   try {
@@ -1379,7 +1625,7 @@ async function markDraft(sheetId, product, status) {
 }
 
 // The dashboard's "List on eBay": picks the product, then opens eBay's listing start page for its marketplace.
-// The listing itself is written later, by the panel on eBay's form, when the seller presses Create listing.
+// The listing was written by the queue; the panel on eBay's form fills it when the seller presses Fill form.
 async function listOnEbay({ sheetId, key, product, status } = {}) {
   const region = await pickTarget(sheetId, key, product);
   await markDraft(sheetId, product, status);
@@ -1391,69 +1637,81 @@ async function listOnEbay({ sheetId, key, product, status } = {}) {
 async function ebayPick() {
   const { ebayTarget: target } = await chrome.storage.local.get({ ebayTarget: null });
   if (!target) return {};
-  const slot = `listing:${target.sheetId}:${target.key}`;
+  const slot = `listing:${target.key}`;
   return { target, listing: (await chrome.storage.local.get({ [slot]: null }))[slot]?.listing };
 }
 
 // What the panel shows and fills: { target: { sku, title, price, currency, host } | null, listing: { title, description,
 // html, specifics } | null }. The description comes as plain text (to copy) and as eBay's HTML (to fill); the listing's
-// own item specifics are what the panel offers to copy when the AI step fails.
+// own item specifics are what the panel offers to copy when the AI step fails. With no listing yet, `queued` says where
+// its job stands: { at (when it runs), failed, code }, or null when nothing is queued.
 async function ebayContext() {
   const { target, listing } = await ebayPick();
   if (!target) return { success: true, target: null, listing: null };
   const region = REGIONS[target.region] ?? REGIONS.UK;
   const on = await photosOn();
+  const job = listing ? null : (await chrome.storage.local.get({ aiQueue: [] })).aiQueue.find((j) => j.itemId === target.key);
   return {
     success: true,
     photos: { on, ...(on ? await photoSet(target).then((s) => ({ count: s.urls.length, variants: s.variants.length })) : { count: 0, variants: 0 }) },
     target: { sku: target.sku, title: target.title, price: target.price == null ? "" : target.price.toFixed(2), currency: region.currency, host: region.ebay },
     listing: listing ? { title: listing.title, description: listing.description, html: toEbayHtml(listing.description), specifics: listing.itemSpecifics ?? [] } : null,
+    ...(!listing && { queued: job ? { at: job.notBefore, failed: Boolean(job.failed), code: job.error ?? "" } : null }),
   };
 }
 
-// The cards the panel offers: every product with a kept listing, newest first, as { sheetId, key, sku, title, price,
-// currency, product }. A listing carries its product since it was written; an older one is looked up in the dashboard's
-// cached list, else it shows the listing's own title. Listings of a sheet that has since been removed are left out.
+// The cards the panel offers, newest first, as { sheetId, key, sku, title, price, currency, state, product }: every product
+// with a kept listing (state "ready") or a queued one ("queued", or "failed" after its last try). All from storage, no
+// sheet read: a listing names its sheet since it is written, an older one is found in the sheets' indexes or the library,
+// and the SKU comes from the index (a formula SKU is read back there). A product whose sheet is gone is left out.
+// ponytail: reads all of storage.local to find the listing:* keys; chrome.storage.local.getKeys once Chrome 130 is the minimum.
 async function ebayProductList() {
-  const [{ sheets }, { library }, { ebayTarget }] = await Promise.all([
-    chrome.storage.sync.get({ sheets: [] }),
-    chrome.storage.local.get({ library: [] }),
-    chrome.storage.local.get({ ebayTarget: null }),
-  ]);
-  const cards = [];
-  const add = (sheetId, region, products) => {
-    for (const p of products) {
-      const key = listingKey(p);
-      const picked = ebayTarget?.sheetId === sheetId && ebayTarget?.key === key;
-      if (!key || (p.status !== "Draft" && !picked)) continue; // the drafts, and the product just sent from AliExpress or the dashboard
-      const currency = REGIONS[region]?.currency ?? text(p.currency);
-      cards.push({ sheetId, key, sku: text(p.sku) || key, title: text(p.title), price: num(p.salePrice) > 0 ? num(p.salePrice) : null, currency, product: { ...p, currency } });
-    }
+  const [{ sheets }, all] = await Promise.all([chrome.storage.sync.get({ sheets: [] }), chrome.storage.local.get(null)]);
+  const index = (sheetId, itemId) => all[`index:${sheetId}`]?.items?.[itemId];
+  const inLibrary = (itemId) => (all.library ?? []).some((x) => x.status !== "Discontinued" && itemIdOf(x.link) === itemId);
+  const known = (sheetId) => sheetId === LOCAL || sheets.some((s) => s.id === sheetId);
+  const cards = new Map();
+  const add = (itemId, record, job) => {
+    if (cards.has(itemId)) return;
+    const p = record?.product ?? job?.product ?? {};
+    let sheetId = record?.sheetId ?? job?.sheetId;
+    if (!known(sheetId)) sheetId = sheets.find((s) => index(s.id, itemId))?.id ?? (inLibrary(itemId) ? LOCAL : null);
+    if (!sheetId) return;
+    const region = sheets.find((s) => s.id === sheetId)?.region;
+    const currency = REGIONS[region]?.currency ?? text(p.currency);
+    const sku = text(index(sheetId, itemId)?.sku) || text(p.sku);
+    const state = record ? "ready" : job.failed ? "failed" : "queued";
+    cards.set(itemId, { sheetId, key: itemId, sku: sku || itemId, title: text(p.title) || text(record?.listing?.title), price: num(p.salePrice) > 0 ? num(p.salePrice) : null, currency, state, at: record?.createdAt ?? job?.notBefore ?? 0, product: { ...p, sku, currency } });
   };
-  add(LOCAL, "", libToProducts(library));
-  // Each sheet is read fresh (the status may have changed in the sheet); the dashboard's last list stands in when it can't be.
-  for (const sheet of sheets) {
-    let products = await readProducts(sheet).then((r) => r.products).catch(() => []);
-    if (!products.length) products = (await chrome.storage.local.get({ [`cache:${sheet.id}`]: null }))[`cache:${sheet.id}`]?.products ?? [];
-    add(sheet.id, sheet.region, products.slice().reverse()); // the newest rows first
+  for (const [k, record] of Object.entries(all)) {
+    const m = /^listing:(\d{6,})$/.exec(k);
+    if (m && record?.listing) add(m[1], record);
   }
-  return cards.slice(0, 200);
+  for (const job of all.aiQueue ?? []) if (job?.itemId) add(job.itemId, null, job);
+  return [...cards.values()].sort((a, b) => b.at - a.at).slice(0, 200);
 }
 
-// The panel's "Create listing": writes the picked product's listing with Gemini (kept with the product, so pressing it again
-// reuses it) from the target the panel is on, never from what the page says. A failed reply carries Gemini's `code`.
-async function ebayCreateListing() {
-  const { target } = await ebayPick();
+// The panel's "Write now": the picked product's job goes to the front of the queue (queued now when there is none) and
+// runs at once, after any write in flight. Answers once the listing is kept; else fails with the job's code, and for a
+// busy or spent key the time it runs again. Written from the target the panel is on, never from what the page says.
+async function ebayWriteNow() {
+  const { target, listing } = await ebayPick();
   if (!target) throw new Error("Choose a product first.");
+  if (listing) return { success: true };
+  if (!(await aiPool()).length) throw aiError("nokey", "Add an AI key in the AI tab.");
   const region = REGIONS[target.region] ?? REGIONS.UK;
   const product = { sku: target.sku, title: target.title, link: target.link, image: target.image, salePrice: target.price, currency: region.currency };
-  const stop = keepAlive();
-  try {
-    await generateListing({ sheetId: target.sheetId, product });
-  } finally {
-    stop();
-  }
-  return { success: true };
+  const itemId = target.key;
+  await editAiQueue((q) => {
+    const job = q.find((j) => j.itemId === itemId) ?? { itemId, sheetId: target.sheetId, product, tries: 0 };
+    return [{ ...job, notBefore: 0, failed: false, error: "" }, ...q.filter((j) => j.itemId !== itemId)];
+  });
+  await aiQueueRun; // a write already running (maybe this one) finishes first
+  if (!(await ebayPick()).listing) await runAiQueue();
+  if ((await ebayPick()).listing) return { success: true };
+  const job = (await chrome.storage.local.get({ aiQueue: [] })).aiQueue.find((j) => j.itemId === itemId);
+  const waits = ["rate", "quota"].includes(job?.error) && job.notBefore > Date.now();
+  throw aiError(job?.error || undefined, "The listing couldn't be written.", { ...(job?.provider && { provider: job.provider }), ...(waits && { retryAt: job.notBefore }) });
 }
 
 // The seller published the listing: the picked product becomes Listed, once. { manual } is the panel's own button, the
@@ -1467,34 +1725,53 @@ async function ebayListed() {
   return { success: true };
 }
 
-// { products: [{ sheetId, key, sku, title, price, currency }], current: { sheetId, key } | null } for the panel's cards.
+// { products: [{ sheetId, key, sku, title, price, currency, state }], current: { sheetId, key } | null } for the panel's cards.
 async function ebayProducts() {
   const { target } = await ebayPick();
   return {
     success: true,
     current: target ? { sheetId: target.sheetId, key: target.key } : null,
-    products: (await ebayProductList()).map(({ product, createdAt, ...card }) => card),
+    products: (await ebayProductList()).map(({ product, at, ...card }) => card),
   };
 }
 
-// The card the seller clicked becomes the panel's product. The panel names only the card (sheet and key): what is
-// filled into the form, the price included, comes from this list and never from the page.
+// The card the seller clicked becomes the panel's product, and the answer is its context (as ebayContext). The panel
+// names only the card (sheet and key): what is filled into the form, the price included, comes from this list and never
+// from the page.
 async function ebaySelect({ sheetId, key } = {}) {
   const card = (await ebayProductList()).find((x) => x.sheetId === sheetId && x.key === key);
-  if (!card) throw new Error("That product's listing is gone. Create one on the dashboard.");
+  if (!card) throw new Error("That product's listing is gone. Add it from its AliExpress page again.");
   await pickTarget(card.sheetId, card.key, card.product);
-  return { success: true };
+  return ebayContext();
 }
 
-// Gemini matches the form's empty item specifics to the saved listing. { fields, category } from the panel (cleaned
-// here) -> { success, answers: [{ name, value }] } of checked answers only. A failed reply has Gemini's `code`.
+// The AI matches the form's empty item specifics to the saved listing, after directFillPlan took the ones the listing
+// names itself. { fields, category } from the panel (cleaned here) -> { success, answers: [{ name, value }] } of checked
+// answers only. A failed reply has the AI's `code`; when the direct answers stand alone, `aiError` says why.
 async function planFill({ fields, category } = {}) {
   const { target, listing } = await ebayPick();
   if (!listing) throw new Error("Choose a product on the dashboard first.");
   const list = cleanFields(fields);
   if (!list.some(askable)) return { success: true, answers: [] };
-  const raw = await callGemini({ ...buildFillRequest(list, target, listing, category), timeoutMs: 45000 });
-  return { success: true, answers: validateFillPlan(raw, list) };
+
+  const direct = directFillPlan(list, listing);
+  const matched = new Set(direct.map((a) => a.name));
+  const remaining = list.filter((f) => !matched.has(f.name));
+  if (!remaining.some(askable)) return { success: true, answers: direct };
+
+  const stop = keepAlive();
+  let raw;
+  try {
+    ({ answer: raw } = await callAi({ ...buildFillRequest(remaining, target, listing, category), task: "fill", timeoutMs: 60000 }));
+  } catch (error) {
+    if (!direct.length) throw error;
+    const { code, provider, retryAt } = fail(error);
+    return { success: true, answers: direct, aiError: { code, provider, retryAt } };
+  } finally {
+    stop();
+  }
+  const aiAnswers = validateFillPlan(raw, remaining);
+  return { success: true, answers: [...direct, ...aiAnswers] };
 }
 
 // The panel can't open extension pages itself.

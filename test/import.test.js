@@ -36,6 +36,7 @@ function setup({ local = {}, sync = {}, tokens = ["token"], failure = "OAuth2 no
       removeCachedAuthToken: (opts, cb) => cb(),
     },
     storage: {
+      session: (() => { const s = {}; return { get: async (d) => ({ ...d, ...s }), set: async (i) => void Object.assign(s, i) }; })(), // AI key cooldowns
       sync: { get: async (d) => ({ ...d, ...synced }) },
       local: { get: async (d) => ({ ...d, ...store }), set: async (i) => void Object.assign(store, i), remove: async () => {}, setAccessLevel: async () => {} },
     },
@@ -256,11 +257,13 @@ test("with a key the AI's checked answer leads, titles fill the rest, and the ca
   // The key goes nowhere else.
   for (const c of t.calls.filter((x) => x !== call)) assert.ok(!c.url.includes(KEY) && !JSON.stringify(c.headers).includes(KEY));
   assert.ok(!JSON.stringify(r).includes(KEY));
-  assert.deepEqual(plain(t.store), { geminiKey: ` ${KEY} ` });
+  // The old single key moved into the pool once, trimmed, with the old model setting; nothing else is kept.
+  assert.deepEqual(plain(t.store.aiKeys), [{ id: "k1", provider: "gemini", key: KEY, model: "gemini-test-model", paid: false }]);
+  assert.deepEqual(Object.keys(t.store).filter((k) => !k.startsWith("diag")).sort(), ["aiKeys", "geminiKey"]); // this mock's remove() keeps nothing out
 });
 
 test("a model setting that is not a model name is ignored", async () => {
-  for (const [aiModel, model] of [["", "gemini-3.8-flash"], ["../v1/other", "gemini-3.8-flash"], ["a b", "gemini-3.8-flash"], ["x".repeat(101), "gemini-3.8-flash"], [42, "gemini-3.8-flash"], ["gemini-2.5-pro", "gemini-2.5-pro"]]) {
+  for (const [aiModel, model] of [["", "gemini-3.5-flash-lite"], ["../v1/other", "gemini-3.5-flash-lite"], ["a b", "gemini-3.5-flash-lite"], ["x".repeat(101), "gemini-3.5-flash-lite"], [42, "gemini-3.5-flash-lite"], ["gemini-2.5-pro", "gemini-2.5-pro"]]) {
     const { t, meta } = await read_({ local: { geminiKey: KEY }, sync: { aiModel }, gemini: [answer(GOOD_AI)] });
     await t.ask(mapRequest(meta));
     assert.equal(t.gemini()[0].url, `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, String(aiModel));
@@ -272,14 +275,14 @@ const AI_FAILURES = [
   ["a rejected key (401)", [failure(401, "x")], "invalid-key", 1],
   ["a forbidden key (403)", [failure(403, "x")], "invalid-key", 1],
   ["an invalid key (400)", [failure(400, "API key not valid. Please pass a valid API key.", { details: [{ reason: "API_KEY_INVALID" }] })], "invalid-key", 1],
-  ["rate limited twice", [failure(429, "x"), failure(429, "x")], "rate", 2],
+  ["rate limited, no other key", [failure(429, "x")], "rate", 1],
   ["a server error twice", [failure(500, "x"), failure(503, "x")], "network", 2],
   ["the network down", [{ throw: new TypeError("fetch failed") }], "network", 1],
   ["a timeout", [{ throw: named("TimeoutError", "timed out") }], "timeout", 1],
   ["an aborted request", [{ throw: named("AbortError", "aborted") }], "timeout", 1],
   ["an answer that is not JSON", [answer("sorry, I cannot help")], "bad-output", 1],
   ["an empty answer", [{ json: {} }], "bad-output", 1],
-  ["a blocked answer", [{ json: { promptFeedback: { blockReason: "SAFETY" } } }], "bad-output", 1],
+  ["a blocked answer", [{ json: { promptFeedback: { blockReason: "SAFETY" } } }], "blocked", 1],
   ["an unknown model (404)", [failure(404, "models/x is not found")], "bad-model", 1],
   ["a rejected request (400)", [failure(400, "Invalid JSON payload received.")], "bad-output", 1],
   ["JSON that is not an object", [answer([1, 2])], "bad-output", 1],
@@ -300,8 +303,8 @@ for (const [name, replies, reason, count] of AI_FAILURES) {
   });
 }
 
-test("one retry on a busy or failing Gemini, then success", async () => {
-  for (const first of [failure(429, "x"), failure(500, "x"), failure(503, "x")]) {
+test("one retry on a failing Gemini, then success", async () => {
+  for (const first of [failure(500, "x"), failure(503, "x")]) {
     const { t, meta } = await read_({ local: { geminiKey: KEY }, gemini: [first, answer(GOOD_AI)] });
     const r = await t.ask(mapRequest(meta));
     assert.equal(r.draft.method, "ai");
@@ -359,46 +362,46 @@ test("personal columns, cells and the spreadsheet's name never reach Gemini", as
   assert.deepEqual(tab.sample[0], { A: "ORD-5501", B: "Synthetic Ceramic Mug" }); // "Total" is not a title it knows: no sample cells
 });
 
-test("the Gemini helper never puts the key in a message, in a URL or in a reply", async () => {
+test("the AI helper never puts the key in a message, in a URL or in a reply", async () => {
   const t = setup({ local: { geminiKey: KEY }, gemini: [failure(400, `API key ${KEY} not valid`, { details: [{ reason: "API_KEY_INVALID" }] })] });
-  await assert.rejects(t.ctx.callGemini({ system: "s", user: "u", schema: { type: "object" } }), (e) => {
+  await assert.rejects(t.ctx.callAi({ system: "s", user: "u", schema: { type: "object" } }), (e) => {
     assert.equal(e.code, "invalid-key");
     assert.ok(!e.message.includes(KEY) && e.message.includes("[key]"));
     return true;
   });
   // No key at all: nothing is sent.
   const none = setup({ local: { geminiKey: "   " } });
-  await assert.rejects(none.ctx.callGemini({ user: "u" }), (e) => e.code === "nokey");
+  await assert.rejects(none.ctx.callAi({ user: "u" }), (e) => e.code === "nokey");
   assert.equal(none.calls.length, 0);
   // A schema is optional (listing text later); without one the call asks for no JSON mode.
   const free = setup({ local: { geminiKey: KEY }, gemini: [answer({ ok: 1 })] });
-  assert.deepEqual(plain(await free.ctx.callGemini({ user: "u" })), { ok: 1 });
+  assert.deepEqual(plain((await free.ctx.callAi({ user: "u" })).answer), { ok: 1 });
   assert.equal(JSON.parse(free.gemini()[0].body).generationConfig.responseMimeType, undefined);
 });
 
-test("the AI tab refuses a blank key, and the dialog's reduced-motion rule comes after the animations it turns off", () => {
+test("the AI tab adds a key only after Check, and the dialog's reduced-motion rule comes after the animations it turns off", () => {
   const js = read("options/options.js");
-  assert.match(js, /const key = keyInput\.value\.trim\(\);\s*if \(!key\)/); // a blank key never overwrites the saved one
+  assert.match(js, /if \(!checked\) return/); // a key is added only after Check passed, so a blank one never is
   // Same specificity: the later rule wins, so the reduced-motion block must come last.
   const css = read("options/options.css");
   const reduced = css.indexOf("@media (prefers-reduced-motion: reduce) {\n  :is(input, select)[data-flash]");
   assert.ok(reduced > css.lastIndexOf(".gs-pane {") && reduced > css.lastIndexOf(".gs-spinner {"));
 });
 
-test("the key is saved on this device only: never in a backup, never synced, never exported", () => {
-  assert.ok(!shared.EXPORT_KEYS.includes("geminiKey"));
-  const file = { app: "aliswift", version: 1, sync: { sheets: [], activeSheetId: "", geminiKey: KEY, aiModel: "gemini-x" } };
+test("the keys are saved on this device only: never in a backup, never synced, never exported", () => {
+  assert.ok(!shared.EXPORT_KEYS.includes("geminiKey") && !shared.EXPORT_KEYS.includes("aiKeys"));
+  const file = { app: "aliswift", version: 1, sync: { sheets: [], activeSheetId: "", geminiKey: KEY, aiKeys: [{ key: KEY }], aiModel: "gemini-x" } };
   const r = shared.validateImport(file);
   assert.equal(r.ok, true);
-  assert.ok(!("geminiKey" in r.sync));
+  assert.ok(!("geminiKey" in r.sync) && !("aiKeys" in r.sync));
   assert.ok(!JSON.stringify(r).includes(KEY));
-  // The options page reads and writes it in local storage only.
+  // The options page reads and writes them in local storage only.
   const js = read("options/options.js");
   for (const m of js.matchAll(/chrome\.storage\.(sync|local)\.\w+\([^)]*\)/g)) {
-    if (m[0].includes("geminiKey")) assert.equal(m[1], "local", m[0]);
+    if (/geminiKey|aiKeys/.test(m[0])) assert.equal(m[1], "local", m[0]);
   }
-  assert.match(js, /chrome\.storage\.local\.set\(\{ geminiKey/);
-  assert.doesNotMatch(js, /EXPORT_KEYS[^;]*geminiKey/);
+  assert.match(js, /chrome\.storage\.local\.set\(\{ aiKeys: next \}\)/);
+  assert.doesNotMatch(js, /EXPORT_KEYS[^;]*(geminiKey|aiKeys)/);
 });
 
 /* Read only */
@@ -418,8 +421,8 @@ test("the import code path contains no write: no method, no body, no values:upda
 
   // The pure module never touches chrome or the network; the helper only talks to Gemini.
   assert.doesNotMatch(code(read("lib/importmap.js"), "// Pure logic"), /\bchrome\b|\bfetch\b/);
-  const gem = code(read("lib/gemini.js"), "// One structured call");
-  assert.deepEqual([...gem.matchAll(/https?:\/\/[^\s"'`/]+/g)].map((m) => m[0]), ["https://generativelanguage.googleapis.com"]);
+  const ai = code(read("lib/ai.js"), "const AI_PROVIDERS");
+  assert.deepEqual([...new Set([...ai.matchAll(/https?:\/\/[^\s"'`/*]+/g)].map((m) => m[0]))].sort(), ["https://api.groq.com", "https://generativelanguage.googleapis.com", "https://openrouter.ai"]);
 });
 
 // A sheet like AliSwift's own, with formulas in the first data row as the Sheets API gives them back (FORMULA).

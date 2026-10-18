@@ -11,6 +11,8 @@ const PRICING_KEYS = [
   "marginPercent",
   "includeSalePrice",
   "roundToNinetyNine",
+  "feePercent",
+  "feeFixed",
 ];
 const TITLE_KEYS = ["titleLength", "excludeKeywords"];
 // Column rows in the Edit dialog. Optional columns sit under "More columns" and may be left blank.
@@ -46,6 +48,7 @@ const EDIT_KEYS = [
   "region",
   ...COLUMNS.map((c) => c.key),
   "skuPrefix",
+  "skuFormula",
   "oTab",
   "oRow",
 ];
@@ -386,9 +389,10 @@ $("presetBtn").addEventListener("click", () => {
     el.value = value;
     changed.push(el);
   };
-  for (const key of EDIT_KEYS.filter((k) => k !== "name" && k !== "region")) {
+  for (const key of EDIT_KEYS.filter((k) => k !== "name" && k !== "region" && k !== "skuFormula")) {
     set(editForm.elements[key], TEMPLATE_LAYOUT[key]);
   }
+  editForm.elements.skuFormula.checked = false; // the template's SKU column is AliSwift's to write
   for (const c of ORDER_COLS) set(editForm.elements[`oc_${c.key}`], TEMPLATE_LAYOUT.oCols[c.key]);
   $("moreCols").open = true;
   validateEdit();
@@ -694,13 +698,15 @@ const GS_PANES = ["gsChoose", "gsRead", "gsMap"];
 const GS_TAGS = { matched: ["green", "success", "Matched"], guessed: ["amber", "warning", "Guessed"], yours: ["blue", "", "Your pick"], formula: ["amber", "warning", "Has formulas"] };
 const GS_NOTICE_ICON = { error: ICONS.error, warn: ICONS.warning, info: ICONS.info };
 const GS_REASONS = {
-  nokey: "Add a Gemini key in the AI tab to map with AI.",
+  nokey: "Add an AI key in the AI tab to map with AI.",
   "invalid-key": "Gemini rejected your key. Check it in the AI tab.",
   rate: "Gemini is busy right now.",
   network: "Couldn't reach Gemini.",
   timeout: "Gemini took too long.",
   "bad-output": "Gemini's answer didn't pass checks.",
-  "bad-model": "Gemini doesn't know the model name. Check the model in the AI tab.",
+  "bad-model": "That model isn't available for your key. Check it in the AI tab.",
+  quota: "Every AI key has used its limit for today.",
+  blocked: "The AI refused to answer.",
 };
 const GS_RETRY = ["rate", "network", "timeout", "bad-output"];
 const GS_ERRORS = {
@@ -1064,6 +1070,7 @@ async function gsSave() {
   for (const r of GS_ROWS.filter((x) => x.scope === "inv" || sheet.oTab)) {
     if (!gsClash(r, gsForm.elements[r.name].value)) continue;
     if (r.key === "salePriceCol") sheet.includeSalePrice = false;
+    else if (r.key === "skuCol") sheet.skuFormula = true; // read back after each add, never written
     else if (r.scope === "inv") {
       sheet[r.key] = "";
       cleared.add(r.key);
@@ -1203,63 +1210,137 @@ $("gsDialog").addEventListener("close", () => {
   gsAfter = null;
 });
 
-/* AI tab: the Gemini key. It lives in storage.local only: never synced, never exported, never shown back. */
+/* AI tab: the key pool (lib/ai.js). Keys live in storage.local only: never synced, never exported, never shown back.
+   A key is added only after Check has asked its provider which models it can use. */
 
-const keyInput = $("geminiKey");
-let hasKey = false;
+const keyInput = $("keyInput");
+let aiKeys = [];
+let checked = null; // { provider, key, paid } that the last Check passed
 
-function renderKey(has) {
-  hasKey = has;
-  keyInput.placeholder = has ? "Saved. Paste a new key to replace it." : "Paste your Gemini API key";
-  $("keyState").innerHTML = has
-    ? 'Key saved on this device. <button type="button" class="link-btn">Remove key</button>'
-    : 'No key saved. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get one from Google AI Studio</a>.';
+function node(tag, props = {}, ...kids) {
+  const el = Object.assign(document.createElement(tag), props);
+  el.append(...kids);
+  return el;
 }
 
-// A pasted key often carries a space or a newline at its end: it is trimmed when saved.
+const keyStatus = (c) =>
+  !c || c.until <= Date.now() ? ["green", "Ready"]
+  : c.code === "invalid-key" ? ["red", "Rejected"]
+  : c.code === "quota" ? ["amber", "Daily limit"]
+  : ["amber", `Busy until ${new Date(c.until).toTimeString().slice(0, 5)}`];
+
+async function renderKeys() {
+  const cool = await chrome.storage.session.get({ aiCool: {} }).then((r) => r.aiCool, () => ({}));
+  $("keyList").replaceChildren(...aiKeys.map((k, i) => {
+    const name = AI_PROVIDERS[k.provider].name;
+    const [tone, status] = keyStatus(cool[k.id]);
+    const paid = node("span", { className: "tag", textContent: k.paid ? "Paid" : "Free" });
+    const state = node("span", { className: "tag", textContent: status });
+    if (k.paid) paid.dataset.tone = "blue";
+    state.dataset.tone = tone;
+    const btn = (text, label, act, off = false) => node("button", { type: "button", className: "btn btn-quiet btn-sm", textContent: text, disabled: off, ariaLabel: `${label} ${name} key ${i + 1}`, onclick: act });
+    return node("li", { className: "key-row" },
+      node("span", { className: "key-name" }, node("strong", { textContent: name }), " ", node("span", { className: "muted", textContent: k.model })),
+      paid, state,
+      node("span", { className: "key-actions" },
+        btn("Up", "Move up", () => moveKey(i, -1), i === 0),
+        btn("Down", "Move down", () => moveKey(i, 1), i === aiKeys.length - 1),
+        btn("Remove", "Remove", () => removeKey(i))));
+  }));
+  $("keyState").textContent = aiKeys.length ? "" : "No key yet. Add one below; Get API keys says where.";
+}
+
+async function saveKeys(next, undo) {
+  try {
+    await chrome.storage.local.set({ aiKeys: next });
+  } catch {
+    toast("Couldn't save your keys.", { kind: "error" });
+    return false;
+  }
+  aiKeys = next;
+  renderKeys();
+  flash("Saved");
+  if (undo) toast(undo.text, { duration: 8000, action: { label: "Undo", onClick: () => saveKeys(undo.keys) } });
+  return true;
+}
+
+function moveKey(i, by) {
+  const next = [...aiKeys];
+  [next[i], next[i + by]] = [next[i + by], next[i]];
+  saveKeys(next);
+}
+
+const removeKey = (i) => saveKeys(aiKeys.filter((_, j) => j !== i), { text: "Key removed.", keys: aiKeys });
+
+// Any change to what was checked means a new Check.
+function uncheck() {
+  checked = null;
+  $("keyModelRow").hidden = true;
+}
+for (const id of ["keyProvider", "keyPaid"]) $(id).addEventListener("change", uncheck);
 keyInput.addEventListener("input", () => {
-  const v = keyInput.value.trim();
-  keyInput.setCustomValidity(!keyInput.value || /^\S{20,200}$/.test(v) ? "" : "That doesn't look like an API key.");
+  uncheck();
+  keyInput.setCustomValidity("");
+});
+
+$("keyCheck").addEventListener("click", async () => {
+  const provider = $("keyProvider").value;
+  const paid = $("keyPaid").value === "paid";
+  const key = keyInput.value.trim(); // a pasted key often carries a space or a newline at its end
+  keyInput.setCustomValidity(/^\S{20,200}$/.test(key) ? "" : "That doesn't look like an API key.");
+  if (!keyInput.reportValidity()) return;
+  const p = AI_PROVIDERS[provider];
+  // Asked here, from the click, so installing AliSwift asks for nothing new. Gemini's host is in the manifest.
+  if (!(await chrome.permissions.request({ origins: [p.host] }).catch(() => false))) {
+    $("keyState").textContent = `Allow AliSwift to reach ${p.name} to use this key.`;
+    return;
+  }
+  $("keyCheck").disabled = true;
+  $("keyState").textContent = `Checking with ${p.name}…`;
+  try {
+    const models = await aiModels(provider, key, paid);
+    if (!models.length) throw new Error(`This ${p.name} key can't use any model AliSwift knows how to call.`);
+    $("keyModel").replaceChildren(...models.map((m) => node("option", { value: m, textContent: m })));
+    $("keyModel").value = models.includes(p.model) ? p.model : models[0];
+    checked = { provider, key, paid };
+    $("keyModelRow").hidden = false;
+    $("keyState").textContent = "The key works. Pick a model, then Add key.";
+    $("keyModel").focus();
+  } catch (e) {
+    $("keyState").textContent = e.message;
+  } finally {
+    $("keyCheck").disabled = false;
+  }
 });
 
 $("keyForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const key = keyInput.value.trim();
-  if (!key) {
-    keyInput.value = "";
-    return keyInput.focus();
-  }
-  try {
-    await chrome.storage.local.set({ geminiKey: key });
-  } catch {
-    return toast("Couldn't save your key.", { kind: "error", action: { label: "Retry", onClick: () => $("keyForm").requestSubmit() } });
-  }
+  if (!checked) return $("keyCheck").focus();
+  const entry = { id: crypto.randomUUID(), ...checked, model: $("keyModel").value };
+  if (!(await saveKeys([...aiKeys, entry]))) return;
   keyInput.value = "";
-  renderKey(true);
-  flash("Saved");
-  toast("Key saved.");
+  uncheck();
+  toast("Key added.");
 });
 
-$("keyState").addEventListener("click", async (e) => {
-  if (!e.target.closest(".link-btn")) return;
-  await chrome.storage.local.remove("geminiKey");
-  renderKey(false);
-  toast("Key removed.");
-  keyInput.focus();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.aiKeys) aiKeys = Array.isArray(changes.aiKeys.newValue) ? changes.aiKeys.newValue : [];
+  if ((area === "local" && changes.aiKeys) || (area === "session" && changes.aiCool)) renderKeys();
+});
+aiPool().then((keys) => {
+  aiKeys = keys;
+  renderKeys();
 });
 
-chrome.storage.onChanged.addListener((changes, area) => area === "local" && changes.geminiKey && renderKey(Boolean(changes.geminiKey.newValue)));
-chrome.storage.local.get({ geminiKey: "" }).then(({ geminiKey }) => renderKey(Boolean(String(geminiKey).trim())));
+$("aiPhotos").addEventListener("change", (e) => setSync({ aiPhotos: e.target.checked }, () => (e.target.checked = !e.target.checked), () => $("aiPhotos").dispatchEvent(new Event("change"))));
 
-/* AI tab: the model and the listing instructions. Settings, not secrets, so they sync and export.
+/* AI tab: the listing instructions. A setting, not a secret, so it syncs and exports.
    Blank means the default: the instructions are stored as "" until the seller edits them. */
 
-const modelInput = $("aiModel");
 const instInput = $("aiInstructions");
-const aiSaved = { aiModel: "", aiInstructions: "" };
+const aiSaved = { aiInstructions: "" };
 
 function showAi() {
-  modelInput.value = aiSaved.aiModel;
   instInput.value = aiSaved.aiInstructions || DEFAULT_INSTRUCTIONS;
   $("aiCount").textContent = `${instInput.value.length}/6000`;
 }
@@ -1279,13 +1360,6 @@ function saveAi(patch) {
   );
 }
 
-modelInput.addEventListener("change", () => {
-  const v = modelInput.value.trim();
-  modelInput.setCustomValidity(/^[\w.-]{0,100}$/.test(v) ? "" : "Use a model id from Google, like gemini-3.8-flash.");
-  if (!modelInput.reportValidity()) return flash("Not saved", true);
-  saveAi({ aiModel: v });
-});
-
 instInput.addEventListener("input", () => ($("aiCount").textContent = `${instInput.value.length}/6000`));
 instInput.addEventListener("change", () => saveAi({ aiInstructions: instInput.value.trim() === DEFAULT_INSTRUCTIONS ? "" : instInput.value.trim() }));
 
@@ -1298,9 +1372,10 @@ $("aiReset").addEventListener("click", () => {
 
 // Another tab, or a settings import, changed them.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "sync" || !("aiModel" in changes || "aiInstructions" in changes)) return;
-  for (const key of Object.keys(aiSaved)) if (key in changes) aiSaved[key] = changes[key].newValue ?? "";
-  if (document.activeElement !== instInput && document.activeElement !== modelInput) showAi();
+  if (area !== "sync" || !("aiInstructions" in changes || "aiPhotos" in changes)) return;
+  if ("aiPhotos" in changes) $("aiPhotos").checked = changes.aiPhotos.newValue === true;
+  if ("aiInstructions" in changes) aiSaved.aiInstructions = changes.aiInstructions.newValue ?? "";
+  if (document.activeElement !== instInput) showAi();
 });
 
 /* Settings backup */
@@ -1437,7 +1512,7 @@ function showImagesNote(on, granted) {
   $("imagesNote").textContent = !on
     ? ""
     : granted
-      ? "Downloads allowed: the download button on AliExpress saves gallery and variant photos to your Downloads folder, and Create Listing attaches photos to eBay forms."
+      ? "Downloads allowed: the download button on AliExpress saves gallery and variant photos to your Downloads folder, and the eBay panel attaches photos to eBay's form."
       : "Downloads permission was not allowed. Switch this off and on to prompt for permission.";
 }
 
@@ -1456,6 +1531,15 @@ async function saveIncludeImages(on) {
   );
 }
 $("includeImages").addEventListener("change", (e) => saveIncludeImages(e.target.checked));
+
+// Error reports (lib/diag.js reads these two).
+for (const id of ["diagOn", "diagContent"]) {
+  const save = (on) => {
+    $(id).checked = on;
+    return setSync({ [id]: on }, () => ($(id).checked = !on), () => save(on));
+  };
+  $(id).addEventListener("change", (e) => save(e.target.checked));
+}
 const imagesNoteFor = async (on) => showImagesNote(on, await chrome.permissions.contains({ permissions: ["downloads"] }).catch(() => false));
 
 $("tabs").addEventListener("click", (e) => {
@@ -1499,8 +1583,10 @@ profileButton($("profile"));
     showPageButton: true,
     includeImages: false,
     homeCurrency: "",
-    aiModel: "",
+    aiPhotos: false,
     aiInstructions: "",
+    diagOn: true,
+    diagContent: false,
   });
   sheets = stored.sheets;
   activeId = stored.activeSheetId;
@@ -1508,7 +1594,10 @@ profileButton($("profile"));
   $("showPageButton").checked = stored.showPageButton;
   $("includeImages").checked = stored.includeImages;
   imagesNoteFor(stored.includeImages);
-  Object.assign(aiSaved, { aiModel: stored.aiModel, aiInstructions: stored.aiInstructions });
+  Object.assign(aiSaved, { aiInstructions: stored.aiInstructions });
+  $("aiPhotos").checked = stored.aiPhotos === true;
+  $("diagOn").checked = stored.diagOn !== false;
+  $("diagContent").checked = stored.diagContent === true;
   showAi();
   render();
 })();

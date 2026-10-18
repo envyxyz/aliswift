@@ -28,7 +28,8 @@ npm test
 | `lib/shared.js` | Settings defaults, price parsing, formula evaluator, pricing, and library reducers. Loaded by every part |
 | `lib/ui.css`, `lib/ui.js` | Colors, controls, tabs, dialogs, tooltips, and toasts shared by every page |
 | `lib/template.js` | Google Sheets template workbook generator for Auto sheets |
-| `lib/gemini.js` | Service worker client for Google's Gemini API |
+| `lib/ai.js` | AI calls: one queue, a key pool across Gemini, Groq and OpenRouter, per-key cooldowns |
+| `lib/errors.js` | One table of error messages and buttons for every page |
 | `lib/importmap.js` | Column matching and AI mapping logic for importing existing sheets |
 | `lib/listing.js` | AI listing generation and validation logic |
 | `content.js`, `content.css` | Reads AliExpress product pages, injects the on-page save button |

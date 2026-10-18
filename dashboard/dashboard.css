@@ -330,7 +330,7 @@ textarea:focus-visible {
 
 .card-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   gap: var(--sp-2);
   margin-top: auto;
 }
@@ -608,7 +608,7 @@ textarea:focus-visible {
 }
 
 /* ==========================================================================
-   Listing dialog
+   Inspector: the listing section
    ========================================================================== */
 
 .score {
@@ -687,7 +687,7 @@ textarea:focus-visible {
   gap: 16px;
 }
 
-#lsBody[inert] {
+#lsContent[inert] {
   opacity: 0.5;
 }
 
@@ -719,4 +719,195 @@ textarea:focus-visible {
   #refreshBtn[aria-busy="true"] {
     opacity: 0.5;
   }
+}
+
+/* ==========================================================================
+   Inspector. A side sheet on wide screens and a bottom sheet on a phone, entering and leaving along the same edge.
+   --spring is a damped spring (damping 0.85, response 0.34s) sampled for linear(): it settles with a small overshoot.
+   Leaving is shorter than entering. Reduced motion fades (lib/ui.css drops the slide); reduced transparency drops the blur.
+   ========================================================================== */
+
+dialog.sheet {
+  --spring: linear(0, 0.0621, 0.1967, 0.3501, 0.5021, 0.6347, 0.7407, 0.825, 0.8876, 0.9312, 0.9618, 0.9817, 0.9937, 1.0008, 1.0043, 1.0057, 1.0058, 1.0052, 1.0043, 1.0034, 1.0026, 1.0019, 1.0013, 1.0009, 1);
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(480px, 100vw);
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border-width: 0 0 0 1px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  opacity: 0;
+  transform: translateX(100%);
+  transition: opacity 160ms ease-in, transform 180ms cubic-bezier(0.4, 0, 1, 1), overlay 180ms allow-discrete,
+    display 180ms allow-discrete;
+}
+
+dialog.sheet[open] {
+  opacity: 1;
+  transform: none;
+  transition: opacity 160ms ease-out, transform 500ms var(--spring), overlay 500ms allow-discrete,
+    display 500ms allow-discrete;
+}
+
+@starting-style {
+  dialog.sheet[open] {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+dialog.sheet form {
+  height: 100%;
+  max-height: none;
+}
+
+dialog.sheet::backdrop {
+  background: rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(6px);
+}
+
+dialog.sheet .dialog-foot {
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+@media (max-width: 719px) {
+  dialog.sheet {
+    inset: auto 0 0 0;
+    width: 100%;
+    height: auto;
+    max-height: 92dvh;
+    border-width: 1px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transform: translateY(100%);
+  }
+  dialog.sheet form {
+    height: auto;
+    max-height: 92dvh;
+  }
+  @starting-style {
+    dialog.sheet[open] {
+      transform: translateY(100%);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.sheet,
+  dialog.sheet[open] {
+    transition-duration: 100ms;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  dialog.sheet::backdrop {
+    background: rgb(0 0 0 / 0.6);
+    backdrop-filter: none;
+  }
+}
+
+.ins-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.ins-photo {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+
+.ins-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ins-id {
+  flex: 1;
+  min-width: 0;
+}
+
+.ins-id h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.25;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.ins-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+#insNumbers,
+#insListing {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+#insListing {
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.ins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-3);
+}
+
+.ins-grid input {
+  font-variant-numeric: tabular-nums;
+}
+
+.ins-grid input[readonly] {
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.ins-sum {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+
+.ins-sum dt {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.ins-sum dd {
+  margin: 2px 0 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The card's Inspect eye sits beside its two buttons; its touch area is larger than the icon. */
+.card-eye {
+  position: relative;
+  align-self: center;
+}
+
+.card-eye::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
 }

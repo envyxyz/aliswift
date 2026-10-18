@@ -1,0 +1,6 @@
+# Only what AliSwift needs; `supabase link` fills in the rest in Part 8.
+project_id = "aliswift"
+
+# The extension has no Supabase sign-in: the function checks each event itself (check.mjs) and writes with the service role.
+[functions.ingest]
+verify_jwt = false

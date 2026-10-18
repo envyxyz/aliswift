@@ -4,6 +4,8 @@
 // so pressing it again (or on the next page of results) adds only what is new. It changes nothing on eBay.
 // Needs lib/panel.js and lib/orders.js (loaded first by the manifest).
 
+reportCrashes(); // lib/errors.js
+
 (() => {
   const GO_KEY = "aliswift-orders-go"; // set while the button takes the seller to All orders, so the import runs when it opens
   const ORDER_ONLY = /^\s*(\d{2}-\d{5}-\d{5})\s*$/;

@@ -35,22 +35,22 @@ AI is completely optional. You can use all core features of AliSwift (scraping, 
 1. Automated Column Mapping: When connecting an existing spreadsheet with unfamiliar header names, Gemini analyzes tab titles and headers to suggest accurate column mappings automatically.
 2. Listing Generation: Generating search-optimized eBay listing titles, descriptions, and item specifics from product cards on the dashboard.
 3. eBay Form Fill: Automatically matching and filling item specifics on eBay listing pages.
-To use AI features, you provide your own free Gemini API key from Google AI Studio.
+To use AI features, you provide your own AI key: a free Gemini key from Google AI Studio, or one from Groq or OpenRouter. You can add several; free keys are used first and a paid key takes over when every free one is busy. Settings, AI tab, **Get API keys** says where to get each.
 
-## 9. What data is sent to Gemini?
-When AI features are invoked, requests travel directly from your browser to Google's Gemini API using your personal key.
+## 9. What data is sent to the AI?
+When AI features are invoked, requests travel directly from your browser to your key's provider (Gemini, Groq or OpenRouter) using your personal key.
 - For AI column mapping, AliSwift sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns that look personal (names, addresses, phone numbers, and emails). Because the filter is a deny-list and can miss odd or unexpected headers, always check the mapping preview before confirming.
-- For listing generation, the product title, sell price (never your cost), the page's specifications and description, and up to four photos are sent.
+- For listing generation, the product title, sell price (never your cost), the page's specifications and description are sent, and up to two small photos if you turn that setting on.
 - For the AI fallbacks: the names, labels and types of the eBay form's boxes (never what is typed in them); the pieces of an AliExpress page that hold a price, with their size and a few words around them; and, from Seller Hub's order list, only each row's order number, custom label (SKU), quantities, money and dates, with every other piece of text replaced by a placeholder.
 - For eBay form filling, field names and available option choices from the eBay page are sent.
-Each Gemini call has a 15 s timeout and retries once, so requests take up to about 30 s total. Your Gemini API key stays in storage.local on this device, is sent only to Google's Gemini API, and is not included in settings export.
+Requests are sent one at a time, and a timeout is not retried. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are not included in settings export.
 
 ## 10. How do I undo an accidental product removal or change?
-AliSwift enforces a strict non-destructive policy. It only appends new product rows, updates selected status or tracking cells, and adds missing SKU or Image columns when you answer yes. It never deletes rows, clears cells, or overwrites existing values in your spreadsheet.
+AliSwift enforces a strict non-destructive policy. It writes new product rows, updates status, tracking and the prices you edit in the inspector (never a cell that holds a formula), and adds missing SKU or Image columns when you answer yes. It never deletes rows. The only cells it clears are the ones it wrote in a product's row when you press Remove from Sheet, after a second click.
 When you remove a product on the dashboard, AliSwift simply updates its status cell to Discontinued. A confirmation toast appears with an Undo button for 8 seconds. Clicking Undo immediately restores the item to its previous status. You can also view all discontinued products at any time under the Removed filter tab on the dashboard and restore them whenever you wish.
 
 ## 11. How can I back up or transfer my settings to another computer?
-In the Settings page under the General tab, click **Export settings**. AliSwift generates an `aliswift-settings.json` file containing all your sheet configurations, pricing formulas, saved local library items, and photo links (photo links only, no image data). On your other computer, click **Import settings** to restore your setup. Your secret Gemini key (which stays on this device in `storage.local`) and Google OAuth tokens are excluded from the backup file for your security.
+In the Settings page under the General tab, click **Export settings**. AliSwift generates an `aliswift-settings.json` file containing all your sheet configurations, pricing formulas, saved local library items, and photo links (photo links only, no image data). On your other computer, click **Import settings** to restore your setup. Your AI keys (which stay on this device in `storage.local`) and Google OAuth tokens are excluded from the backup file for your security.
 
 ## 12. Which supplier sites and selling platforms are supported?
 - Sourcing: AliExpress (`aliexpress.com` and `aliexpress.us`) product detail pages and Buy Now pages.
