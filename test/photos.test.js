@@ -504,7 +504,7 @@ test("C9. validateImport accepts boolean includeImages and rejects non-boolean; 
 test("C10. manifest.json permissions and optional_permissions declare downloads without adding host permissions", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "manifest.json"), "utf8"));
   assert.deepEqual(manifest.optional_permissions, ["downloads"]);
-  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms", "activeTab"]);
   assert.ok(!manifest.host_permissions.some((h) => h.includes("download")));
 });
 

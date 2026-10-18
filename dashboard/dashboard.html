@@ -187,6 +187,10 @@
           <label for="ordTrack">Tracking number</label>
           <input id="ordTrack" autocomplete="off" placeholder="e.g. RR123456789GB">
         </div>
+        <div id="ordLinkBox">
+          <label for="ordLink">Order link</label>
+          <input id="ordLink" type="url" autocomplete="off" placeholder="https://www.ebay.com/sh/ord/details?orderid=12-34567-89012">
+        </div>
         <div>
           <label for="ordNotes">Notes</label>
           <textarea id="ordNotes" rows="3" placeholder="Buyer notes or supplier details"></textarea>
@@ -221,14 +225,20 @@
           <datalist id="aoList"></datalist>
           <p id="aoCaption" class="muted" role="status"></p>
         </div>
+        <div>
+          <label for="aoLink">Order link</label>
+          <input id="aoLink" type="url" required placeholder="https://www.ebay.com/sh/ord/details?orderid=12-34567-89012">
+          <p id="aoLinkNote" class="muted" role="status"></p>
+        </div>
         <div class="fields-row">
           <div>
             <label for="aoNo">Order number</label>
             <input id="aoNo" required placeholder="12-34567-89012">
           </div>
           <div>
-            <label for="aoDate">Date</label>
-            <input id="aoDate" type="date" required>
+            <label for="aoDateBtn">Date</label>
+            <button type="button" class="field-btn" id="aoDateBtn" aria-haspopup="dialog"><span id="aoDateText"></span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"/></svg></button>
+            <input id="aoDate" type="hidden">
           </div>
         </div>
         <div class="fields-row">
@@ -262,12 +272,13 @@
       <header class="dialog-head ins-head">
         <div class="ins-photo" id="insPhoto" aria-hidden="true"></div>
         <div class="ins-id">
-          <h2 id="insTitle"></h2>
           <p class="ins-sub">
             <span id="insSku"></span>
-            <span class="tag" id="insStatus"></span>
-            <a id="insLink" href="#" target="_blank" rel="noopener" hidden>AliExpress page</a>
+            <span class="ins-status" id="insStatus"></span>
           </p>
+          <h2 id="insTitle">
+            <a class="ins-title" id="insTitleLink" target="_blank" rel="noopener"><span class="ins-track"><span id="insTitleText"></span></span></a>
+          </h2>
         </div>
         <button type="button" class="icon-btn" id="insClose" aria-label="Close">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -316,10 +327,7 @@
             </svg>
             <div id="lsBusyMsg">Writing your listing...</div>
           </div>
-          <div id="lsNone" class="notice" role="note" hidden>
-            <div id="lsNoneMsg"></div>
-            <button type="button" class="btn btn-sm" id="lsWrite">Write now</button>
-          </div>
+          <p id="lsNone" class="ls-none" role="note" hidden><span id="lsNoneMsg"></span></p>
           <div id="lsLimited" class="notice" role="note" hidden>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
@@ -379,8 +387,8 @@
         <div class="actions ls-actions" id="lsActions">
           <button type="button" class="btn btn-quiet" id="lsRegen">Rewrite listing</button>
           <button type="button" class="btn btn-quiet" id="lsCopyAll">Copy all</button>
-          <button type="button" class="btn btn-quiet" id="lsEbay">List on eBay</button>
-          <button type="button" class="btn" id="lsDone">Done</button>
+          <button type="button" class="btn" id="lsEbay">List on eBay</button>
+          <button type="button" class="btn" id="lsWrite" hidden>Create listing</button>
         </div>
       </footer>
     </form>
@@ -416,8 +424,8 @@
       </header>
       <div class="dialog-body">
         <p id="delMsg">Are you sure you want to delete this product?</p>
-        <p class="dialog-sub" id="delSub" style="margin-top:6px;word-break:break-word;"></p>
-        <p class="note" id="delNote" style="margin-top:8px;">This will remove the product from your active sheet.</p>
+        <p class="dialog-sub" id="delSub"></p>
+        <p class="note" id="delNote">This will remove the product from your active sheet.</p>
       </div>
       <footer class="dialog-foot">
         <div class="actions">

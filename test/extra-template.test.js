@@ -142,7 +142,7 @@ test("extra-template: column counts match the config layout", () => {
 
   assert.equal(sheetSizes.Dashboard, 4);
   assert.equal(sheetSizes.Inventory, 15);
-  assert.equal(sheetSizes.Orders, 12);
+  assert.equal(sheetSizes.Orders, 13);
 
   // Check Inventory column mappings in config
   assert.ok(colIndex(config.skuCol) < sheetSizes.Inventory);

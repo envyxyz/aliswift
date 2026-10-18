@@ -639,13 +639,13 @@ test("9. Dashboard source: sends fillPhotos once in backfillPhotos after caching
    10. Manifest permissions
    ================================================================ */
 
-test("10. Manifest: host_permissions include aliexpress.com and aliexpress-media.com, permissions are exactly storage and identity", () => {
+test("10. Manifest: host_permissions include aliexpress.com and aliexpress-media.com, permissions are exactly storage, identity, alarms and activeTab", () => {
   const manifest = JSON.parse(read("manifest.json"));
 
   assert.ok(manifest.host_permissions.includes("https://*.aliexpress.com/*"));
   assert.ok(manifest.host_permissions.includes("https://*.aliexpress-media.com/*"));
 
-  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms", "activeTab"]);
 });
 
 /* ================================================================

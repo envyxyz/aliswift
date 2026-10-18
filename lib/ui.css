@@ -806,8 +806,8 @@ details.disclosure > :not(summary) {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   color: var(--muted);
   background: none;
@@ -817,6 +817,8 @@ details.disclosure > :not(summary) {
 }
 
 .info svg {
+  width: 14px; /* the markup says 16; a little smaller sits better beside 13-17px text */
+  height: 14px;
   pointer-events: none;
 }
 
@@ -843,8 +845,12 @@ details.disclosure > :not(summary) {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-2px);
+  /* Hidden, it is collapsed: an invisible box still counts as scrollable overflow, so a tip near the bottom of a
+     dialog body made it scroll. */
+  max-height: 0;
+  overflow: hidden;
   transition: opacity var(--dur-fast) var(--ease) 150ms, transform var(--dur-fast) var(--ease) 150ms,
-    visibility 0s linear 270ms;
+    visibility 0s linear 270ms, max-height 0s linear 270ms;
 }
 
 /* Bridges the 6px gap so the pointer can travel from the icon to the tip. */
@@ -861,7 +867,9 @@ details.disclosure > :not(summary) {
   opacity: 1;
   visibility: visible;
   transform: none;
-  transition: opacity 140ms var(--ease), transform 140ms var(--ease), visibility 0s;
+  max-height: none;
+  overflow: visible;
+  transition: opacity 140ms var(--ease), transform 140ms var(--ease), visibility 0s, max-height 0s;
 }
 
 :is(.info, .has-tip):hover + .tip {
@@ -1292,6 +1300,28 @@ dialog form {
   border-radius: 50%;
   background: var(--ok);
   box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* The Google account photo replaces the icon and the green dot while signed in. */
+.profile-btn img {
+  display: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-btn[data-pic] img {
+  display: block;
+}
+
+.profile-btn[data-pic] svg,
+.profile-btn[data-pic]::after {
+  display: none;
+}
+
+.profile-btn[data-default] img {
+  filter: grayscale(1);
 }
 
 .profile-btn[data-state="busy"] svg {

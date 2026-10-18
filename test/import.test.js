@@ -152,7 +152,7 @@ test("readSpreadsheetMeta reads the tab names, then the first 4 rows of each, an
   assert.equal(meta.success, true);
   assert.equal(meta.title, "My store");
   assert.deepEqual(meta.skipped, ["Dashboard"]);
-  assert.deepEqual(meta.tabs.map((x) => [x.title, x.startRow, x.headers.length]), [["Inventory", 3, 15], ["Orders", 2, 12]]);
+  assert.deepEqual(meta.tabs.map((x) => [x.title, x.startRow, x.headers.length]), [["Inventory", 3, 15], ["Orders", 2, 13]]);
   assert.equal(t.calls.length, 3);
   assert.ok(t.calls.every((c) => c.method === "GET" && c.body === undefined && c.timed));
   // The third call reads the first data rows again as typed, so formulas can be told from values.
@@ -211,7 +211,7 @@ test("readSpreadsheetMeta explains every way a read can fail", async () => {
 /* Mapping and the AI fallback chain */
 
 const TEMPLATE_FIELDS = { keywordsCol: "B", linkCol: "C", priceCol: "D", salePriceCol: "E", skuCol: "A", statusCol: "M", imageCol: "O", profitCol: "J", marginCol: "L" };
-const ORDER_FIELDS = { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L" };
+const ORDER_FIELDS = { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M" };
 const letters = (fields) => Object.fromEntries(Object.entries(fields).map(([k, f]) => [k, f.letter]));
 const GOOD_AI = {
   inventoryTab: "Inventory",

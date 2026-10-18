@@ -785,3 +785,13 @@ label.inline > input[type="checkbox"]:disabled {
   flex-wrap: wrap;
   gap: var(--sp-4);
 }
+
+/* Signed out: nothing to set up without Google, so the page is the header and the lock, centered. */
+main[data-locked] > :not(.page-head, #lockSheets) {
+  display: none;
+}
+
+main[data-locked] #lockSheets {
+  margin: auto;
+  padding-bottom: 96px; /* the header sits above, so this lands the line at the middle of the page */
+}

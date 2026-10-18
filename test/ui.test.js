@@ -18,6 +18,13 @@ function fakeEl() {
     removeAttribute(k) {
       delete this.attrs[k];
     },
+    toggleAttribute(k, on) {
+      if (on) this.attrs[k] = "";
+      else delete this.attrs[k];
+    },
+    querySelector() {
+      return (this.img ??= {});
+    },
     addEventListener(type, fn) {
       (this.listeners[type] ??= []).push(fn);
     },
@@ -39,7 +46,7 @@ function setup(replies) {
   const chrome = {
     runtime: {
       sendMessage: async ({ action }) => {
-        const queue = replies[action];
+        const queue = replies[action] ?? [{ success: true, picture: "" }]; // no photo unless a test gives one
         const reply = queue.length > 1 ? queue.shift() : queue[0];
         if (reply instanceof Error) throw reply;
         return reply;
@@ -75,6 +82,22 @@ test("account button: a probe that can't tell is unknown, not signed out, and ne
   await visible(); // failed probe
   assert.deepEqual(t.signedIn(), [null, true]);
   assert.equal(t.btn.attrs["aria-label"], "Google account, signed in");
+});
+
+test("account button: the Google photo replaces the icon while signed in, and Google's stand-in photo is greyed", async () => {
+  const photo = "https://lh3.googleusercontent.com/a/abc=s96-c";
+  const t = setup({ authState: [{ success: true, signedIn: true }], profilePicture: [{ success: true, picture: photo }] });
+  await t.flush();
+  assert.ok("data-pic" in t.btn.attrs);
+  assert.equal(t.btn.img.src, photo);
+  assert.ok(!("data-default" in t.btn.attrs));
+
+  t.set(false); // signed out: back to the icon
+  assert.ok(!("data-pic" in t.btn.attrs));
+
+  const d = setup({ authState: [{ success: true, signedIn: true }], profilePicture: [{ success: true, picture: "https://lh3.googleusercontent.com/a/default-user=s96-c" }] });
+  await d.flush();
+  assert.ok("data-pic" in d.btn.attrs && "data-default" in d.btn.attrs);
 });
 
 test("account button: a save that says 'signin' flips it, and signing in again fires authchange so the popup recovers", async () => {

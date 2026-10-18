@@ -1,6 +1,5 @@
 body {
   width: 360px;
-  min-height: 200px;
 }
 
 /* Shipped inactive. If a themed select ever misbehaves in the popup, put class="select-native" on <body>. */
@@ -55,6 +54,26 @@ form {
   gap: 12px;
 }
 
+#launch {
+  display: grid;
+  gap: 12px;
+}
+
+.find {
+  display: flex;
+  gap: 8px;
+}
+
+.find input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Same height as the field beside it (the base button is 40px, inputs are 36px). */
+.find .btn {
+  height: 36px;
+}
+
 /* The currency block is empty for a same-currency product, so only what shows adds space. */
 #currency > :not([hidden]) {
   margin-top: 8px;
@@ -69,10 +88,14 @@ form {
 }
 
 #status {
-  min-height: 18px;
   font-size: 12px;
   text-align: center;
   color: var(--muted);
+}
+
+/* Nothing to say: no reserved line, or the form ends with 30px more space below the button than above the first field. */
+#status:empty {
+  display: none;
 }
 
 #status.error {

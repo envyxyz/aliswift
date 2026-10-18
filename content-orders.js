@@ -77,7 +77,9 @@ reportCrashes(); // lib/errors.js
     // The sell price is eBay's: the first plain amount in the row (its price column), 0 or none when the row shows no price.
     const amount = tokensOf(row ?? document.createElement("tr")).map((t) => /^[^\d\s]{0,3}\s?(\d{1,3}(?:,\d{3})*|\d+)\.\d{2}$/.exec(t)?.[0]).find(Boolean);
     const sell = amount ? Number(amount.replace(/[^\d.]/g, "")) : 0;
-    return { status: clean(row?.querySelector(".order-status .sh-bold")), tracking: clean(row?.querySelector(".tracking-info button")), ...(sell > 0 && { sell }) };
+    // The order number is a link to the order's page; its address is kept with the order.
+    const a = row?.querySelector('a[href*="orderid"], a[href*="/sh/ord/details"]') ?? [...(row?.querySelectorAll("a") ?? [])].find((x) => x.textContent.trim() === orderNumber);
+    return { status: clean(row?.querySelector(".order-status .sh-bold")), tracking: clean(row?.querySelector(".tracking-info button")), link: a?.href ?? "", ...(sell > 0 && { sell }) };
   }
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -110,7 +112,7 @@ reportCrashes(); // lib/errors.js
     }
     const range = resultsRange(document.body.innerText);
     const parts = [res.added ? `Added ${plural(res.added, "order")} to your sheet.` : "Nothing new to add."];
-    if (res.skipped) parts.push(`${plural(res.skipped, "order")} already there${res.updated ? `, ${plural(res.updated, "cell")} updated with eBay's status or tracking` : ""}.`);
+    if (res.skipped) parts.push(`${plural(res.skipped, "order")} already there${res.updated ? `, ${plural(res.updated, "cell")} updated with eBay's status, tracking or order link` : ""}.`);
     if (res.rejected) parts.push(`${plural(res.rejected, "item")} skipped: no custom label (SKU) on eBay.`);
     if (read.ai) parts.push("Read with AI, because the page's wording changed.");
     if (range && range.to < range.of) parts.push(`This page shows ${range.from}-${range.to} of ${range.of}: go to the next page and press the button again.`);

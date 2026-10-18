@@ -20,6 +20,7 @@ const handlers = {
   authState: { run: () => authState() },
   signIn: { pagesOnly: true, run: () => signIn() },
   signOut: { pagesOnly: true, run: () => signOut() },
+  profilePicture: { pagesOnly: true, run: () => profilePicture() },
   rate: { aliOk: true, run: (request) => getRate(request.data) },
   listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
   setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
@@ -31,6 +32,7 @@ const handlers = {
   moveLocal: { pagesOnly: true, run: (request) => moveLocal(request.sheetId) },
   importLibrary: { pagesOnly: true, run: (request) => importLibrary(request.library, request.photos) },
   addColumns: { pagesOnly: true, run: (request) => addColumns(request.sheetId, request.columns) },
+  addOrderLink: { pagesOnly: true, run: (request) => addOrderLink(request.sheetId) },
   fillPhotos: { pagesOnly: true, run: (request) => fillPhotos(request.sheetId, request.links, request.retry) },
   listSpreadsheets: { pagesOnly: true, run: () => listSpreadsheets() },
   readSpreadsheetMeta: { pagesOnly: true, run: (request) => readSpreadsheetMeta(request.id) },
@@ -198,13 +200,26 @@ async function authState() {
 async function signIn() {
   await getToken(true);
   await chrome.storage.local.set({ authOff: false });
+  await chrome.storage.local.remove(["profilePic"]); // maybe a different account than last time
   return { success: true, signedIn: true };
+}
+
+// The account photo for the account button (userinfo.profile scope), kept a day so the popup doesn't wait on Google.
+// picture is "" when there is none to show: the button keeps its icon, so a failure here is never worth an error.
+async function profilePicture() {
+  const { profilePic } = await chrome.storage.local.get("profilePic");
+  if (profilePic && Date.now() - profilePic.at < 24 * 60 * 60 * 1000) return { success: true, picture: profilePic.url };
+  const { picture } = await googleFetch("https://www.googleapis.com/oauth2/v3/userinfo").catch(() => ({}));
+  const url = /^https:\/\/[\w-]+\.googleusercontent\.com\//.test(picture) ? picture : "";
+  if (url) await chrome.storage.local.set({ profilePic: { url, at: Date.now() } });
+  return { success: true, picture: url };
 }
 
 // Local only: the Google grant stays (revoking would sign out every device and ask for consent again).
 async function signOut() {
   const token = await getToken().catch(() => null);
   await chrome.storage.local.set({ authOff: true });
+  await chrome.storage.local.remove(["profilePic"]);
   if (token) await new Promise((r) => chrome.identity.removeCachedAuthToken({ token }, r));
   return { success: true };
 }
@@ -719,7 +734,7 @@ async function ordersOf(sheetId) {
 // The Orders tab's order-number and SKU columns from row 1 down (f), and the order rows among them ({ row, no, sku }).
 async function readOrderKeys(sheet, cols) {
   if (!cols.no || !cols.sku) throw new Error("This sheet's Orders tab needs an Order Number and a SKU column.");
-  const f = await readFields(sheet.id, sheet.oTab, { no: cols.no, sku: cols.sku, status: cols.status, track: cols.track, sell: cols.sell }, 1); // one read: the same call also brings the status and tracking
+  const f = await readFields(sheet.id, sheet.oTab, { no: cols.no, sku: cols.sku, status: cols.status, track: cols.track, sell: cols.sell, link: cols.link }, 1); // one read: the same call also brings the status, tracking and link
   const rows = Array.from({ length: Math.max(f.no.length, f.sku.length) }, (_, i) => ({ row: i + 1, no: f.no[i], sku: f.sku[i] }));
   return { f, rows: rows.filter((r) => r.row >= sheet.oRow) };
 }
@@ -741,7 +756,7 @@ async function listOrders(sheetId) {
     orders.push({
       row: sheet.oRow + i, orderNumber, sku, product: names.get(sku.toLowerCase()) ?? "", date: fromSheetDate(c.date[i]),
       qty, sell: own ?? (unit == null ? null : round2(unit * qty)), cost: num(c.cost[i]), profit: num(c.profit[i]),
-      status: text(c.status[i]) || "Pending", tracking: text(c.track[i]), notes: text(c.notes[i]),
+      status: text(c.status[i]) || "Pending", tracking: realTracking(text(c.track[i])), notes: text(c.notes[i]), link: text(c.link[i]),
     });
   }
   return { success: true, orders };
@@ -770,7 +785,7 @@ async function addOrder(sheetId, order) {
     const cost = unit.cost == null ? null : round2(unit.cost * o.qty);
     await putCells(sheet.id, sheet.oTab, [
       [cols.no, o.orderNumber], [cols.sku, o.sku], [cols.date, o.serial], [cols.qty, o.qty], [cols.sell, sell],
-      [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking], [cols.notes, o.notes],
+      [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking], [cols.notes, o.notes], [cols.link, o.link],
     ].filter(([col]) => col).map(([col, value]) => [`${col}${row}`, value]));
     return { success: true, row, ...(cost == null && { warning: "SKU not found in your sheet, so cost is blank." }) };
   });
@@ -819,7 +834,8 @@ async function importOrders({ orders } = {}) {
       if (!r) continue;
       const now = text(have.status?.[r.row - 1]);
       if (cols.status && o.status !== "Pending" && o.status !== now && ["", "Pending", "Ordered"].includes(now)) updates.push([`${cols.status}${r.row}`, o.status]);
-      if (cols.track && o.tracking && !text(have.track?.[r.row - 1])) updates.push([`${cols.track}${r.row}`, o.tracking]);
+      if (cols.track && o.tracking && !realTracking(text(have.track?.[r.row - 1]))) updates.push([`${cols.track}${r.row}`, o.tracking]); // an old "+ Add tracking" prompt counts as empty
+      if (cols.link && o.link && !text(have.link?.[r.row - 1])) updates.push([`${cols.link}${r.row}`, o.link]);
       if (cols.sell && o.sell != null && num(have.sell?.[r.row - 1]) == null) updates.push([`${cols.sell}${r.row}`, o.sell]); // the price eBay shows
     }
     if (updates.length) await putCells(sheet.id, sheet.oTab, updates);
@@ -840,7 +856,7 @@ async function importOrders({ orders } = {}) {
       const cost = u?.cost == null ? null : round2(u.cost * o.qty);
       return [
         [cols.no, o.orderNumber], [cols.sku, o.sku], [cols.date, o.serial], [cols.qty, o.qty], [cols.sell, sell],
-        [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking],
+        [cols.cost, cost], [cols.status, o.status], [cols.track, o.tracking], [cols.link, o.link],
       ].filter(([col]) => col).map(([col, value]) => [`${col}${first + i}`, value]);
     });
     await putCells(sheet.id, sheet.oTab, cells);
@@ -1223,6 +1239,39 @@ async function addColumns(sheetId, wanted) {
     const { sheets } = await chrome.storage.sync.get({ sheets: [] });
     await chrome.storage.sync.set({ sheets: sheets.map((s) => (s.id === sheet.id ? { ...s, ...columns } : s)) });
     return { success: true, columns, skus: columns.skuCol ? rows.length : 0, photos };
+  });
+}
+
+// Adds the Order Link column to a sheet's Orders tab, after the last column that has a value, with its title in the header
+// row, and keeps the letter in the sheet's settings (oCols.link). Like addColumns, only after the seller said yes, and it
+// writes only into the new, empty column: no existing order is touched. The orders already there simply have no link yet.
+async function addOrderLink(sheetId) {
+  const sheet = await sheetById(sheetId);
+  if (!sheet.oTab) throw new Error("This sheet has no Orders tab to add the order link to.");
+  return enqueue(async () => {
+    const fields = encodeURIComponent("sheets.properties(sheetId,title,gridProperties(columnCount))");
+    const tab = (await sheetsFetch(`/${sheet.id}?fields=${fields}`)).sheets?.find((s) => s.properties?.title === sheet.oTab)?.properties;
+    if (!tab) throw new Error(`There is no tab called "${sheet.oTab}" in that spreadsheet.`);
+    const { values = [] } = await sheetsFetch(`/${sheet.id}/values/${encodeURIComponent(quote(sheet.oTab))}?valueRenderOption=UNFORMATTED_VALUE`);
+    const first = values.reduce((n, r) => Math.max(n, r.length), 0);
+    if (first + 1 > MAX_COLS) throw new Error(`There is no room: AliSwift uses columns A to Z and this tab already uses ${first} of them.`);
+    const letter = indexToCol(first);
+    if (first + 1 > (tab.gridProperties?.columnCount ?? 0)) {
+      const requests = [{ appendDimension: { sheetId: tab.sheetId, dimension: "COLUMNS", length: first + 1 - (tab.gridProperties?.columnCount ?? 0) } }];
+      await sheetsFetch(`/${sheet.id}:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests }) });
+    }
+    const head = sheet.oRow - 1; // the header row, when there is one
+    if (head >= 1) await putCells(sheet.id, sheet.oTab, [[`${letter}${head}`, "Order Link"]]);
+    // The title looks like its neighbours'. Cosmetic, so a refusal is not an error.
+    const last = head >= 1 ? (values[head - 1] ?? []).findLastIndex((c) => text(c)) : -1;
+    if (last >= 0) {
+      const range = (from, to) => ({ sheetId: tab.sheetId, startRowIndex: head - 1, endRowIndex: head, startColumnIndex: from, endColumnIndex: to });
+      const requests = [{ copyPaste: { source: range(last, last + 1), destination: range(first, first + 1), pasteType: "PASTE_FORMAT" } }];
+      await sheetsFetch(`/${sheet.id}:batchUpdate`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ requests }) }).catch(() => {});
+    }
+    const { sheets } = await chrome.storage.sync.get({ sheets: [] });
+    await chrome.storage.sync.set({ sheets: sheets.map((s) => (s.id === sheet.id ? { ...s, oCols: { ...SHEET_DEFAULTS.oCols, ...s.oCols, link: letter } } : s)) });
+    return { success: true, letter };
   });
 }
 

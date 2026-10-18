@@ -51,11 +51,16 @@ function buildSetStatusRequest(sheetId, product, status) {
 // Pure helper: the fields the Edit order dialog changed. Empty when nothing did, and then nothing is sent.
 function orderEditPatch(initial, current) {
   const patch = {};
-  for (const field of ["status", "tracking", "notes"]) {
-    if (current[field] !== initial[field]) patch[field] = current[field];
+  for (const field of ["status", "tracking", "notes", "link"]) {
+    if (current[field] === undefined || current[field] === initial[field]) continue;
+    if (field === "link" && !current.link) continue; // a link is never cleared from here, like the sheet's other cells
+    patch[field] = current[field];
   }
   return patch;
 }
+
+// Whether the active sheet's Orders tab has a column for the order link (an older sheet may not).
+const hasLinkCol = () => Boolean({ ...SHEET_DEFAULTS.oCols, ...activeSheet?.oCols }.link);
 
 // Pure helper: the status Undo writes back. A blank old status is shown as Pending, and "" is never sent.
 const undoOrderStatus = (oldStatus) => (ORDER_STATUSES.includes(oldStatus) ? oldStatus : "Pending");
@@ -747,6 +752,86 @@ function fillPriceRow(row, product, currencyCode) {
   }
 }
 
+// The card's context menu: one popover, rebuilt for the card that asked. It opens at the pointer and grows out from that
+// point (transform-origin), flips to stay on screen, and closes on an outside click, Esc or scroll (popover light dismiss).
+let cardMenu;
+function menuItem(label, { href, danger, disabled, onClick } = {}) {
+  const el = document.createElement(href ? "a" : "button");
+  el.className = "menu-item";
+  el.setAttribute("role", "menuitem");
+  if (!href) el.type = "button";
+  const text = document.createElement("span");
+  text.textContent = label;
+  if (href) {
+    el.href = href;
+    el.target = "_blank";
+    el.rel = "noopener";
+    el.append(text, createSvgPath("14", "14", ICONS.external));
+  } else {
+    el.append(text);
+  }
+  if (danger) el.dataset.tone = "danger";
+  if (disabled) el.setAttribute("aria-disabled", "true");
+  el.addEventListener("click", (e) => {
+    if (disabled) e.preventDefault();
+    cardMenu.hidePopover();
+    if (onClick) onClick();
+  });
+  return el;
+}
+
+function openCardMenu(e, product, card, isRemovedView) {
+  e.preventDefault();
+  if (!cardMenu) {
+    cardMenu = document.createElement("div");
+    cardMenu.className = "menu ctx";
+    cardMenu.tabIndex = -1;
+    cardMenu.setAttribute("popover", "");
+    cardMenu.setAttribute("role", "menu");
+    cardMenu.setAttribute("aria-label", "Product actions");
+    cardMenu.addEventListener("keydown", (k) => {
+      const items = [...cardMenu.querySelectorAll('[role="menuitem"]')];
+      const at = items.indexOf(document.activeElement);
+      const to = { ArrowDown: at + 1, ArrowUp: at < 0 ? items.length - 1 : at - 1, Home: 0, End: items.length - 1 }[k.key];
+      if (to === undefined) return;
+      k.preventDefault();
+      items[(to + items.length) % items.length].focus();
+    });
+    window.addEventListener("scroll", () => cardMenu.hidePopover(), { capture: true, passive: true });
+    document.body.append(cardMenu);
+  }
+
+  const items = [];
+  const link = httpsUrl(product.link);
+  items.push(link ? menuItem("View Product", { href: link }) : menuItem("View Product", { disabled: true }));
+  if (activeSheet?.oTab && authSignedIn && !isLibraryMode) items.push(menuItem("Add order", { onClick: () => openAddOrderDialog(product) }));
+  if (!isRemovedView) {
+    // Same rules as before: a sheet with no Status column, or a status shared by variant rows, cannot remove a product.
+    const why = !sheetHasStatus()
+      ? ["This sheet has no Status column, so products can't be removed.", { kind: "neutral", detail: "Add one in this sheet's settings, under More columns.", action: { label: "Open settings", onClick: openSettings } }]
+      : product.statusShared
+        ? ["This status is shared by other variant rows. Change it in the sheet.", { kind: "neutral" }]
+        : null;
+    const sep = document.createElement("div");
+    sep.className = "ctx-sep";
+    sep.setAttribute("role", "separator");
+    items.push(sep, menuItem("Delete", { danger: true, disabled: Boolean(why), onClick: () => (why ? toast(...why) : openDeleteDialog(product, card, card)) }));
+  }
+  cardMenu.replaceChildren(...items);
+
+  // Measure while open but not yet placed, then put it at the pointer, flipped where it would run off the window.
+  if (cardMenu.matches(":popover-open")) cardMenu.hidePopover();
+  cardMenu.showPopover();
+  const { width, height } = cardMenu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(e.clientX, innerWidth - width - 8));
+  const top = Math.max(8, e.clientY + height > innerHeight - 8 ? e.clientY - height : e.clientY);
+  cardMenu.style.left = `${left}px`;
+  cardMenu.style.top = `${top}px`;
+  cardMenu.style.setProperty("--ox", `${e.clientX - left}px`);
+  cardMenu.style.setProperty("--oy", `${e.clientY - top}px`);
+  cardMenu.focus();
+}
+
 // Create a single Product Card element
 function createProductCard(product, { currencyCode = "", isRemovedView = false }) {
   const card = document.createElement("article");
@@ -878,67 +963,6 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
   }
   media.append(slotStart);
 
-  // Slot end: "x" remove button (absent in Removed view)
-  if (!isRemovedView) {
-    const slotEnd = document.createElement("div");
-    slotEnd.className = "title-row card-slot";
-    slotEnd.dataset.pos = "end";
-    slotEnd.dataset.align = "end";
-
-    const xBtn = document.createElement("button");
-    xBtn.type = "button";
-    xBtn.className = "icon-btn card-x";
-    xBtn.setAttribute("aria-label", `Delete ${product.sku || product.title}`);
-    xBtn.append(
-      createSvgPath("18", "18", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z")
-    );
-
-    if (!hasStatusCol) {
-      xBtn.setAttribute("aria-disabled", "true");
-      xBtn.classList.add("has-tip");
-      xBtn.setAttribute("aria-describedby", `tip-nox-${product.row}`);
-
-      const tip = document.createElement("span");
-      tip.id = `tip-nox-${product.row}`;
-      tip.className = "tip";
-      tip.setAttribute("role", "tooltip");
-      tip.textContent = "This sheet has no Status column, so products can't be removed.";
-
-      xBtn.addEventListener("click", () => {
-        toast("This sheet has no Status column, so products can't be removed.", {
-          kind: "neutral",
-          detail: "Add one in this sheet's settings, under More columns.",
-          action: { label: "Open settings", onClick: openSettings },
-        });
-      });
-      slotEnd.append(xBtn, tip);
-    } else if (product.statusShared) {
-      xBtn.setAttribute("aria-disabled", "true");
-      xBtn.classList.add("has-tip");
-      xBtn.setAttribute("aria-describedby", `tip-nox-${product.row}`);
-
-      const tip = document.createElement("span");
-      tip.id = `tip-nox-${product.row}`;
-      tip.className = "tip";
-      tip.setAttribute("role", "tooltip");
-      tip.textContent = "This status is shared by other variant rows. Change it in the sheet.";
-
-      xBtn.addEventListener("click", () => {
-        toast("This status is shared by other variant rows. Change it in the sheet.", {
-          kind: "neutral",
-        });
-      });
-      slotEnd.append(xBtn, tip);
-    } else {
-      xBtn.addEventListener("click", () => {
-        openDeleteDialog(product, card, xBtn);
-      });
-      slotEnd.append(xBtn);
-    }
-
-    media.append(slotEnd);
-  }
-
   card.append(media);
 
   // 2. Body
@@ -954,19 +978,6 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     skuSpan.className = "card-sku";
     skuSpan.textContent = product.sku;
     meta.append(skuSpan);
-  }
-
-  if (activeSheet?.oTab && authSignedIn && !isLibraryMode) {
-    const addOrderBtn = document.createElement("button");
-    addOrderBtn.type = "button";
-    addOrderBtn.className = "icon-btn";
-    addOrderBtn.setAttribute("aria-label", `Add order for ${product.sku || product.title}`);
-    addOrderBtn.title = "Add order";
-    addOrderBtn.append(
-      createSvgPath("16", "16", "M11 9h2V6h3V4h-3V1h-2v3H8v2h3v3zm-4 9c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2zm-9.83-3.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.86-7.01L19.42 4h-.01l-1.1 2-2.76 5H8.53l-.13-.27L6.16 6l-.95-2-.94-2H1v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.13 0-.25-.11-.25-.25z")
-    );
-    addOrderBtn.addEventListener("click", () => openAddOrderDialog(product));
-    meta.append(addOrderBtn);
   }
 
   body.append(meta);
@@ -991,25 +1002,6 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
   const actions = document.createElement("div");
   actions.className = "card-actions";
 
-  // "View product"
-  const safeProdLink = httpsUrl(product.link);
-  if (safeProdLink) {
-    const viewBtn = document.createElement("a");
-    viewBtn.className = "btn btn-quiet btn-sm";
-    viewBtn.href = safeProdLink;
-    viewBtn.target = "_blank";
-    viewBtn.rel = "noopener";
-    viewBtn.textContent = "View product";
-    actions.append(viewBtn);
-  } else {
-    const viewBtn = document.createElement("a");
-    viewBtn.className = "btn btn-quiet btn-sm";
-    viewBtn.setAttribute("aria-disabled", "true");
-    viewBtn.title = "No product link";
-    viewBtn.textContent = "View product";
-    actions.append(viewBtn);
-  }
-
   // Primary action: Restore (in Removed view) or the listing button
   if (isRemovedView) {
     const restoreBtn = document.createElement("button");
@@ -1030,16 +1022,19 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
     actions.append(createBtn);
   }
 
-  // Inspect: the eye opens the inspector (numbers, then listing).
-  const eyeBtn = document.createElement("button");
-  eyeBtn.type = "button";
-  eyeBtn.className = "icon-btn card-eye";
-  eyeBtn.setAttribute("aria-label", `Inspect ${product.sku || product.title}`);
-  eyeBtn.setAttribute("aria-haspopup", "dialog");
-  eyeBtn.title = "Inspect";
-  eyeBtn.append(createSvgPath("18", "18", "M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"));
-  eyeBtn.addEventListener("click", () => openInspector(product, eyeBtn));
-  actions.append(eyeBtn);
+  // The card itself opens the inspector (numbers, then listing). Its other controls keep their own clicks, and a click
+  // that ended a text selection is not one. Right click (or the menu key) opens View Product, Add order and Delete.
+  card.tabIndex = 0;
+  card.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, select, .status, .tag, .tip") || window.getSelection().toString()) return;
+    openInspector(product, card);
+  });
+  card.addEventListener("keydown", (e) => {
+    if (e.target !== card || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    openInspector(product, card);
+  });
+  card.addEventListener("contextmenu", (e) => openCardMenu(e, product, card, isRemovedView));
 
   card.append(actions);
   return card;
@@ -1429,7 +1424,19 @@ function createOrderRow(order, currencyCode) {
   const textWrap = document.createElement("div");
   const nameEl = document.createElement("div");
   nameEl.className = "name";
-  nameEl.textContent = nameEl.title = order.product || matchedProd?.title || "-";
+  nameEl.title = order.product || matchedProd?.title || "-";
+  // The name opens the AliExpress product page, when the sheet has the product's link.
+  const supLink = httpsUrl(matchedProd?.link);
+  if (supLink) {
+    const nameLink = document.createElement("a");
+    nameLink.href = supLink;
+    nameLink.target = "_blank";
+    nameLink.rel = "noopener";
+    nameLink.textContent = nameEl.title;
+    nameEl.append(nameLink);
+  } else {
+    nameEl.textContent = nameEl.title;
+  }
   textWrap.append(nameEl);
 
   if (order.sku) {
@@ -1628,31 +1635,25 @@ function createOrderRow(order, currencyCode) {
   editBtn.addEventListener("click", () => openEditOrderDialog(order, editBtn));
   actInner.append(editBtn);
 
-  // Supplier link
-  const supLink = httpsUrl(matchedProd?.link);
-  if (supLink) {
-    const aSup = document.createElement("a");
-    aSup.className = "icon-btn";
-    aSup.href = supLink;
-    aSup.target = "_blank";
-    aSup.rel = "noopener";
-    aSup.setAttribute("aria-label", "Order from supplier");
-    aSup.title = "Order from supplier";
-    aSup.append(
-      createSvgPath("16", "16", "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z")
-    );
-    actInner.append(aSup);
+  // The arrow opens the order in Seller Hub, on the sheet's eBay site (eBay US with no sheet).
+  const aOrder = document.createElement("a");
+  aOrder.className = "icon-btn";
+  if (order.orderNumber) {
+    const host = REGIONS[activeSheet?.region]?.ebay ?? REGIONS.US.ebay;
+    aOrder.href = cleanOrderLink(order.link) || `https://${host}/sh/ord/details?orderid=${encodeURIComponent(order.orderNumber)}`; // the saved link first
+    aOrder.target = "_blank";
+    aOrder.rel = "noopener";
+    aOrder.setAttribute("aria-label", `Open order #${order.orderNumber} on eBay`);
+    aOrder.title = "Open order on eBay";
   } else {
-    const aSup = document.createElement("a");
-    aSup.className = "icon-btn";
-    aSup.setAttribute("aria-disabled", "true");
-    aSup.setAttribute("aria-label", "No supplier link");
-    aSup.title = "No supplier link";
-    aSup.append(
-      createSvgPath("16", "16", "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z")
-    );
-    actInner.append(aSup);
+    aOrder.setAttribute("aria-disabled", "true");
+    aOrder.setAttribute("aria-label", "No order number");
+    aOrder.title = "No order number";
   }
+  aOrder.append(
+    createSvgPath("16", "16", "M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z")
+  );
+  actInner.append(aOrder);
 
   tdAct.append(actInner);
   tr.append(tdAct);
@@ -1839,9 +1840,7 @@ function renderProductsSkeleton() {
     act.className = "card-actions";
     const b1 = document.createElement("div");
     b1.className = "skeleton skeleton-btn";
-    const b2 = document.createElement("div");
-    b2.className = "skeleton skeleton-btn";
-    act.append(b1, b2);
+    act.append(b1);
     card.append(act);
 
     li.append(card);
@@ -2044,6 +2043,8 @@ function openEditOrderDialog(order, originBtn) {
   }
   if (ordTrack) ordTrack.value = order.tracking || "";
   if (ordNotes) ordNotes.value = order.notes || "";
+  document.getElementById("ordLink").value = order.link || "";
+  document.getElementById("ordLinkBox").hidden = !hasLinkCol();
 
   if (ordSummary) {
     const cur = getSheetCurrency();
@@ -2056,7 +2057,7 @@ function openEditOrderDialog(order, originBtn) {
   editingOrder = {
     sheetId: currentSheetId(),
     line: { orderNumber: order.orderNumber, sku: order.sku, row: order.row },
-    initial: { status, tracking: order.tracking || "", notes: order.notes || "" },
+    initial: { status, tracking: order.tracking || "", notes: order.notes || "", link: order.link || "" },
   };
 
   dlg.showModal();
@@ -2105,9 +2106,14 @@ function openAddOrderDialog(prefillProduct = null) {
     now.getDate()
   ).padStart(2, "0")}`;
 
-  if (dateIn) dateIn.value = todayStr;
+  setPickedDate(todayStr);
   if (qtyIn) qtyIn.value = "1";
-  if (noIn) noIn.value = "";
+  if (noIn) {
+    noIn.value = "";
+    delete noIn.dataset.touched;
+  }
+  document.getElementById("aoLink").value = "";
+  document.getElementById("aoLinkNote").textContent = hasLinkCol() ? "" : "This sheet has no Order link column, so the link only fills in the order number. Add the column in Settings, under Sheets.";
   if (noteIn) noteIn.value = "";
   if (sellIn) {
     delete sellIn.dataset.touched;
@@ -2245,6 +2251,7 @@ function setupOrderForm() {
       status: document.getElementById("ordStatus").value,
       tracking: document.getElementById("ordTrack").value,
       notes: document.getElementById("ordNotes").value,
+      link: document.getElementById("ordLink").value.trim(),
     });
     if (!Object.keys(patch).length) return closeOrd(true); // nothing changed, so nothing to send
 
@@ -2274,11 +2281,140 @@ function setupOrderForm() {
 }
 
 // Add order form: sends one new order line, then reloads the orders.
+/* The Add order form's date picker: a calendar popover in AliSwift's own look (the browser's can't be styled). The date
+   lives in the hidden #aoDate as year-month-day; the button shows it. Arrow keys move by day and week, Page Up and Down
+   by month, Home and End to the week's ends, Enter picks. The popover sits inside the dialog so the modal doesn't block it. */
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fromIso = (s) => new Date(...s.split("-").map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+
+function setPickedDate(iso) {
+  document.getElementById("aoDate").value = iso;
+  document.getElementById("aoDateText").textContent = fromIso(iso).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function setupDatePicker() {
+  const btn = document.getElementById("aoDateBtn");
+  const pop = document.createElement("div");
+  pop.className = "menu ctx datepop";
+  pop.setAttribute("popover", "");
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Choose a date");
+  const make = (tag, className, children = []) => {
+    const node = document.createElement(tag);
+    node.className = className;
+    node.append(...children);
+    return node;
+  };
+  const stepBtn = (step, label, path) => {
+    const b = make("button", "icon-btn", [createSvgPath("18", "18", path)]);
+    b.type = "button";
+    b.dataset.step = step;
+    b.setAttribute("aria-label", label);
+    return b;
+  };
+  const today = make("button", "link-btn");
+  today.type = "button";
+  today.dataset.today = "";
+  today.textContent = "Today";
+  const month = make("span", "dp-month");
+  month.setAttribute("aria-live", "polite");
+  const week = make("div", "dp-week", Array.from({ length: 7 }, (_, i) => Object.assign(document.createElement("span"), { textContent: new Date(2024, 0, 7 + i).toLocaleDateString("en", { weekday: "short" }).slice(0, 2) })));
+  week.setAttribute("aria-hidden", "true");
+  pop.append(
+    make("div", "dp-head", [month, make("span", "dp-nav", [stepBtn(-1, "Previous month", "M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"), stepBtn(1, "Next month", "M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z")])]),
+    week,
+    make("div", "dp-grid"),
+    make("div", "dp-foot", [today]),
+  );
+  document.getElementById("addOrderDialog").append(pop);
+  const grid = pop.querySelector(".dp-grid");
+
+  let view; // the first of the month on show
+  let focus; // the day the keyboard is on
+  const render = () => {
+    pop.querySelector(".dp-month").textContent = view.toLocaleDateString("en", { month: "long", year: "numeric" });
+    const picked = document.getElementById("aoDate").value;
+    const today = isoOf(new Date());
+    const start = new Date(view.getFullYear(), view.getMonth(), 1 - view.getDay());
+    grid.replaceChildren(
+      ...Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+        const iso = isoOf(d);
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "dp-day";
+        cell.dataset.iso = iso;
+        cell.textContent = d.getDate();
+        cell.tabIndex = iso === isoOf(focus) ? 0 : -1;
+        cell.setAttribute("aria-label", d.toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+        if (d.getMonth() !== view.getMonth()) cell.dataset.out = "";
+        if (iso === today) cell.dataset.today = "";
+        if (iso === picked) cell.setAttribute("aria-pressed", "true");
+        return cell;
+      }),
+    );
+  };
+  const pick = (iso) => {
+    setPickedDate(iso);
+    pop.hidePopover();
+    btn.focus();
+  };
+  const goTo = (d, keepFocus) => {
+    focus = d;
+    view = new Date(d.getFullYear(), d.getMonth(), 1);
+    render();
+    if (keepFocus) grid.querySelector('[tabindex="0"]').focus();
+  };
+
+  btn.addEventListener("click", () => {
+    const picked = fromIso(document.getElementById("aoDate").value);
+    focus = picked;
+    view = new Date(picked.getFullYear(), picked.getMonth(), 1);
+    render();
+    pop.showPopover();
+    // Under the button, or above it when there is no room; it grows out of the button's edge.
+    const b = btn.getBoundingClientRect();
+    const { width, height } = pop.getBoundingClientRect();
+    const left = Math.max(8, Math.min(b.left, innerWidth - width - 8));
+    const below = b.bottom + 6 + height <= innerHeight - 8;
+    const top = below ? b.bottom + 6 : Math.max(8, b.top - 6 - height);
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+    pop.style.setProperty("--ox", `${b.left + b.width / 2 - left}px`);
+    pop.style.setProperty("--oy", below ? "0px" : `${height}px`);
+    grid.querySelector('[tabindex="0"]').focus();
+  });
+  pop.addEventListener("click", (e) => {
+    const day = e.target.closest(".dp-day");
+    const step = e.target.closest("[data-step]");
+    if (day) pick(day.dataset.iso);
+    else if (step) goTo(new Date(view.getFullYear(), view.getMonth() + Number(step.dataset.step), 1));
+    else if (e.target.closest("[data-today]")) pick(isoOf(new Date()));
+  });
+  grid.addEventListener("keydown", (e) => {
+    const move = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [0, -7], ArrowDown: [0, 7], Home: [0, -focus.getDay()], End: [0, 6 - focus.getDay()], PageUp: [-1, 0], PageDown: [1, 0] }[e.key];
+    if (!move) return;
+    e.preventDefault();
+    goTo(new Date(focus.getFullYear(), focus.getMonth() + move[0], focus.getDate() + move[1]), true);
+  });
+}
+
 function setupAddOrderForm() {
+  setupDatePicker();
   const form = document.getElementById("addOrderForm");
   const dlg = document.getElementById("addOrderDialog");
   const submitBtn = document.getElementById("aoSubmit");
   document.getElementById("aoCancel").onclick = () => dlg.close();
+
+  // The order number comes from the pasted link, unless the seller typed one themselves.
+  const noIn = document.getElementById("aoNo");
+  noIn.addEventListener("input", () => (noIn.dataset.touched = "1"));
+  document.getElementById("aoLink").addEventListener("input", (e) => {
+    const link = e.target.value.trim();
+    const found = orderNumberFromLink(link);
+    if (found && !noIn.dataset.touched) noIn.value = found;
+    document.getElementById("aoLinkNote").textContent = !link ? "" : found ? `Order number ${found} read from the link.` : "No order number in this link. Type it below.";
+  });
 
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -2294,6 +2430,7 @@ function setupAddOrderForm() {
       date: document.getElementById("aoDate").value,
       qty: parseInt(document.getElementById("aoQty").value || "1", 10),
       notes: document.getElementById("aoNote").value.trim(),
+      link: document.getElementById("aoLink").value.trim(),
       ...(Number.isFinite(sell) && { sell }),
     };
 
@@ -2525,11 +2662,20 @@ function setListingBusy(on) {
   if (on) regen.dataset.state = "loading";
   else delete regen.dataset.state;
   regen.setAttribute("aria-disabled", String(on));
+  const write = lsEl("lsWrite");
+  if (on) write.dataset.state = "loading";
+  else delete write.dataset.state;
+  syncListingFooter();
 }
 
 // Regenerate and Copy all need a listing to act on.
+// With a listing: the rewrite, copy and list buttons. Without one, Create listing is the only button (not while
+// one is being written, or for a product with no link to keep a listing under).
 function syncListingFooter() {
   lsEl("lsRegen").hidden = lsEl("lsCopyAll").hidden = lsEl("lsEbay").hidden = !ls.record;
+  const write = lsEl("lsWrite");
+  write.hidden = Boolean(ls.record);
+  write.setAttribute("aria-disabled", String(!ls.key || !lsEl("lsBusy").hidden));
 }
 
 function showListingError({ text, retry, settings }) {
@@ -2547,7 +2693,7 @@ function showListingError({ text, retry, settings }) {
 function showNoListing() {
   const job = queuedListings[ls.key];
   lsEl("lsNoneMsg").textContent = job?.failed ? "The queue gave up on this listing after several tries." : job ? "Waiting in the queue. It writes itself a few minutes after you add a product." : "No listing yet.";
-  lsEl("lsWrite").textContent = job?.failed ? "Try again" : "Write now";
+  lsEl("lsWrite").textContent = job?.failed ? "Try again" : "Create listing";
   lsEl("lsNone").hidden = false;
   lsEl("lsContent").hidden = true;
   syncListingFooter();
@@ -2717,6 +2863,28 @@ async function listOnEbayFromCard(product) {
   loadProductsData();
 }
 
+// The title stays on one line. One wider than its box runs like a conveyor belt: a second copy follows the first, a gap
+// between, and the pair slides left forever (CSS .ins-title[data-run]). Measured again whenever the box changes size.
+const TITLE_GAP = 48;
+const TITLE_SPEED = 45; // px per second
+function fitTitle() {
+  const link = lsEl("insTitleLink");
+  const track = link.firstElementChild;
+  const text = lsEl("insTitleText");
+  track.querySelector(".ins-copy")?.remove();
+  delete link.dataset.run;
+  if (!link.clientWidth || text.offsetWidth <= link.clientWidth) return;
+  const copy = text.cloneNode(true);
+  copy.removeAttribute("id");
+  copy.className = "ins-copy";
+  copy.setAttribute("aria-hidden", "true");
+  track.append(copy);
+  const dist = text.offsetWidth + TITLE_GAP;
+  link.style.setProperty("--dist", `${dist}px`);
+  link.style.setProperty("--dur", `${dist / TITLE_SPEED / 0.85}s`); // the first 15% of each lap is a rest
+  link.dataset.run = "";
+}
+
 // Opens the inspector on `product`. `opener` is the button that asked, which gets the focus back on close.
 function openInspector(product, opener = null) {
   const dlg = lsEl("inspector");
@@ -2724,15 +2892,17 @@ function openInspector(product, opener = null) {
   const sheetId = currentSheetId();
   Object.assign(ls, { session: ls.session + 1, product, sheetId, key, record: listingsCache[key] ?? null, rendered: null, opener, prices: { price: product.price, salePrice: product.salePrice } });
 
-  lsEl("insTitle").textContent = product.title || "Untitled product";
+  lsEl("insTitleText").textContent = product.title || "Untitled product";
   lsEl("insSku").textContent = product.sku || "";
   const status = lsEl("insStatus");
   status.hidden = !product.status || !sheetHasStatus();
-  status.textContent = product.status || "";
+  status.textContent = { "Not Listed": "Not listed", Discontinued: "Removed" }[product.status] ?? product.status ?? "";
   status.dataset.tone = getStatusTone(product.status);
+  // The title opens the product page in a new tab; with no link it is plain text.
   const link = httpsUrl(product.link);
-  lsEl("insLink").hidden = !link;
-  if (link) lsEl("insLink").href = link;
+  if (link) lsEl("insTitleLink").href = link;
+  else lsEl("insTitleLink").removeAttribute("href");
+  fitTitle();
   const photo = lsEl("insPhoto");
   const src = httpsUrl(product.image);
   photo.hidden = !src;
@@ -2851,12 +3021,13 @@ async function writePrices() {
 }
 
 function setupInspector() {
+  new ResizeObserver(fitTitle).observe(lsEl("insTitleLink"));
   const dlg = lsEl("inspector");
   lsEl("lsCopyTitleSlot").replaceWith(copyButton("title", () => lsEl("lsTitleIn").value));
   lsEl("lsCopyDescSlot").replaceWith(copyButton("description", () => lsEl("lsDesc").value));
 
   lsEl("inspectorForm").addEventListener("submit", (e) => e.preventDefault());
-  lsEl("insClose").onclick = lsEl("lsDone").onclick = () => dlg.close();
+  lsEl("insClose").onclick = () => dlg.close();
   let pressed; // a drag that starts in a field and ends on the backdrop is not a click on it
   dlg.addEventListener("pointerdown", (e) => (pressed = e.target));
   dlg.addEventListener("click", (e) => e.target === dlg && pressed === dlg && dlg.close());
@@ -2875,7 +3046,7 @@ function setupInspector() {
   for (const id of ["lsTitleIn", "lsDesc"]) lsEl(id).addEventListener("change", saveListingEdits);
 
   lsEl("lsRetry").onclick = () => generateListing(Boolean(ls.record));
-  lsEl("lsWrite").onclick = () => generateListing(false);
+  lsEl("lsWrite").onclick = () => lsEl("lsWrite").getAttribute("aria-disabled") !== "true" && generateListing(false);
 
   const askReplace = (on) => {
     lsEl("lsConfirm").hidden = !on;

@@ -196,12 +196,18 @@ textarea:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  cursor: pointer;
   transition: border-color var(--dur-fast), opacity var(--dur-fast), transform var(--dur-fast);
   scroll-margin-top: calc(var(--head-h) + 8px);
 }
 
 .card:hover {
   border-color: color-mix(in srgb, var(--text) 20%, var(--border));
+}
+
+/* Pressing the card answers at once, but not when the press is on one of its own controls. */
+.card:active:not(:has(:is(button, a, select):active)) {
+  transform: scale(0.99);
 }
 
 .card.removing {
@@ -214,7 +220,7 @@ textarea:focus-visible {
 .card-media {
   position: relative;
   flex: none;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 5 / 4;
   overflow: hidden;
   background: var(--bg);
   border-radius: var(--radius);
@@ -256,27 +262,78 @@ textarea:focus-visible {
   left: 8px;
 }
 
-.card-slot[data-pos="end"] {
-  right: 8px;
+/* The status shows while the pointer or focus is in the card; touch has no hover, so it stays. */
+@media (hover: hover) {
+  .card-slot {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease-out;
+  }
+
+  .card:is(:hover, :focus-within) .card-slot {
+    opacity: 1;
+    pointer-events: auto;
+    transition-duration: 220ms; /* a fade in you can see, a quicker one out */
+  }
 }
 
-.card-x {
-  background: var(--raised);
-  border: 1px solid var(--border);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
-  width: 32px;
-  height: 32px;
+/* Card context menu (.menu is the shared popover). A translucent material that grows out of the pointer. */
+.ctx {
+  --shift: 0px;
+  width: auto;
+  min-width: 190px;
+  background: color-mix(in srgb, var(--raised) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform-origin: var(--ox, 0) var(--oy, 0);
+  scale: 0.98;
+  transition: opacity 120ms ease-in, scale 120ms ease-in, display 120ms allow-discrete, overlay 120ms allow-discrete;
 }
 
-.card-x:hover:not([aria-disabled="true"]) {
+.ctx:popover-open {
+  scale: 1;
+  transition-duration: 180ms, 180ms, 180ms, 180ms; /* in: a touch slower than out */
+  transition-timing-function: ease-out;
+}
+
+@starting-style {
+  .ctx:popover-open {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.ctx:focus {
+  outline: none;
+}
+
+.ctx .menu-item:active:not([aria-disabled="true"]) {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.ctx .menu-item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ctx .menu-item[data-tone="danger"] {
   color: var(--danger);
+}
+
+.ctx .menu-item[data-tone="danger"]:hover:not([aria-disabled="true"]) {
   background: var(--danger-soft);
 }
 
-.card-x[data-confirm] {
-  color: #fff;
-  background: var(--danger);
-  border-color: var(--danger);
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ctx {
+    background: var(--raised);
+    backdrop-filter: none;
+  }
 }
 
 .card[data-status="Discontinued"] .card-media {
@@ -297,12 +354,6 @@ textarea:focus-visible {
   font-size: var(--fs-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-}
-
-.card-meta .icon-btn {
-  width: 28px;
-  height: 28px;
-  margin-right: -6px;
 }
 
 .card-name {
@@ -330,7 +381,7 @@ textarea:focus-visible {
 
 .card-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr;
   gap: var(--sp-2);
   margin-top: auto;
 }
@@ -709,8 +760,14 @@ textarea:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card.removing {
-    transform: none;
+  .card.removing,
+  .card:active,
+  .card-slot {
+    transform: none !important;
+  }
+  .ctx {
+    scale: 1;
+    transition-duration: 100ms;
   }
   .skeleton {
     animation: none;
@@ -900,14 +957,447 @@ dialog.sheet .dialog-foot {
   font-variant-numeric: tabular-nums;
 }
 
-/* The card's Inspect eye sits beside its two buttons; its touch area is larger than the icon. */
-.card-eye {
-  position: relative;
-  align-self: center;
+/* Delete confirmation: the product sits in its own box, the spacing comes from the body's gap alone, and the two buttons
+   sit together on the right (the shared rule that sends Delete to the far left is for dialogs where it comes first). */
+#delMsg {
+  font-weight: 400;
 }
 
-.card-eye::before {
+#delSub {
+  margin: 0;
+  padding: 8px 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#deleteDialog .actions .btn-danger {
+  margin-right: 0;
+}
+
+/* ==========================================================================
+   Inspector, calmer: the same content with more room. One rhythm (4/8/12/16/24/32), hierarchy from size, weight and
+   colour instead of boxes and rules, labels quiet so the values lead, and a thin scrollbar.
+   ========================================================================== */
+
+#inspector .ins-head {
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 24px 24px 20px;
+}
+
+#inspector .ins-photo {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-lg);
+}
+
+#inspector .ins-id h2 {
+  display: block;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+/* SKU above the title, status after it: a dot and plain text in the status's colour, the same size as the SKU. */
+#inspector .ins-sub {
+  flex-wrap: nowrap;
+  gap: 12px;
+  margin: 0 0 4px;
+  font-size: var(--fs-xs);
+}
+
+.ins-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.ins-status::before {
   content: "";
-  position: absolute;
-  inset: -6px;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  border-radius: 50%;
+}
+
+.ins-status[data-tone="amber"] {
+  color: var(--tone-amber-fg);
+}
+
+.ins-status[data-tone="green"] {
+  color: var(--tone-green-fg);
+}
+
+.ins-status[data-tone="blue"] {
+  color: var(--tone-blue-fg);
+}
+
+.ins-status[data-tone="red"] {
+  color: var(--tone-red-fg);
+}
+
+/* The title: one line, faded at the end, accent on hover, opens the product page. Too long to fit, it scrolls like a
+   conveyor belt (fitTitle in dashboard.js adds the second copy and sets --dist and --dur), pausing under the pointer or
+   keyboard focus. Reduced motion keeps it still, clipped and faded. */
+.ins-title {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text);
+  text-decoration: none;
+  transition: color var(--dur-fast);
+}
+
+.ins-title[href]:hover,
+.ins-title[href]:focus-visible {
+  color: var(--accent);
+}
+
+.ins-title:not([href]) {
+  cursor: default;
+}
+
+.ins-track {
+  display: inline-flex;
+  gap: 48px; /* TITLE_GAP */
+}
+
+.ins-title[data-run] {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+}
+
+.ins-title[data-run] .ins-track {
+  animation: ins-belt var(--dur) linear infinite;
+}
+
+.ins-title[data-run]:is(:hover, :focus-visible) .ins-track {
+  animation-play-state: paused;
+}
+
+@keyframes ins-belt {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-1 * var(--dist)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ins-title[data-run] .ins-track {
+    animation: none;
+  }
+  .ins-title[data-run] .ins-copy {
+    display: none;
+  }
+}
+
+#inspector .dialog-body {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 24px 32px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Section titles are quiet eyebrows; the content under them leads. */
+#insNumbers > h3,
+#insListing > h3 {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#insNumbers,
+#insListing {
+  gap: var(--sp-4);
+}
+
+#insNumbers {
+  flex: none;
+}
+
+/* The listing section takes the rest of the body, so an empty one can centre its message in the space left. */
+#insListing {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  margin-top: 32px;
+  padding-top: 32px;
+}
+
+.ls-none {
+  max-width: 32ch;
+  margin: auto;
+  font-size: var(--fs-md);
+  color: var(--muted);
+  text-align: center;
+  text-wrap: balance;
+}
+
+#inspector label,
+#inspector .field-head label {
+  margin-bottom: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+#inspector .field-head label {
+  margin-bottom: 0;
+}
+
+#inspector .field-head {
+  margin-bottom: 8px;
+}
+
+#inspector input,
+#inspector textarea {
+  height: 40px;
+  font-size: var(--fs-md);
+}
+
+#inspector textarea {
+  height: auto;
+  padding: 12px;
+  line-height: 1.55;
+}
+
+#inspector .ins-grid {
+  gap: var(--sp-4);
+}
+
+#inspector .ins-sum {
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border-radius: var(--radius-lg);
+}
+
+#inspector .ins-sum dd {
+  margin-top: 4px;
+  font-size: var(--fs-xl);
+  letter-spacing: -0.01em;
+}
+
+#inspector .ins-sum dd .tag {
+  margin-top: 3px;
+}
+
+#inspector .note {
+  line-height: 1.5;
+}
+
+#lsContent {
+  gap: 28px;
+}
+
+#inspector .score {
+  gap: var(--sp-3);
+}
+
+#inspector .score h3 {
+  font-size: var(--fs-md);
+}
+
+#inspector #lsSummary {
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+#inspector #lsFlags {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+#inspector .flags-h {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+#inspector .flags {
+  gap: var(--sp-2);
+  margin: 8px 0 0;
+}
+
+#inspector .flags li {
+  gap: 10px;
+  padding: 12px;
+  line-height: 1.5;
+  background: var(--danger-soft);
+  border-radius: var(--radius);
+}
+
+#inspector .flags svg {
+  margin-top: 3px;
+}
+
+#inspector .kv-list {
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-lg);
+}
+
+#inspector .copy-row {
+  padding: 12px 0;
+  row-gap: 4px;
+}
+
+#inspector .copy-label {
+  font-size: var(--fs-xs);
+}
+
+/* Footer: the rewrite is a quiet text button on the left, the rest sit together on the right. */
+#inspector .dialog-foot {
+  padding: 16px 24px max(20px, env(safe-area-inset-bottom));
+}
+
+#inspector .ls-actions {
+  gap: var(--sp-2);
+}
+
+#inspector .ls-actions #lsRegen {
+  color: var(--muted);
+  background: none;
+  border-color: transparent;
+}
+
+#inspector .ls-actions #lsRegen:hover:not([aria-disabled="true"]) {
+  color: var(--text);
+  background: var(--hover);
+  filter: none;
+}
+
+/* The product name in an order row links to the AliExpress page: plain until hovered, then accent. */
+.prod .name a {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--dur-fast);
+}
+
+.prod .name a:is(:hover, :focus-visible) {
+  color: var(--accent);
+}
+
+/* A button that looks like an input: the Add order form's date. */
+.field-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.field-btn svg {
+  flex: none;
+  color: var(--muted);
+}
+
+/* The date picker popover (.menu .ctx: the shared translucent material that grows out of its anchor). */
+.datepop {
+  width: 288px;
+  padding: 12px;
+}
+
+.dp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.dp-month {
+  padding-left: 4px;
+  font-weight: 600;
+}
+
+.dp-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.dp-nav .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.dp-week,
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.dp-week {
+  margin-bottom: 4px;
+}
+
+.dp-week span {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  text-align: center;
+}
+
+.dp-day {
+  height: 36px;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color var(--dur-fast);
+}
+
+.dp-day:hover {
+  background: var(--hover);
+}
+
+.dp-day:active {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.dp-day[data-out] {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.dp-day[data-today] {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dp-day[aria-pressed="true"] {
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  opacity: 1;
+}
+
+.dp-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--border);
 }

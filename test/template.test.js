@@ -41,7 +41,7 @@ test("the workbook has the three tabs, sized like the template", () => {
   assert.equal(createBody.properties.title, "My store");
   assert.deepEqual(
     createBody.sheets.map((s) => [s.properties.title, s.properties.gridProperties.rowCount, s.properties.gridProperties.columnCount]),
-    [["Dashboard", 15, 4], ["Inventory", 1000, 15], ["Orders", 1001, 12]],
+    [["Dashboard", 15, 4], ["Inventory", 1000, 15], ["Orders", 1001, 13]],
   );
 });
 

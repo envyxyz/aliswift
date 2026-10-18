@@ -39,6 +39,7 @@ const ORDER_COLS = [
   { key: "status", label: "Status", required: true },
   { key: "track", label: "Tracking" },
   { key: "notes", label: "Notes" },
+  { key: "link", label: "Order link" },
 ];
 // oCols is edited through the ORDER_COLS inputs (oc_<key>), not by its own key.
 const EDIT_KEYS = [
@@ -187,7 +188,7 @@ function validateEdit() {
   const optional = COLUMNS.filter((c) => c.optional);
   const set = optional.filter((c) => editForm.elements[c.key].value.trim()).length;
   $("moreCount").textContent = `${set} of ${optional.length} set`;
-  const lack = lacking((k) => editForm.elements[k].value.trim());
+  const lack = lacking((k) => editForm.elements[fieldOf(k)].value.trim(), Boolean(oTab.value.trim()));
   $("colsOffer").hidden = !lack.length;
   $("colsOfferText").textContent = `This sheet has no ${nameList(lack)} column. Without ${lack.length > 1 ? "them" : "it"}, AliSwift is less useful. AliSwift can add ${lack.length > 1 ? "them" : "it"} for you.`;
 }
@@ -572,6 +573,7 @@ for (const id of ["gsOpen", "gsOpenEmpty"]) $(id).addEventListener("click", (e) 
 document.addEventListener("authchange", (e) => {
   const lock = e.detail.signedIn === false;
   $("lockSheets").hidden = !lock;
+  document.querySelector("main").toggleAttribute("data-locked", lock);
   for (const id of ["addSheetBtn", "emptyAddBtn", "gsOpen", "gsOpenEmpty"]) {
     $(id).setAttribute("aria-disabled", String(lock));
     if (lock) $(id).setAttribute("aria-describedby", "lockSheets");
@@ -582,6 +584,12 @@ document.addEventListener("authchange", (e) => {
 $("cancelBtn").addEventListener("click", () => {
   if (!adding) $("addDialog").close();
 });
+// A click on the backdrop closes it, like Cancel. A drag that starts in a field and ends outside is not one.
+let pressed;
+$("addDialog").addEventListener("pointerdown", (e) => (pressed = e.target));
+$("addDialog").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget && pressed === e.currentTarget && !adding) e.currentTarget.close();
+});
 
 /* Add missing columns. A sheet with no SKU or Image column works, but less well: no custom label to list under, no photos
    on the dashboard. So the seller is asked, once, whether AliSwift may add them (the worker's addColumns). Nothing is
@@ -590,9 +598,13 @@ $("cancelBtn").addEventListener("click", () => {
 const MISSING = {
   skuCol: ["SKU", "a short code for each product. It is your eBay custom label, and how an order finds its product."],
   imageCol: ["Image", "the link to each product's photo, so the dashboard can show it. It stays in your sheet, so it survives reinstalling AliSwift."],
+  link: ["Order link", "the link to each order on eBay, so the dashboard can open it. AliSwift fills it in for every order it adds or imports. It goes in the Orders tab."],
 };
-const lacking = (has) => Object.keys(MISSING).filter((k) => !has(k));
-const nameList = (keys) => keys.map((k) => MISSING[k][0]).join(" or ");
+// `link` belongs to the Orders tab, so it is only missing for a sheet that has one.
+const lacking = (has, orders = false) => Object.keys(MISSING).filter((k) => (k !== "link" || orders) && !has(k));
+const nameList = (keys) => (keys.length > 1 ? `${keys.slice(0, -1).map((k) => MISSING[k][0]).join(", ")} or ${MISSING[keys.at(-1)][0]}` : MISSING[keys[0]][0]);
+// The edit form's field for a missing column: the Orders link lives with the other order columns.
+const fieldOf = (k) => (k === "link" ? "oc_link" : k);
 
 // "yes", "no" or "back" (Go back, or Escape). `back` is for the import, where the seller can still pick a column themselves.
 function askColumns(keys, { prefix = SHEET_DEFAULTS.skuPrefix, back = true } = {}) {
@@ -605,8 +617,21 @@ function askColumns(keys, { prefix = SHEET_DEFAULTS.skuPrefix, back = true } = {
   const plural = keys.length > 1;
   $("colsLead").textContent = `Your sheet has no ${nameList(keys)} column. Without ${plural ? "them" : "it"}, AliSwift is less useful:`;
   $("colsList").replaceChildren(...keys.map(li));
-  $("colsIfYes").textContent = `If you say yes, AliSwift adds ${plural ? "them" : "it"} after the last column of the Inventory tab, with a title in the header row. Nothing else in your sheet changes.`;
-  $("colsIfNo").textContent = "If you say no, AliSwift still works. It keeps product photos on this device instead. They survive updates, and Export settings saves them, but removing the extension loses them.";
+  const inv = keys.filter((k) => k !== "link");
+  const where = [
+    inv.length && `${nameList(inv)} after the last column of the Inventory tab`,
+    keys.includes("link") && "Order link after the last column of the Orders tab",
+  ].filter(Boolean);
+  $("colsIfYes").textContent = `If you say yes, AliSwift adds ${where.join(" and ")}, with a title in the header row. Nothing else in your sheet changes.`;
+  $("colsIfNo").textContent =
+    "If you say no, AliSwift still works. " +
+    [
+      keys.includes("imageCol") && "It keeps product photos on this device instead. They survive updates, and Export settings saves them, but removing the extension loses them.",
+      keys.includes("skuCol") && "Products and orders can't be matched by SKU.",
+      keys.includes("link") && "Orders keep no link, and the arrow on an order opens Seller Hub by its order number instead.",
+    ]
+      .filter(Boolean)
+      .join(" ");
   $("colsBack").hidden = !back;
   const dialog = $("colsDialog");
   dialog.returnValue = "";
@@ -616,14 +641,26 @@ function askColumns(keys, { prefix = SHEET_DEFAULTS.skuPrefix, back = true } = {
   });
 }
 
-// Asks the worker to add the columns to a sheet it already has in its settings, and keeps the letters it saved.
+// Asks the worker to add the columns to a sheet it already has in its settings, and keeps the letters it saved. The Order
+// link goes in the Orders tab (its own worker call); the rest go in the Inventory tab.
 async function addColumnsTo(id, keys) {
-  const res = await chrome.runtime.sendMessage({ action: "addColumns", sheetId: id, columns: keys }).catch((e) => ({ success: false, error: e.message }));
-  if (res?.success) {
-    sheets = sheets.map((s) => (s.id === id ? { ...s, ...res.columns } : s));
+  const send = (message) => chrome.runtime.sendMessage(message).catch((e) => ({ success: false, error: e.message }));
+  const keep = (columns) => {
+    const { link, ...inventory } = columns;
+    sheets = sheets.map((s) => (s.id === id ? { ...s, ...inventory, ...(link && { oCols: { ...SHEET_DEFAULTS.oCols, ...s.oCols, link } }) } : s));
     render();
+  };
+  const inv = keys.filter((k) => k !== "link");
+  let res = inv.length ? await send({ action: "addColumns", sheetId: id, columns: inv }) : { success: true, columns: {} };
+  if (!res?.success) return res ?? { success: false, error: "AliSwift didn't answer. Reload the extension and try again." };
+  keep(res.columns);
+  if (keys.includes("link")) {
+    const added = await send({ action: "addOrderLink", sheetId: id });
+    if (!added?.success) return added ?? { success: false, error: "AliSwift didn't answer. Reload the extension and try again." };
+    res = { ...res, columns: { ...res.columns, link: added.letter } };
+    keep({ link: added.letter });
   }
-  return res ?? { success: false, error: "AliSwift didn't answer. Reload the extension and try again." };
+  return res;
 }
 
 const columnsAdded = (res) => Object.entries(res.columns).map(([k, letter]) => `${MISSING[k][0]} in ${letter}`).join(", ");
@@ -636,7 +673,7 @@ $("colsOfferBtn").addEventListener("click", async () => {
   const saved = { ...SHEET_DEFAULTS, ...sheets.find((s) => s.id === editingId) };
   const changed = ["sheetTab", "startRow", "keywordsCol", "linkCol", "skuPrefix"].some((k) => String(editForm.elements[k].value).trim().toUpperCase() !== String(saved[k]).toUpperCase());
   if (changed) return setNotice($("editNotice"), "Save your changes to the tab, first row, Keywords, Link and SKU prefix first, then add the columns.");
-  const keys = lacking((k) => editForm.elements[k].value.trim());
+  const keys = lacking((k) => editForm.elements[fieldOf(k)].value.trim(), Boolean(editForm.elements.oTab.value.trim()));
   if ((await askColumns(keys, { prefix: saved.skuPrefix, back: false })) !== "yes") return btn.focus();
   btn.dataset.state = "loading";
   btn.setAttribute("aria-disabled", "true");
@@ -648,7 +685,7 @@ $("colsOfferBtn").addEventListener("click", async () => {
     return btn.focus();
   }
   setNotice($("editNotice"), "");
-  for (const [k, letter] of Object.entries(res.columns)) editForm.elements[k].value = letter;
+  for (const [k, letter] of Object.entries(res.columns)) editForm.elements[fieldOf(k)].value = letter;
   validateEdit();
   toast(`New columns: ${columnsAdded(res)}.`);
   editForm.elements.name.focus();
@@ -1048,9 +1085,9 @@ async function gsSave() {
       cleared.add(r.key);
     } else sheet.oCols[r.key] = "";
   }
-  // A sheet with no SKU or Image column is asked before it is added whether AliSwift may add them. (A column that was
+  // A sheet with no SKU, Image or Order link column is told before it is added that AliSwift would add them, and asked. (A column that was
   // only left out because it holds formulas is not missing.)
-  const missing = lacking((k) => sheet[k] || cleared.has(k));
+  const missing = lacking((k) => (k === "link" ? sheet.oCols?.link : sheet[k]) || cleared.has(k), Boolean(sheet.oTab));
   const answer = missing.length ? await askColumns(missing) : "no";
   if (answer === "back") return $("gsGo").focus();
   gsSaving = true;

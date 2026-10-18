@@ -431,7 +431,7 @@ test("findOrderRows: one order can be several rows; a SKU or a row narrows it", 
 
 test("cleanOrder checks the form's order and turns the date into a sheet serial", () => {
   const ok = cleanOrder({ orderNumber: " 12-1 ", sku: "SKU-01", qty: "2", date: "2026-10-10", sell: "19.999", notes: "hi" });
-  assert.deepEqual(ok, { orderNumber: "12-1", sku: "SKU-01", qty: 2, serial: 46305, sell: 20, status: "Pending", tracking: "", notes: "hi" });
+  assert.deepEqual(ok, { orderNumber: "12-1", sku: "SKU-01", qty: 2, serial: 46305, sell: 20, status: "Pending", tracking: "", notes: "hi", link: "" });
   // No sell (or 0, which the form sends for a blank box) means "use the product's own price".
   assert.equal(cleanOrder({ orderNumber: "a", sku: "b", sell: 0 }).sell, null);
   assert.equal(cleanOrder({ orderNumber: "a", sku: "b", sell: "x" }).sell, null);

@@ -698,7 +698,7 @@ test("the popup and the settings page both link to the dashboard", () => {
   assert.match(readFile("popup/popup.js"), /getURL\("dashboard\/dashboard\.html"\)/);
   assert.match(readFile("options/options.html"), /href="\.\.\/dashboard\/dashboard\.html"/);
   const manifest = JSON.parse(readFile("manifest.json"));
-  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]); // an extension page needs no permission to open
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms", "activeTab"]); // an extension page needs no permission to open
 });
 
 test("shared.js, ui.js and dashboard.js load together in one page without a redeclared name", () => {

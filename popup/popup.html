@@ -34,6 +34,18 @@
     <main>
       <p id="notice" class="muted" hidden></p>
 
+      <div id="launch" hidden>
+        <form id="find" class="find" role="search">
+          <input id="query" type="search" placeholder="Search AliExpress" aria-label="Search AliExpress" required autocomplete="off" />
+          <button class="btn" type="submit">Search</button>
+        </form>
+        <div class="row">
+          <button id="hubBtn" class="btn btn-quiet" type="button">Seller Hub</button>
+          <button id="listBtn" class="btn btn-quiet" type="button">Create listing</button>
+        </div>
+        <p id="hint" class="muted" hidden>Open a product to save it to your sheet.</p>
+      </div>
+
       <form id="form" hidden>
         <div>
           <label for="sheet">Save to</label>

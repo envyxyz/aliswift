@@ -294,7 +294,7 @@ test("the panel is a content script on eBay's listing pages only, with its two s
   assert.ok(war.matches.every((m) => /^https:\/\/www\.ebay\.[a-z.]+\/\*$/.test(m)));
   for (const file of [...script.js, ...war.resources]) assert.ok(fs.existsSync(path.join(__dirname, "..", file)), file);
   assert.equal(manifest.host_permissions.some((h) => /ebay/.test(h)), false);
-  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms"]);
+  assert.deepEqual(manifest.permissions, ["storage", "identity", "alarms", "activeTab"]);
 });
 
 test("the page script builds its panel without markup strings, never reaches for the buttons that publish, and loads the worker's lists", () => {

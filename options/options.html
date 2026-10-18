@@ -26,6 +26,8 @@
         </div>
       </header>
 
+      <p id="lockSheets" class="lock lock-page" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg><button type="button" class="link-btn" data-signin>Sign in</button> to add sheets.</p>
+
       <div id="tabs" class="tabs" role="tablist" aria-label="Settings sections">
         <button type="button" role="tab" id="tab-sheets" aria-controls="panel-sheets" aria-selected="true" tabindex="0">Sheets</button>
         <button type="button" role="tab" id="tab-pricing" aria-controls="panel-pricing" aria-selected="false" tabindex="-1">Pricing</button>
@@ -51,8 +53,8 @@
             </div>
             <div id="groupActions" class="group-actions">
               <button id="gsOpen" class="btn btn-quiet btn-sm" type="button" aria-haspopup="dialog">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
-                Import from Google Sheets
+                <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#23A566" d="M14.5 2h-8A2.5 2.5 0 0 0 4 4.5v15A2.5 2.5 0 0 0 6.5 22h11a2.5 2.5 0 0 0 2.5-2.5v-12z"/><path fill="#7BCB9F" d="M14.5 2v4a1.5 1.5 0 0 0 1.5 1.5h4z"/><path fill="#fff" fill-rule="evenodd" d="M7.5 11h9v7.5h-9zm1.3 1.3v1.5h2.2v-1.5zm3.5 0v1.5h2.4v-1.5zM8.8 15.1v1.5h2.2v-1.5zm3.5 0v1.5h2.4v-1.5z"/></svg>
+                Import sheet
               </button>
               <button id="addSheetBtn" class="btn btn-quiet btn-sm" type="button">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
@@ -60,7 +62,6 @@
               </button>
             </div>
           </div>
-          <p id="lockSheets" class="lock" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" /></svg><button type="button" class="link-btn" data-signin>Sign in</button> to add sheets.</p>
           <div id="chips" class="chips" role="group" aria-label="Your sheets"></div>
           <div id="empty" class="empty" hidden>
             <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 10.02h5V21h-5zM17 21h3c1.1 0 2-.9 2-2v-9h-5v11zm3-18H5c-1.1 0-2 .9-2 2v3h19V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h3V10H3v9z" /></svg>
@@ -69,7 +70,7 @@
             <p class="note">AliSwift sends error reports (no product content) so bugs get fixed. Turn them off in General.</p>
             <div class="empty-actions">
               <button id="emptyAddBtn" class="btn" type="button">Create a sheet</button>
-              <button id="gsOpenEmpty" class="btn btn-quiet" type="button" aria-haspopup="dialog">Import from Google Sheets</button>
+              <button id="gsOpenEmpty" class="btn btn-quiet" type="button" aria-haspopup="dialog">Import sheet</button>
             </div>
           </div>
         </div>
@@ -389,7 +390,15 @@
 
     <dialog id="addDialog" aria-labelledby="addTitle">
       <form id="addForm" autocomplete="off">
-        <div class="dialog-head"><h2 id="addTitle">Create sheet</h2></div>
+        <div class="dialog-head">
+          <div class="title-row">
+            <h2 id="addTitle">Create sheet</h2>
+            <button type="button" class="info" aria-label="About creating a sheet" aria-describedby="tip-create">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
+            </button>
+            <span id="tip-create" role="tooltip" class="tip">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs, in the marketplace's currency. Supplier prices are converted at the live exchange rate. To use a sheet you already have, close this and choose Import from Google Sheets.</span>
+          </div>
+        </div>
         <div class="dialog-body">
           <fieldset id="addInputs" class="bare">
             <div id="addNotice" class="notice" data-tone="error" role="alert" hidden>
@@ -418,7 +427,6 @@
                   <input id="addSkuPrefix" class="prefix" maxlength="8" value="SKU-" placeholder="SKU-" autocomplete="off" />
                 </div>
               </div>
-              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs, in the marketplace's currency. Supplier prices are converted at the live exchange rate. To use a sheet you already have, close this and choose Import from Google Sheets.</p>
             </fieldset>
           </fieldset>
           <p id="addStatus" class="muted" role="status" hidden></p>
@@ -434,7 +442,7 @@
 
     <dialog id="gsDialog" aria-labelledby="gsTitle">
       <form id="gsForm" autocomplete="off">
-        <div class="dialog-head"><h2 id="gsTitle">Import from Google Sheets</h2></div>
+        <div class="dialog-head"><h2 id="gsTitle">Import sheet</h2></div>
         <div class="dialog-body">
           <fieldset id="gsChoose" class="bare gs-pane" role="none">
             <p class="muted">Pick a sheet and AliSwift works out its tabs and columns. It only reads your sheet. If it has no SKU or Image column, AliSwift asks before adding one.</p>

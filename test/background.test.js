@@ -257,7 +257,7 @@ test("createSheet creates the file, then sets it up with one batchUpdate", async
     skuPrefix: "OR-",
     oTab: "Orders",
     oRow: 2,
-    oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L" },
+    oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M" },
     skuFormula: true,
     region: "UK",
   });
@@ -775,9 +775,9 @@ test("listOrders reads the Orders columns, names the product from Inventory and 
   ]);
   const reply = await ask(t.listener, { action: "listOrders", sheetId: full.id }, options);
   assert.deepEqual(reply.orders, [
-    { row: 2, orderNumber: "12-1", sku: "SKU-01", product: "ring", date: "2026-10-10", qty: 2, sell: 13.98, cost: 4.3, profit: 5, status: "Pending", tracking: "", notes: "" },
-    { row: 3, orderNumber: "12-1", sku: "SKU-02", product: "lamp", date: "2026-10-09", qty: 1, sell: 4.99, cost: 1.5, profit: 1, status: "Shipped", tracking: "RR1", notes: "" },
-    { row: 5, orderNumber: "77", sku: "SKU-01", product: "ring", date: "2026-10-08", qty: 1, sell: 7, cost: null, profit: null, status: "Cancelled", tracking: "", notes: "hi" },
+    { row: 2, orderNumber: "12-1", sku: "SKU-01", product: "ring", date: "2026-10-10", qty: 2, sell: 13.98, cost: 4.3, profit: 5, status: "Pending", tracking: "", notes: "", link: "" },
+    { row: 3, orderNumber: "12-1", sku: "SKU-02", product: "lamp", date: "2026-10-09", qty: 1, sell: 4.99, cost: 1.5, profit: 1, status: "Shipped", tracking: "RR1", notes: "", link: "" },
+    { row: 5, orderNumber: "77", sku: "SKU-01", product: "ring", date: "2026-10-08", qty: 1, sell: 7, cost: null, profit: null, status: "Cancelled", tracking: "", notes: "hi", link: "" },
   ]);
   assert.match(decoded(t.calls[0]), /'Orders'!A2:A&ranges='Orders'!B2:B&ranges='Orders'!D2:D/);
 });

@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const PRODUCT_URL = /^https:\/\/([\w-]+\.)?aliexpress\.(com|us)\/(item\/|.*\/buyNow)/;
+const ON_ALIEXPRESS = /^https:\/\/([\w-]+\.)*aliexpress\./;
 // Saving goes to the active sheet, or to the on-device library when signed out or without a sheet.
 const WORDS = { sheet: { idle: "Add to Sheet", busy: "Adding..." }, local: { idle: "Save to library", busy: "Saving..." } };
 
@@ -8,9 +9,11 @@ let resetTimer;
 let row; // the product the page button would save: see scrapeRow in content.js
 let signedIn = true; // false only when the account button knows the user is signed out
 let dest = "sheet"; // "sheet" or "local", see destination()
+let ebayHost;
 const idle = () => WORDS[dest].idle;
 
 function show(view, message = "") {
+  $("launch").hidden = view !== "launch";
   $("form").hidden = view !== "form";
   $("notice").hidden = view !== "notice";
   $("notice").textContent = message;
@@ -73,7 +76,8 @@ function renderCurrency() {
   $("fxNote").hidden = !rated;
   if (rated) {
     const day = new Date(fx.at ?? Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" });
-    $("fxNote").textContent = `Converted from ${fx.from} ${amount(fx.price + fx.shipping)} at 1 ${fx.to} = ${Number(fx.rate.toPrecision(6))} ${fx.from}, live rate (${day}, ExchangeRate-API)`;
+    $("fxNote").textContent = `${amount(fx.price + fx.shipping)} ${fx.from} ≈ ${row.price} ${fx.to}`;
+    $("fxNote").title = `1 ${fx.to} = ${Number(fx.rate.toPrecision(6))} ${fx.from}, live rate (${day}, ExchangeRate-API)`;
   }
 }
 
@@ -108,9 +112,15 @@ async function init() {
   dest = destination(signedIn, sheets[0]);
   renderDest(sheets, activeSheetId);
 
+  // The eBay links follow the active sheet's marketplace; the library has none, so eBay US.
+  ebayHost = REGIONS[sheets.find((s) => s.id === activeSheetId)?.region ?? sheets[0]?.region]?.ebay ?? REGIONS.US.ebay;
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!PRODUCT_URL.test(tab?.url ?? "")) {
-    return show("notice", "Open an AliExpress product page, then click the AliSwift icon.");
+  const url = tab?.url ?? "";
+  if (!PRODUCT_URL.test(url)) {
+    show("launch");
+    $("hint").hidden = !ON_ALIEXPRESS.test(url); // here the next step is a product, so say so
+    return $("query").focus(); // typing can start the moment the popup opens
   }
   tabId = tab.id;
   await loadProduct();
@@ -118,6 +128,13 @@ async function init() {
 
 $("settingsBtn").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("dashBtn").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard/dashboard.html") }));
+const open = (url) => chrome.tabs.create({ url });
+$("find").addEventListener("submit", (e) => {
+  e.preventDefault();
+  open(`https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent($("query").value.trim())}`);
+});
+$("hubBtn").addEventListener("click", () => open(`https://${ebayHost}/sh/ovw`));
+$("listBtn").addEventListener("click", () => open(`https://${ebayHost}/sl/prelist/suggest`)); // same page as the dashboard's "List on eBay"
 $("lockAct").addEventListener("click", () => signedIn && chrome.runtime.openOptionsPage()); // Sign in is the account button's job
 $("fxSettings").addEventListener("click", (e) => {
   e.preventDefault();

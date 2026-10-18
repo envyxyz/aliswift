@@ -142,3 +142,31 @@ test("product: the AI picks the price and the shipping from the page's price-loo
   assert.match(user, /0: "US \$9\.99" size=28/);
   assert.match(user, /1: "US \$19\.99" size=14 struck-through/);
 });
+
+test("orderNumberFromLink reads the order number from an eBay order link and nothing else", () => {
+  const { orderNumberFromLink: from } = require("../lib/shared.js");
+  assert.equal(from("https://www.ebay.com/sh/ord/details?orderid=12-34567-89012"), "12-34567-89012");
+  assert.equal(from(" https://www.ebay.co.uk/sh/ord/details?orderId=12-34567-89012&x=1 "), "12-34567-89012");
+  assert.equal(from("https://www.ebay.com/mesh/ord/details/12-34567-89012"), "12-34567-89012");
+  assert.equal(from("https://www.ebay.com/sh/ord/details"), "");
+  assert.equal(from("https://example.com/?orderid=12-34567-89012"), ""); // not an eBay address
+  assert.equal(from("http://www.ebay.com/?orderid=12-34567-89012"), "");
+  assert.equal(from("12-34567-89012"), ""); // not a link
+});
+
+test("order links: only eBay https addresses are kept, Seller Hub's empty tracking prompt is never a number, and an import carries the link", () => {
+  const { cleanOrderLink, realTracking, cleanOrder, cleanPatch } = require("../lib/shared.js");
+  assert.equal(cleanOrderLink(" https://www.ebay.com/sh/ord/details?orderid=12-34567-89012#x "), "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012");
+  assert.equal(cleanOrderLink("http://www.ebay.com/sh/ord/details?orderid=12-34567-89012"), "");
+  assert.equal(cleanOrderLink("https://evil.example/ebay.com/x"), "");
+  assert.equal(cleanOrderLink("not a link"), "");
+  assert.equal(realTracking("+ Add tracking"), "");
+  assert.equal(realTracking("RR123456789GB"), "RR123456789GB");
+  assert.equal(cleanOrder({ orderNumber: "1", sku: "A", tracking: "+ Add tracking" }).tracking, "");
+  assert.throws(() => cleanOrder({ orderNumber: "1", sku: "A", link: "https://example.com/" }), /eBay address/);
+  assert.deepEqual(cleanPatch({ link: "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012" }), { link: "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012" });
+  assert.throws(() => cleanPatch({ link: "" }), /eBay address/);
+  const { lines } = cleanOrderImport([{ orderNumber: "12-34567-89012", date: "2026-10-10", items: [{ sku: "A", qty: 1 }], link: "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012", tracking: "+ Add tracking" }]);
+  assert.equal(lines[0].link, "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012");
+  assert.equal(lines[0].tracking, "");
+});

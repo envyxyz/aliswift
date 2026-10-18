@@ -575,3 +575,31 @@ test("background.js registers addColumns as pagesOnly: true", async () => {
   const optionsReply = await ask(listener, { action: "addColumns", sheetId: baseSheet.id, columns: [] }, options);
   assert.notDeepEqual(optionsReply, { success: false, error: "Not allowed." });
 });
+
+/* addOrderLink */
+test("addOrderLink adds the Order Link column after the last used column of the Orders tab, titled, and saves its letter", async () => {
+  const sheet = { ...baseSheet, oTab: "Orders", oRow: 2, oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "" } };
+  const replies = [
+    { json: { sheets: [{ properties: { sheetId: 9, title: "Orders", gridProperties: { columnCount: 12 } } }] } },
+    { json: { values: [["Order Number", "SKU", "Product", "Date", "Qty", "Sell", "Cost", "Profit", "Home", "Status", "Tracking", "Notes"], ["12-1", "SKU-01"]] } },
+    { json: {} }, // appendDimension: the tab is 12 wide and the new column is the 13th
+    { json: {} }, // the title
+    { json: {} }, // the title's format, copied from its neighbour
+  ];
+  const { listener, calls, syncStore } = setup(sheet, replies);
+
+  const reply = await ask(listener, { action: "addOrderLink", sheetId: sheet.id }, options);
+
+  assert.deepEqual(reply, { success: true, letter: "M" });
+  assert.equal(calls[2].body.requests[0].appendDimension.length, 1);
+  assert.deepEqual(cellsOf(calls[3]), { "'Orders'!M1": "Order Link" });
+  assert.equal(syncStore.sheets[0].oCols.link, "M");
+  assert.equal(syncStore.sheets[0].oCols.no, "A"); // the other letters are kept
+  assertNothingDestroyed(calls);
+});
+
+test("addOrderLink needs an Orders tab, and is for AliSwift's own pages only", async () => {
+  const { listener } = setup(baseSheet, []);
+  assert.equal((await ask(listener, { action: "addOrderLink", sheetId: baseSheet.id }, options)).success, false);
+  assert.deepEqual(await ask(listener, { action: "addOrderLink", sheetId: baseSheet.id }, page), { success: false, error: "Not allowed." });
+});
