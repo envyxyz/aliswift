@@ -809,6 +809,11 @@
               if (prod) prod.status = status;
               res = { success: true };
             }
+          } else if (msg.action === "deleteProduct") {
+            const { key } = msg;
+            const at = sampleProducts.findIndex((p) => (key?.sku && p.sku === key.sku) || (key?.row && p.row === key.row));
+            if (at >= 0) sampleProducts.splice(at, 1);
+            res = { success: true };
           } else if (msg.action === "priceLocks") {
             res = { success: true, locked: sampleProducts.find((p) => p.row === msg.row)?.locked ?? [] };
           } else if (msg.action === "updateProduct") {

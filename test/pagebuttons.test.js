@@ -45,7 +45,7 @@ function setup({ sheet = SHEET, replies = [], local = {} } = {}) {
   });
   ctx.importScripts = (...files) => files.forEach((file) => vm.runInContext(read(file), ctx));
   vm.runInContext(read("background.js"), ctx);
-  const ask = (request) => new Promise((resolve) => listener(request, { url: ALI }, (r) => resolve(plain(r))));
+  const ask = (request, url = ALI) => new Promise((resolve) => listener(request, { url }, (r) => resolve(plain(r))));
   return { ask, calls, store, downloads };
 }
 
@@ -131,5 +131,61 @@ test("the library: Add twice keeps one, Remove takes it out", async () => {
   assert.equal((await t.ask({ action: "inSheet", link: link(1), dest: "local" })).inSheet, true);
   assert.deepEqual(await t.ask({ action: "removeFromSheet", link: link(1), dest: "local" }), { success: true });
   assert.deepEqual(plain(t.store.library), []);
+  assert.equal(t.calls.length, 0);
+});
+
+test("the index is read again for a product it doesn't have, unless it was read a moment ago (a product added elsewhere)", async () => {
+  const stale = { [`index:${SHEET.id}`]: { at: Date.now() - 60000, items: {} } };
+  const t = setup({ replies: [{ json: { valueRanges: [{ values: [[link(1), link(2)]] }, { values: [["SKU-01", "SKU-02"]] }] } }], local: stale });
+  assert.deepEqual(await t.ask({ action: "inSheet", link: link(2), dest: "sheet" }), { success: true, inSheet: true, sku: "SKU-02" });
+  assert.equal(t.calls.length, 1);
+  const fresh = setup({ local: { [`index:${SHEET.id}`]: { at: Date.now() - 2000, items: {} } } });
+  assert.equal((await fresh.ask({ action: "inSheet", link: link(2), dest: "sheet" })).inSheet, false);
+  assert.equal(fresh.calls.length, 0);
+  assert.equal((await fresh.ask({ action: "inSheet", link: "https://www.aliexpress.com/i/1005000000000002.html", dest: "sheet" })).inSheet, false); // an /i/ link has an item number too
+});
+
+test("Delete from the dashboard clears the same cells as Remove, in the row found again by SKU, link and title; the status stays when variant rows share it", async () => {
+  const product = (n) => [`SKU-0${n}`, `ring ${n}`, link(n)];
+  const read = (statusRows, merges = []) => [
+    { json: { valueRanges: [{ values: [[product(1)[0], product(2)[0]]] }, { values: [[product(1)[1], product(2)[1]]] }, { values: [[link(1), link(2)]] }, { values: [[2, 2]] }, { values: [[4, 4]] }, { values: [statusRows] }, { values: [["", ""]] }] } },
+    { json: { sheets: [{ properties: { title: "Inv" }, merges }] } },
+    { json: {} },
+  ];
+  const own = "chrome-extension://abc/dashboard/dashboard.html";
+  const key = { sku: "SKU-02", row: 3, link: link(2), title: "ring 2" };
+  const local = { [`listing:${id(2)}`]: { listing: {} }, aiQueue: [{ itemId: id(2) }, { itemId: id(1) }], [`index:${SHEET.id}`]: { at: Date.now(), items: { [id(1)]: { sku: "SKU-01", row: 2 }, [id(2)]: { sku: "SKU-02", row: 3 } } } };
+  const t = setup({ replies: read(["Draft", "Listed"]), local });
+  assert.deepEqual(await t.ask({ action: "deleteProduct", sheetId: SHEET.id, key }, own), { success: true });
+  const clear = t.calls.at(-1);
+  assert.match(clear.url, /\/values:batchClear$/);
+  assert.deepEqual(clear.body.ranges, ["'Inv'!B3", "'Inv'!D3", "'Inv'!E3", "'Inv'!C3", "'Inv'!F3", "'Inv'!G3", "'Inv'!A3"]);
+  assert.deepEqual(plain(t.store[`cleared:${SHEET.id}`]), [3]);
+  assert.deepEqual(Object.keys(t.store[`index:${SHEET.id}`].items), [id(1)]);
+  assert.equal(t.store[`listing:${id(2)}`], undefined);
+  assert.deepEqual(plain(t.store.aiQueue), [{ itemId: id(1) }]);
+
+  // Two rows share one merged status (G2:G3): the status cell is left for the row that keeps it.
+  const shared = setup({ replies: read(["Draft"], [{ startRowIndex: 1, endRowIndex: 3, startColumnIndex: 6, endColumnIndex: 7 }]) });
+  assert.equal((await shared.ask({ action: "deleteProduct", sheetId: SHEET.id, key }, own)).success, true);
+  assert.ok(!shared.calls.at(-1).body.ranges.includes("'Inv'!G3"));
+
+  // A product that moved or went: nothing is cleared.
+  const gone = setup({ replies: read(["Draft", "Listed"]).slice(0, 2) });
+  const r = await gone.ask({ action: "deleteProduct", sheetId: SHEET.id, key: { sku: "SKU-09", link: link(9), title: "ring 9" } }, own);
+  assert.deepEqual([r.success, r.code], [false, "row-changed"]);
+  assert.equal(gone.calls.length, 2);
+
+  // The page of a web site cannot ask for it.
+  assert.equal((await setup().ask({ action: "deleteProduct", sheetId: SHEET.id, key })).success, false);
+});
+
+test("Delete in the library takes the product out of it", async () => {
+  const t = setup();
+  await t.ask(add(1, { dest: "local" }));
+  await t.ask(add(2, { dest: "local" }));
+  const own = "chrome-extension://abc/dashboard/dashboard.html";
+  assert.deepEqual(await t.ask({ action: "deleteProduct", sheetId: "local", key: { sku: "L-02", link: link(2), title: "ring 2" } }, own), { success: true });
+  assert.deepEqual(plain(t.store.library.map((x) => x.sku)), ["L-01"]);
   assert.equal(t.calls.length, 0);
 });

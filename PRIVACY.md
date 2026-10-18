@@ -46,8 +46,8 @@ To find and fix bugs, AliSwift sends error reports to the developer's database (
 AliSwift follows a strict non-destructive rule:
 - It only writes new products into the next available row of your sheet (or a row it cleared itself, see below), updates specific status, tracking and price cells when you edit them on the dashboard (never a cell that holds a formula), or adds missing SKU and Image URL columns after the last column with values when you explicitly confirm.
 - Column additions write only into new empty columns and never change cells that already have values.
-- **Remove from Sheet** (on an AliExpress product page, after a second click) clears only the cells AliSwift itself writes in that product's row: name, prices, link, photo link, status, and the SKU unless your sheet's formula makes it. Formulas in the row and your Orders tab are left alone. AliSwift remembers that row and fills it with the next product you add.
-- It never deletes rows, never removes worksheets, and never clears any other cell.
+- **Remove from Sheet** (on an AliExpress product page, after a second click) and **Delete** (on the dashboard, after its confirmation) clear only the cells AliSwift itself writes in that product's row: name, prices, link, photo link, status, and the SKU unless your sheet's formula makes it. Formulas in the row and your Orders tab are left alone. AliSwift remembers that row and fills it with the next product you add.
+- It never deletes rows, never removes worksheets, and never clears any other cell than the ones it wrote in a product's row when you press Remove from Sheet or Delete.
 
 ## What is stored in Chrome
 

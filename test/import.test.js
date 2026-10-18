@@ -385,7 +385,8 @@ test("the AI tab adds a key only after Check, and the dialog's reduced-motion ru
   // Same specificity: the later rule wins, so the reduced-motion block must come last.
   const css = read("options/options.css");
   const reduced = css.indexOf("@media (prefers-reduced-motion: reduce) {\n  :is(input, select)[data-flash]");
-  assert.ok(reduced > css.lastIndexOf(".gs-pane {") && reduced > css.lastIndexOf(".gs-spinner {"));
+  assert.ok(reduced > css.lastIndexOf(".gs-pane {") && reduced > css.indexOf(".gs-spinner {"));
+  assert.match(css.slice(reduced), /\.gs-spinner \{\s*animation-duration: 1\.6s;/); // the spinner turns slowly, it never stands still
 });
 
 test("the keys are saved on this device only: never in a backup, never synced, never exported", () => {

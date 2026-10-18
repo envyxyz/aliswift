@@ -83,8 +83,12 @@ reportCrashes(); // lib/errors.js
     const q = ctx.queued;
     if (q?.failed) return `The listing isn't written yet. ${q.code ? errorView({ step: "write", code: q.code }).text : ""}`.trim();
     if (!q) return "No listing yet. Press Write now.";
-    const mins = Math.max(1, Math.ceil((q.at - Date.now()) / 60000));
-    return `Writing the listing, ready in about ${mins} ${mins === 1 ? "minute" : "minutes"}.`;
+    if (q.code) return `${errorView({ step: "write", code: q.code, retryAt: q.at }).text} Or press Write now.`; // the AI said to come back later
+    if (q.at > Date.now()) {
+      const mins = Math.max(1, Math.ceil((q.at - Date.now()) / 60000));
+      return `Queued, it writes itself in about ${mins} ${mins === 1 ? "minute" : "minutes"}. Or press Write now.`;
+    }
+    return "Writing the listing...";
   }
 
   // A product picked for another marketplace than the one this form is on: its price is never typed in.
@@ -104,7 +108,7 @@ reportCrashes(); // lib/errors.js
   const isCurrent = (card) => current?.sheetId === card.sheetId && current?.key === card.key;
 
   // A card's tag: its sell price once the listing is written, else where the listing stands.
-  const cardTag = (card) => (card.state === "queued" ? "Writing listing…" : card.state === "failed" ? "Not written" : money(card));
+  const cardTag = (card) => (card.state === "queued" ? "Queued" : card.state === "failed" ? "Not written" : money(card));
 
   function cardEl(card) {
     const tag = cardTag(card);
@@ -197,7 +201,7 @@ reportCrashes(); // lib/errors.js
   };
 
   async function copyValue(btn, r) {
-    if (await copyToClipboard(r.value)) {
+    if (await copyToClipboard(r.value, r.html)) {
       btn.dataset.copied = "";
       setTimeout(() => delete btn.dataset.copied, 1500);
     } else {
@@ -528,7 +532,7 @@ reportCrashes(); // lib/errors.js
     const { target: t, listing: l } = ctx;
     row("title", "Title", l?.title ?? t.title, "pending");
     if (t.sku) row("sku", "Custom label", t.sku, "pending");
-    row("description", "Description", l?.description ?? "", "pending");
+    row("description", "Description", l?.description ?? "", "pending", { html: l?.html });
     row("price", `Price (${t.currency})`, t.price, "pending");
   }
 
@@ -559,8 +563,9 @@ reportCrashes(); // lib/errors.js
 
   /* Filling */
 
-  const plain = (html) => clean(new DOMParser().parseFromString(html, "text/html").body.textContent);
-  const squash = (s) => String(s ?? "").replace(/\s+/g, "");
+  const plain = (html) => clean(new DOMParser().parseFromString(String(html ?? ""), "text/html").body.textContent);
+  // Letters and digits only: how two texts are compared, since an editor may add or drop spaces, breaks and bullets.
+  const squash = (s) => String(s ?? "").replace(/[^\p{L}\p{N}]/gu, "");
 
   // The AI's reading of this form, asked once per pass and only when a box was not found the usual ways. It answers with
   // positions in the list of boxes sent, so all it can do is point at one of them.
@@ -614,32 +619,95 @@ reportCrashes(); // lib/errors.js
     return set === "failed" ? null : locate("price");
   }
 
-  // The description has a rich editor (an iframe) and a raw-HTML box behind the "Show HTML code" checkbox: switch to the
-  // raw box, set it, switch back so the rich editor reads it, then check that both hold it. When the editor did not
-  // take it, it is written into the editor itself, the way a pasted text is.
-  async function fillDescription(box, html) {
-    const mode = await locate("htmlSwitch", 1500);
-    if (!mode) return false;
+  // The description has a rich editor (an iframe) and a raw-HTML box behind the "Show HTML code" checkbox. It is given
+  // the text by up to three ways, one after another, each followed by a look at the page (the editor shows the text; when
+  // its frame can't be reached, the HTML box holds it), until one worked: through the HTML box (switch to it, set it,
+  // switch back so the editor reads it), written into the editor as HTML, and pasted into the editor the way a clipboard
+  // would. A way that can't start (no switch, no frame) is skipped. `descSteps` keeps what each found, for the log.
+  const descSteps = {};
+  const descDoc = () => {
+    try {
+      return q('iframe[title="Description"]')?.contentDocument ?? null;
+    } catch {
+      return null; // a frame from another origin
+    }
+  };
+  const descEditable = () => {
+    const d = descDoc();
+    return d?.querySelector('[contenteditable="true"]') ?? (d?.designMode === "on" ? d.body : null) ?? d?.body ?? null;
+  };
+  const descHeld = (html) => {
     const want = squash(plain(html));
-    const wasHtml = mode.checked;
-    if (!wasHtml) press(mode);
-    await wait(250);
-    setValue(box, html);
-    await wait(200);
-    const held = () => squash(plain(box.value)) === want;
-    const stuck = held() || ((await typeIn(box, html)) && held());
-    if (!wasHtml) press(mode);
-    if (!stuck) return false;
-    const editor = () => q('iframe[title="Description"]')?.contentDocument;
-    const shows = () => squash(editor()?.body?.textContent) === want;
-    if (!editor()) return true; // the frame can't be reached: the HTML box holds it
-    if (await until(shows, 2500)) return true;
-    const rich = editor().querySelector('[contenteditable="true"]');
-    if (!rich) return false;
-    rich.focus();
-    editor().execCommand("selectAll");
-    editor().execCommand("insertHTML", false, html);
-    return Boolean(await until(shows, 1500));
+    const d = descDoc();
+    return d ? squash(d.body?.textContent) === want : squash(plain(findBasic(document, "description")?.value)) === want;
+  };
+
+  async function fillDescription(box, html) {
+    const ways = {
+      box: async () => {
+        const area = box.tagName === "TEXTAREA" ? box : findBasic(document, "description");
+        const mode = area && (await locate("htmlSwitch", 1500));
+        descSteps.htmlSwitch = Boolean(mode);
+        if (!mode) return;
+        const wasHtml = mode.checked;
+        if (!wasHtml) press(mode);
+        await wait(250);
+        try {
+          setValue(area, html);
+          await wait(200);
+          if (squash(plain(area.value)) !== squash(plain(html))) await typeIn(area, html);
+        } finally {
+          if (!wasHtml) press(mode); // back to the editor, which reads the box
+        }
+      },
+      type: async () => {
+        const rich = descEditable();
+        if (!rich) return;
+        rich.focus();
+        descDoc().execCommand("selectAll");
+        descDoc().execCommand("insertHTML", false, html);
+      },
+      paste: async () => {
+        const rich = descEditable();
+        if (!rich) return;
+        const win = descDoc().defaultView;
+        const data = new win.DataTransfer();
+        data.setData("text/html", html);
+        data.setData("text/plain", plain(html));
+        rich.focus();
+        descDoc().execCommand("selectAll");
+        rich.dispatchEvent(new win.ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      },
+    };
+    descSteps.frame = Boolean(descDoc());
+    descSteps.editable = Boolean(descEditable());
+    for (const [name, way] of Object.entries(ways)) {
+      await way().catch(() => {}); // a way that threw leaves the next one to try
+      descSteps[name] = Boolean(await until(() => descHeld(html), 2500));
+      if (descSteps[name]) return true;
+    }
+    return false;
+  }
+
+  // eBay saves the draft a few seconds after a box changes and may draw the form again: the description is read once more,
+  // and put back when it is gone.
+  async function keepDescription() {
+    const html = ctx.listing?.html;
+    const r = rows.get("description");
+    if (r?.status !== "filled" || !html || descHeld(html)) return;
+    const field = r.field?.isConnected ? r.field : descDoc() ? q('iframe[title="Description"]') : findBasic(document, "description");
+    const ok = Boolean(field) && (await fillDescription(field, html).catch(() => false));
+    row("description", r.label, r.value, ok ? "filled" : "copy", { field, html, ...(!ok && { hint: "eBay cleared it again. Copy it." }) });
+    if (!ok) {
+      results.basics = { code: "unfilled" };
+      reportDescription();
+    }
+    render();
+  }
+
+  // The description would not go in, after every way: what each found goes to the log (no text), once per pass.
+  function reportDescription() {
+    send({ action: "diagStep", step: "description", steps: descSteps, found: { description: found.description, htmlSwitch: found.htmlSwitch } });
   }
 
   // True when a box with a value couldn't be filled (the step failed; its rows are there to copy).
@@ -649,7 +717,8 @@ reportCrashes(); // lib/errors.js
     const basics = [
       ["title", "Title", l.title, () => locate("title"), fillBasic],
       ["sku", "Custom label", t.sku, customLabel, fillBasic],
-      ["description", "Description", l.description, () => locate("description"), async (box) => (l.html ? fillDescription(box, l.html) : false)],
+      // The editor's frame will do when the HTML box can't be found: the description goes in through the editor itself.
+      ["description", "Description", l.description, async () => (await locate("description")) ?? q('iframe[title="Description"]'), async (box) => (l.html ? fillDescription(box, l.html) : false)],
       // A price for another marketplace is never typed in.
       ["price", `Price (${t.currency})`, t.price, () => (otherSite() || !t.price ? null : priceBox()), fillBasic],
     ];
@@ -661,8 +730,9 @@ reportCrashes(); // lib/errors.js
       const field = await find();
       const ok = Boolean(value && field && (await fill(field, value).catch(() => false)));
       const hint = !value ? "Choose a value on eBay." : id === "price" && otherSite() ? `This is ${location.hostname}, the product is for ${t.host}: type the price yourself if it applies.` : !field ? "AliSwift couldn't find this box. Copy it." : undefined;
-      row(id, label, value, ok ? "filled" : value ? "copy" : "needs", { field, ...(hint && { hint }) });
+      row(id, label, value, ok ? "filled" : value ? "copy" : "needs", { field, ...(hint && { hint }), ...(id === "description" && { html: l.html }) });
       if (value && !ok && !(id === "price" && otherSite())) missed = true;
+      if (value && !ok && id === "description") reportDescription();
     }
     const cond = q('button[name="condition"]');
     const shown = clean(cond?.textContent);
@@ -690,6 +760,7 @@ reportCrashes(); // lib/errors.js
     logsNote = "";
     ai = null;
     for (const k of Object.keys(found)) delete found[k];
+    for (const k of Object.keys(descSteps)) delete descSteps[k];
     render();
     const fresh = await send({ action: "ebayContext" }); // asked again: another product may have been picked
     if (!fresh.success) {
@@ -733,6 +804,7 @@ reportCrashes(); // lib/errors.js
       render();
       if (runs("basics")) await redrawn(document, 4500);
       await settled(document);
+      if (runs("basics")) await keepDescription();
       const cat = q('button[name="categoryId"]');
       const category = clean(`${cat?.textContent ?? ""} ${cat?.parentElement?.querySelector(".value-secondary")?.textContent ?? ""}`);
       const tried = new Set();

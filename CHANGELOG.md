@@ -4,6 +4,23 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-19
+
+### Fixed
+
+- **The eBay description now goes in far more reliably.** It used to give up at once when it could not find the "Show HTML code" checkbox. It now tries three ways in turn (through the HTML box, written into the editor, pasted into the editor), reads the page back after each, checks again a few seconds later in case eBay cleared it, and sends the developer a log line (yes/no per step, never your text) when all three fail.
+- **Copy on a description row copies it with its formatting.** If a description still has to be copied, pasting it into eBay's description box keeps the bold headings and bullets. The description's copy button on the dashboard does the same.
+- **Listings had uneven formatting.** The default instructions now ask for exact headings ending in a colon and "- " bullets, and every description is tidied to that layout when it is written (bullets as "- ", no markdown, **Material & Features:**, **Size Details:**, **Perfect For:** and **Shipping:** spelled out). On eBay any short heading ending in a colon is bold and every bullet run is a real list. **Reset to default** in the AI tab gives the current instructions to everyone.
+- **A card could say "Writing listing..." forever.** The card now says **Queued** until the queue's turn (a minute after the Add instead of three), **Writing listing...** only while the AI is writing, **Waiting...** when the AI asked to come back later (hover to see why and when), and **Retry listing** when it gave up. With no AI key it says so at once instead of waiting. The queue writes every due listing in one go (five at most, stopping at the first failure) and also runs when the browser starts or the dashboard opens.
+- **Delete on the dashboard now deletes.** It clears the product's name, prices, link, photo, status and SKU cells in the sheet (the same as Remove from Sheet on AliExpress, and the row is reused by the next Add) or takes it out of the library, and the card goes only once that worked. The Orders tab is never touched. It works for any sheet you are viewing, with or without a Status column. The status menu's **Removed** still only sets the status.
+- **Some saved products didn't offer Remove from Sheet on AliExpress.** A product added from elsewhere (another computer, the dashboard, by hand) within the last five minutes was not in the page's copy of the sheet, and a look at the sheet that failed (Google busy, offline) was taken as "not there". The page now reads the sheet again for a product it doesn't find, tries again after a failed look, and also knows `/i/` product links.
+- **The loading circle in Settings looked frozen** for anyone whose system asks for reduced motion. Spinners now turn slowly instead of stopping.
+
+### Changed
+
+- **The AliExpress button names the sheet**: "SKU-04 added to sheet Store", "SKU-04 is already in sheet Store", "SKU-04 removed from sheet Store" (or "your library").
+- The eBay panel's cards say **Queued** instead of "Writing listing..." until the AI is actually writing.
+
 ## [1.0.1] - 2026-10-19
 
 ### Fixed
@@ -225,7 +242,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/envyxyz/aliswift/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/envyxyz/aliswift/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/envyxyz/aliswift/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/envyxyz/aliswift/compare/v0.9.0...v0.10.0

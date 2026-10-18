@@ -25,7 +25,7 @@ const PRODUCT = { sku: "SKU-01", title: "Skull Ring", link: LINK, price: 3.5, sa
 
 const GOOD = {
   title: "Stainless Steel Skull Ring Men Biker Punk Gothic Jewellery Gift",
-  description: "A heavy skull ring.\n\nMaterial & features\n- Stainless steel\n\nShipping\nPosted after your order.",
+  description: "A heavy skull ring.\n\nMaterial & features\n* Stainless steel\n\nShipping\n• Posted after your order.",
   itemSpecifics: [{ name: "Brand", value: "Unbranded" }, { name: "Material", value: "Stainless steel" }],
   variants: ["Silver", "Black"],
   categoryHint: "Jewellery > Rings",
@@ -144,7 +144,7 @@ test("the request is the seller's instructions (the default when blank) plus the
   assert.match(own.user, /Product Title: Ring/);
   // The default is what the settings page shows, so it must fit the 6000-character field and name the four sections.
   assert.ok(L.DEFAULT_INSTRUCTIONS.length < 6000);
-  for (const heading of ["Material & features", "Size details", "Perfect for", "Shipping"]) assert.ok(L.DEFAULT_INSTRUCTIONS.includes(heading));
+  for (const heading of ["Material & Features:", "Size Details:", "Perfect For:", "Shipping:"]) assert.ok(L.DEFAULT_INSTRUCTIONS.includes(heading));
 });
 
 test("lib/listing.js is pure: no chrome, no network", () => {
@@ -178,7 +178,7 @@ test("a listing is written from the sheet's name and photo, filed by item number
   assert.deepEqual([r.key, r.limited, r.model, r.cached], [ID, true, "gemini-test", undefined]);
   assert.equal(r.listing.title, GOOD.title);
   assert.deepEqual(r.listing.analysis, GOOD.analysis);
-  assert.ok(r.listing.description.startsWith("A heavy skull ring.\n\nMaterial & features"));
+  assert.equal(r.listing.description, "A heavy skull ring.\n\nMaterial & Features:\n- Stainless steel\n\nShipping:\n- Posted after your order."); // headings spelled out with their colon, bullets as "- "
   assert.ok(Number.isFinite(r.createdAt));
   assert.deepEqual(plain(t.store[`listing:${ID}`]), { listing: r.listing, sheetId: SHEET, limited: true, model: "gemini-test", createdAt: r.createdAt, warnings: [],
     // what the eBay panel's cards show, kept beside the listing: the sell price, never the cost
@@ -400,13 +400,13 @@ test("listing code never touches a sheet: no Google call, no write or clear anyw
 
 /* The listing queue */
 
-test("Add queues the listing 3 minutes ahead; the alarm writes one due job, then the job is gone", async () => {
+test("Add queues the listing a minute ahead; the alarm writes the due job, then the job is gone", async () => {
   const t = setup({ local: { geminiKey: KEY }, gemini: [answer(GOOD)] });
   const save = await t.ask({ action: "appendToSheet", data: { title: "Skull Ring", link: LINK, price: "3.50", salePrice: "8.99", image: IMG, currency: "GBP", dest: "local" } }, "https://www.aliexpress.com/item/1.html");
   assert.equal(save.success, true);
   const [job] = plain(t.store.aiQueue);
   assert.deepEqual([job.itemId, job.sheetId, job.tries, job.product.sku, job.product.salePrice], [ID, "local", 0, save.sku, 8.99]);
-  assert.ok(job.notBefore - Date.now() > 2.9 * 60000);
+  assert.ok(job.notBefore - Date.now() > 0.9 * 60000);
   await t.ctx.runAiQueue(); // not due yet
   assert.equal(t.gem().length, 0);
   t.store.aiQueue = [{ ...job, notBefore: Date.now() - 1 }];
@@ -437,7 +437,34 @@ test("a busy key moves the job to when it is back; the fifth failure marks it fa
   const keyless = setup();
   keyless.store.aiQueue = [job];
   await keyless.ctx.runAiQueue();
-  assert.deepEqual(plain(keyless.store.aiQueue), [job]);
+  assert.deepEqual(plain(keyless.store.aiQueue), [{ ...job, failed: true, error: "nokey" }]); // no card claims to be writing
+  assert.equal(keyless.gem().length, 0);
+});
+
+test("a run writes every due job, one after another, and stops at the first that fails", async () => {
+  const busy = { status: 429, json: { error: { message: "busy", details: [{ retryDelay: "40s" }] } } };
+  const t = setup({ local: { geminiKey: KEY }, gemini: [answer(GOOD), answer(GOOD), busy] });
+  const job = (n) => ({ itemId: `100500000000000${n}`, sheetId: SHEET, product: { ...PRODUCT, link: `https://www.aliexpress.com/item/100500000000000${n}.html` }, notBefore: 0, tries: 0, error: "" });
+  t.store.aiQueue = [1, 2, 3, 4].map(job);
+  await t.ctx.runAiQueue();
+  assert.ok(t.store["listing:1005000000000001"] && t.store["listing:1005000000000002"]);
+  assert.equal(t.store["listing:1005000000000003"], undefined);
+  const left = plain(t.store.aiQueue);
+  assert.deepEqual(left.map((j) => [j.itemId.slice(-1), j.error]), [["3", "rate"], ["4", ""]]); // 3 waits for its key, 4 was not tried
+  assert.equal(t.gem().length, 3);
+});
+
+test("a description is tidied to one layout (bullets as \"- \", headings spelled out with a colon, no markdown) and eBay's HTML bolds any heading and lists every bullet", () => {
+  assert.equal(L.tidyDescription("**Material & features**\n• Steel\n* Strong\n– Light\n# Perfect for\n-5 degrees fine"), "Material & Features:\n- Steel\n- Strong\n- Light\nPerfect For:\n-5 degrees fine");
+  assert.equal(L.htmlToText("<ul><li>A</li><li>B</li></ul>"), "- A\n- B");
+  assert.equal(
+    L.toEbayHtml("Nice ring.\n\nWhat you get:\n• One ring\n• One box"),
+    "<div>Nice ring.</div><div><br></div><div><b>What you get:</b></div><ul><li>One ring</li><li>One box</li></ul>",
+  );
+  assert.equal(L.toEbayHtml("Fits 5.5 cm. Good: yes"), "<div>Fits 5.5 cm. Good: yes</div>"); // a sentence with a colon is not a heading
+  // The default instructions ask for exactly this layout, and Reset gives every seller the current text.
+  assert.match(L.DEFAULT_INSTRUCTIONS, /ending with a colon/);
+  assert.match(L.DEFAULT_INSTRUCTIONS, /start with "- "/);
 });
 
 test("a rejected key uses no try: the job stops until the keys change", async () => {

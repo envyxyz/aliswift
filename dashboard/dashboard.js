@@ -68,7 +68,7 @@ const undoOrderStatus = (oldStatus) => (ORDER_STATUSES.includes(oldStatus) ? old
 // The key a product's listing is kept under: its AliExpress item number.
 // The same rule as listingKey in background.js, which files the listing.
 function listingKeyOf(product) {
-  return /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(product?.link ?? ""))?.[1] || "";
+  return /(?:\/item\/|\/i\/|[?&]productId=)(\d{6,})/.exec(String(product?.link ?? ""))?.[1] || "";
 }
 
 // What the listing writer is given about a product: its name, link, photo and sell price, never the cost price.
@@ -806,16 +806,10 @@ function openCardMenu(e, product, card, isRemovedView) {
   items.push(link ? menuItem("View Product", { href: link }) : menuItem("View Product", { disabled: true }));
   if (activeSheet?.oTab && authSignedIn && !isLibraryMode) items.push(menuItem("Add order", { onClick: () => openAddOrderDialog(product) }));
   if (!isRemovedView) {
-    // Same rules as before: a sheet with no Status column, or a status shared by variant rows, cannot remove a product.
-    const why = !sheetHasStatus()
-      ? ["This sheet has no Status column, so products can't be removed.", { kind: "neutral", detail: "Add one in this sheet's settings, under More columns.", action: { label: "Open settings", onClick: openSettings } }]
-      : product.statusShared
-        ? ["This status is shared by other variant rows. Change it in the sheet.", { kind: "neutral" }]
-        : null;
     const sep = document.createElement("div");
     sep.className = "ctx-sep";
     sep.setAttribute("role", "separator");
-    items.push(sep, menuItem("Delete", { danger: true, disabled: Boolean(why), onClick: () => (why ? toast(...why) : openDeleteDialog(product, card, card)) }));
+    items.push(sep, menuItem("Delete", { danger: true, onClick: () => openDeleteDialog(product, card, card) }));
   }
   cardMenu.replaceChildren(...items);
 
@@ -1049,7 +1043,57 @@ function animateCardRemoval(card, onComplete) {
   }, 160);
 }
 
-// Handle card removal ("x")
+// A card is gone: the list is drawn again and the focus goes to the card that took its place (`idx` was its position).
+function redrawAfterRemoval(idx) {
+  renderProducts();
+  const newCards = document.querySelectorAll(".card");
+  if (newCards.length > 0) {
+    const target = newCards[Math.min(idx, newCards.length - 1)];
+    target.setAttribute("tabindex", "-1");
+    target.focus();
+  } else {
+    const g = document.querySelector(".grid");
+    if (g) {
+      g.setAttribute("tabindex", "-1");
+      g.focus();
+    } else {
+      const emptyHeading = document.querySelector(".empty h3");
+      if (emptyHeading) {
+        emptyHeading.setAttribute("tabindex", "-1");
+        emptyHeading.focus();
+      }
+    }
+  }
+}
+
+const cardIndex = (card) => [...(document.querySelector(".grid")?.querySelectorAll(".card") ?? [])].indexOf(card);
+
+// Delete (the menu's, after its dialog): clears the product's row in the sheet, as Remove from Sheet does on the AliExpress
+// page, or takes it out of the library. The card goes once that worked; a failure leaves it where it is.
+async function handleDeleteProduct(product, card) {
+  const key = product.sku || `row-${product.row}`;
+  if (removingKeys.has(key)) return;
+  removingKeys.add(key);
+  card.setAttribute("aria-busy", "true");
+  const capturedSheetId = currentSheetId();
+  const idx = cardIndex(card);
+  const name = product.sku || `"${(product.title || "").slice(0, 32)}"`;
+
+  const res = await sendMessage({ action: "deleteProduct", sheetId: capturedSheetId, key: { sku: product.sku, row: product.row, link: product.link, title: product.title } });
+  removingKeys.delete(key);
+  card.removeAttribute("aria-busy");
+  if (!res.success) {
+    toast(`Couldn't delete ${name}.`, { kind: "error", detail: res.code ? failView(res, "remove").text : res.error, action: { label: "Retry", onClick: () => handleDeleteProduct(product, card) } });
+    return;
+  }
+  toast(`Deleted ${name} from ${capturedSheetId === "local" ? "your library" : "the sheet"}.`, { duration: 6000 });
+  if (currentSheetId() !== capturedSheetId) return;
+  currentProducts = currentProducts.filter((p) => p !== product);
+  if (capturedSheetId !== "local" && typeof chrome !== "undefined" && chrome.storage?.local) chrome.storage.local.set({ [`cache:${capturedSheetId}`]: { at: dataAt, products: currentProducts } });
+  animateCardRemoval(card, () => redrawAfterRemoval(idx));
+}
+
+// Handle card removal (the status menu's "Removed"): the product stays in the sheet with the status Discontinued
 async function handleRemoveProduct(product, card) {
   const key = product.sku || `row-${product.row}`;
   if (removingKeys.has(key)) return;
@@ -1059,31 +1103,9 @@ async function handleRemoveProduct(product, card) {
   product.status = "Discontinued";
   const capturedSheetId = currentSheetId();
 
-  const grid = document.querySelector(".grid");
-  const cards = grid ? [...grid.querySelectorAll(".card")] : [];
-  const idx = cards.indexOf(card);
+  const idx = cardIndex(card);
 
-  animateCardRemoval(card, () => {
-    renderProducts();
-    const newCards = document.querySelectorAll(".card");
-    if (newCards.length > 0) {
-      const target = newCards[Math.min(idx, newCards.length - 1)];
-      target.setAttribute("tabindex", "-1");
-      target.focus();
-    } else {
-      const g = document.querySelector(".grid");
-      if (g) {
-        g.setAttribute("tabindex", "-1");
-        g.focus();
-      } else {
-        const emptyHeading = document.querySelector(".empty h3");
-        if (emptyHeading) {
-          emptyHeading.setAttribute("tabindex", "-1");
-          emptyHeading.focus();
-        }
-      }
-    }
-  });
+  animateCardRemoval(card, () => redrawAfterRemoval(idx));
 
   const res = await callSetStatus(capturedSheetId, product, "Discontinued");
 
@@ -1137,31 +1159,9 @@ async function handleRestoreProduct(product, card, restoreTo = "Not Listed") {
   product.status = restoreTo;
   const capturedSheetId = currentSheetId();
 
-  const grid = document.querySelector(".grid");
-  const cards = grid ? [...grid.querySelectorAll(".card")] : [];
-  const idx = cards.indexOf(card);
+  const idx = cardIndex(card);
 
-  animateCardRemoval(card, () => {
-    renderProducts();
-    const newCards = document.querySelectorAll(".card");
-    if (newCards.length > 0) {
-      const target = newCards[Math.min(idx, newCards.length - 1)];
-      target.setAttribute("tabindex", "-1");
-      target.focus();
-    } else {
-      const g = document.querySelector(".grid");
-      if (g) {
-        g.setAttribute("tabindex", "-1");
-        g.focus();
-      } else {
-        const emptyHeading = document.querySelector(".empty h3");
-        if (emptyHeading) {
-          emptyHeading.setAttribute("tabindex", "-1");
-          emptyHeading.focus();
-        }
-      }
-    }
-  });
+  animateCardRemoval(card, () => redrawAfterRemoval(idx));
 
   const res = await callSetStatus(capturedSheetId, product, restoreTo);
   if (!res.success) {
@@ -2524,7 +2524,7 @@ let pendingDelete = null;
 function openDeleteDialog(product, card, triggerBtn) {
   const dlg = document.getElementById("deleteDialog");
   if (!dlg) {
-    handleRemoveProduct(product, card);
+    handleDeleteProduct(product, card);
     return;
   }
   pendingDelete = { product, card, triggerBtn };
@@ -2566,7 +2566,7 @@ function setupDeleteDialog() {
       if (!pendingDelete) return;
       const { product, card } = pendingDelete;
       closeDlg();
-      handleRemoveProduct(product, card);
+      handleDeleteProduct(product, card);
     };
   }
 }
@@ -2606,22 +2606,39 @@ async function loadListings(sheetId, products) {
   return Object.fromEntries(Object.entries(found).filter(([, record]) => record).map(([slot, record]) => [slot.slice(prefix.length), record]));
 }
 
-// A card's listing button: "List on eBay" while there is none, "Writing listing..." while the queue has it or one is
-// being written here, "Retry listing" when the queue gave up, "View listing" once there is one. The calmer look once
-// the action is no longer needed.
+// A card's listing button: "List on eBay" while there is none, "Queued" until the queue's turn, "Writing listing..."
+// while the AI is writing it (or one is being written here), "Waiting..." when the AI said to come back later (the
+// tooltip says when and why), "Retry listing" when the queue gave up, "View listing" once there is one. The calmer look
+// once the action is no longer needed.
+function listingState(key) {
+  const job = queuedListings[key];
+  if (listingJobs.has(`${currentSheetId()}:${key}`)) return "busy";
+  if (listingsCache[key]) return "view";
+  if (!job) return "create";
+  return job.failed ? "failed" : job.error ? "waiting" : job.notBefore > Date.now() ? "queued" : "busy";
+}
+
 function setListingButton(btn) {
   const key = btn.dataset.lkey;
   const job = queuedListings[key];
-  const state = listingJobs.has(`${currentSheetId()}:${key}`) ? "busy" : listingsCache[key] ? "view" : job ? (job.failed ? "failed" : "busy") : "create";
-  btn.textContent = { busy: "Writing listing...", view: "View listing", failed: "Retry listing", create: "List on eBay" }[state];
+  const state = listingState(key);
+  btn.textContent = { busy: "Writing listing...", queued: "Queued", waiting: "Waiting...", view: "View listing", failed: "Retry listing", create: "List on eBay" }[state];
   btn.className = state === "create" || state === "failed" ? "btn btn-sm" : "btn btn-quiet btn-sm";
+  const why = state === "waiting" || state === "failed" ? failView({ code: job.error, provider: job.provider, retryAt: job.notBefore }, "write").text : "";
+  btn.title = why || (state === "queued" ? "Writes itself in a minute or so." : "");
 }
 
+let listingDueTimer = 0;
 function syncListingButtons() {
   for (const btn of document.querySelectorAll("button[data-lkey]")) setListingButton(btn);
+  // A queued job turns into "Writing listing..." when it falls due, which changes nothing in storage: look again then.
+  clearTimeout(listingDueTimer);
+  const next = Math.min(...Object.values(queuedListings).filter((j) => !j.failed && !j.error && j.notBefore > Date.now()).map((j) => j.notBefore));
+  if (Number.isFinite(next)) listingDueTimer = setTimeout(syncListingButtons, Math.min(next - Date.now() + 500, 2 ** 30));
 }
 
-function copyButton(label, getText) {
+// `getHtml`, when given, puts the same text on the clipboard as rich text too (the description, for eBay's editor).
+function copyButton(label, getText, getHtml) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "icon-btn";
@@ -2631,7 +2648,7 @@ function copyButton(label, getText) {
   copy.classList.add("i-copy");
   check.classList.add("i-check");
   btn.append(copy, check);
-  btn.addEventListener("click", () => copyText(getText(), btn, label));
+  btn.addEventListener("click", () => copyText(getText(), btn, label, getHtml?.() ?? ""));
   return btn;
 }
 
@@ -2692,7 +2709,8 @@ function showListingError({ text, retry, settings }) {
 // No listing and nothing running: what the queue says about this product, and a button that writes it now.
 function showNoListing() {
   const job = queuedListings[ls.key];
-  lsEl("lsNoneMsg").textContent = job?.failed ? "The queue gave up on this listing after several tries." : job ? "Waiting in the queue. It writes itself a few minutes after you add a product." : "No listing yet.";
+  const reason = job?.error ? failView({ code: job.error, provider: job.provider, retryAt: job.notBefore }, "write").text : "";
+  lsEl("lsNoneMsg").textContent = job?.failed ? `The queue stopped on this listing. ${reason}`.trim() : job ? `Waiting in the queue. It writes itself a minute or so after you add a product. ${reason}`.trim() : "No listing yet.";
   lsEl("lsWrite").textContent = job?.failed ? "Try again" : "Create listing";
   lsEl("lsNone").hidden = false;
   lsEl("lsContent").hidden = true;
@@ -3024,7 +3042,7 @@ function setupInspector() {
   new ResizeObserver(fitTitle).observe(lsEl("insTitleLink"));
   const dlg = lsEl("inspector");
   lsEl("lsCopyTitleSlot").replaceWith(copyButton("title", () => lsEl("lsTitleIn").value));
-  lsEl("lsCopyDescSlot").replaceWith(copyButton("description", () => lsEl("lsDesc").value));
+  lsEl("lsCopyDescSlot").replaceWith(copyButton("description", () => lsEl("lsDesc").value, () => toEbayHtml(lsEl("lsDesc").value)));
 
   lsEl("inspectorForm").addEventListener("submit", (e) => e.preventDefault());
   lsEl("insClose").onclick = () => dlg.close();

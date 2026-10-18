@@ -19,8 +19,10 @@ const LABELS = { sheet: "Add to Sheet", local: "Save to library" };
 const REMOVE = { sheet: "Remove from Sheet", local: "Remove from library" };
 let dest = "sheet";
 let inSheet = false; // the product on this page is saved where a click goes: the first button removes it
+let sheetName = ""; // the active sheet's name, for the messages ("SKU-04 added to sheet Store")
 let confirmUntil = 0; // Remove's second click counts until then
 let resetTimer;
+let recheck; // a look at the sheet that failed is tried again, a few times
 
 // A page left open while the extension reloads or updates is cut off from it: sendMessage then throws at once (a .catch on
 // its promise doesn't see that), so every ask goes through here and gets null.
@@ -34,11 +36,18 @@ const ask = (message) => {
 
 // Where a click saves, and whether the product is already there (the sheet's own word, through the worker's index, so
 // it is right even after a row was deleted by hand).
-async function refreshDest() {
+async function refreshDest(attempt = 0) {
+  clearTimeout(recheck);
   const state = await ask({ action: "authState" });
   if (!state) return; // the worker didn't answer: keep what is known
-  dest = destination(state.signedIn, await getActiveSheet());
-  inSheet = Boolean((await ask({ action: "inSheet", link: getLink(), dest }))?.inSheet);
+  const sheet = await getActiveSheet();
+  dest = destination(state.signedIn, sheet);
+  sheetName = sheet?.name ?? "";
+  const found = await ask({ action: "inSheet", link: getLink(), dest });
+  // A look that failed (Google busy, offline) says nothing about the product: the button keeps its state and asks again,
+  // else a product that is in the sheet would be offered for adding.
+  if (found?.success) inSheet = Boolean(found.inSheet);
+  else if (attempt < 3) recheck = setTimeout(() => refreshDest(attempt + 1), 3000 * (attempt + 1));
   const btn = document.getElementById("aliswift-page-btn");
   if (btn && !btn.dataset.state) showLabel(btn); // never over a Saving... or result text
 }
@@ -260,17 +269,29 @@ function priceNote(row) {
   return row.kind === "unset" ? `, ${row.currency}` : row.kind === "unknown" ? ". Currency unknown." : "";
 }
 
+const whereIs = (where) => (where === "local" ? "your library" : sheetName ? `sheet ${sheetName}` : "your sheet");
+
+// Where a product went, in words: "SKU-04 added to sheet Store", "SKU-04 saved to your library", or "SKU-04 is already in
+// sheet Store" (with `existed`).
+function placed(sku, where, existed) {
+  const name = whereIs(where);
+  const what = sku || (existed ? "This product" : "Product");
+  return existed ? `${what} is already in ${name}` : `${what} ${where === "local" ? "saved to" : "added to"} ${name}`;
+}
+
 // Remove asks for a second click, saying first when an order uses the product's SKU; the second click clears the
 // product's cells in the sheet (or takes it out of the library).
+let removeSku = ""; // the SKU the first click found, for the message after the second
 async function remove(btn) {
-  const place = dest === "local" ? "library" : "sheet";
+  const place = whereIs(dest);
   if (Date.now() > confirmUntil) {
     btn.disabled = true;
     const check = dest === "local" ? null : await ask({ action: "removeCheck", link: getLink(), dest });
+    removeSku = check?.sku ?? "";
     confirmUntil = Date.now() + 6000;
     setState(btn, "confirm", "Click again to remove");
     const warn = check?.orderSku ? `An order uses ${check.orderSku}. Removing this product can mix up records later. Remove anyway?` : "";
-    note(warn || `Click again to remove it from your ${place}.`, warn ? "error" : "");
+    note(warn || `Click again to remove ${removeSku || "it"} from ${place}.`, warn ? "error" : "");
     resetTimer = setTimeout(reset, 6000);
     return;
   }
@@ -279,7 +300,7 @@ async function remove(btn) {
   const result = (await ask({ action: "removeFromSheet", link: getLink(), dest })) ?? { code: "reloaded" };
   if (result.success) inSheet = false;
   setState(btn, result.success ? "success" : "error", result.success ? "Removed" : "Try again");
-  note(result.success ? `Removed from your ${place}.` : failText(result, "remove"), result.success ? "ok" : "error");
+  note(result.success ? `${removeSku || "Product"} removed from ${place}.` : failText(result, "remove"), result.success ? "ok" : "error");
   resetTimer = setTimeout(() => (reset(), refreshDest()), result.success ? 3500 : 6000);
 }
 
@@ -322,14 +343,13 @@ async function run(kind) {
 
   let message;
   if (result?.success) {
-    const sku = result.sku ? ` as ${result.sku}` : "";
-    const place = where === "local" ? "library" : "sheet";
     setState(btn, "success", action.done);
     if (kind === "download") {
       message = `Saved ${result.saved} of ${result.total} photo${result.total === 1 ? "" : "s"} to ${result.folder}.`;
     } else {
       inSheet = true;
-      message = result.existed ? `Already in your ${place}${sku}.` : where === "local" ? `Saved to library${sku}` : `Added${sku}${priceNote(row)}`;
+      sheetName = (await getActiveSheet())?.name ?? sheetName;
+      message = `${placed(result.sku, where, result.existed)}${result.existed ? "." : priceNote(row)}`;
     }
   } else if (result?.code === "permission") {
     setState(btn, "error", "Permission");

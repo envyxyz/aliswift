@@ -5,7 +5,7 @@ AliSwift is small on purpose: plain JavaScript, Manifest V3, no build step, no d
 ## Core Rules
 
 - **Zero dependencies and no build step**: everything is plain JavaScript, CSS, and HTML. Do not add bundlers, compilers, or npm dependencies.
-- **Never delete user data**: no code path may delete rows or clear cells in a user's Google Sheet (enforced by tests). Removing a product is strictly a status change to `Discontinued`.
+- **Never delete user data**: no code path may delete rows, and the only cells cleared are the ones AliSwift wrote in one product's row, by `clearRow` in `background.js` (Remove from Sheet and the dashboard's Delete; enforced by tests). The status menu's Removed is a status change to `Discontinued`.
 - **Run tests**: run automated tests with `npm test`. Tests use Node's built-in test runner (Node 20 or newer), so there is nothing to install. All tests must pass before submitting changes.
 
 ## Run it
@@ -82,7 +82,7 @@ Changing `"key"` changes the extension ID. Chrome then treats the build as a new
 
 - Keep them small and explain why, not just what.
 - Run `npm test` before opening a pull request.
-- Ensure no code path deletes rows or clears cells in sheets.
+- Ensure no code path deletes rows, and that cells are cleared only by `clearRow`.
 - If you touched the popup, settings, dashboard, or page button, try it in Chrome and mention what you checked.
 - Add a line under **Unreleased** in `CHANGELOG.md` when users would notice the change.
 

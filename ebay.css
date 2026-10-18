@@ -178,7 +178,7 @@
     transition: none;
   }
   .spin {
-    animation: none;
+    animation-duration: 1.6s; /* slow, not still: it is the sign that work is going on */
   }
 }
 

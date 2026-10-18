@@ -672,7 +672,7 @@ const readFile = (file) => fs.readFileSync(path.join(__dirname, "..", file), "ut
 test("dashboard.html loads only local scripts that exist, and never the dev stub", () => {
   const html = readFile("dashboard/dashboard.html");
   const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/ui.js", "../lib/errors.js", "dashboard.js"]); // shared first: dashboard.js needs it
+  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/listing.js", "../lib/ui.js", "../lib/errors.js", "dashboard.js"]); // shared first: dashboard.js needs it
   for (const url of [...scripts, ...[...html.matchAll(/<link[^>]*\shref="([^"]+)"/g)].map((m) => m[1])]) {
     assert.ok(!/^https?:/.test(url), url);
     assert.ok(fs.existsSync(path.join(__dirname, "..", "dashboard", url)), url);
@@ -716,8 +716,8 @@ test("shared.js, ui.js and dashboard.js load together in one page without a rede
 test("the dashboard only sends the messages it should, and never puts data into innerHTML", () => {
   const js = readFile("dashboard/dashboard.js");
   const actions = new Set([...js.matchAll(/action: "(\w+)"/g)].map((m) => m[1]));
-  // Nothing here can delete a row or clear a cell: removing is setStatus, and the rest only reads, adds or changes a product's two prices.
-  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks"];
+  // Only deleteProduct clears a row's cells (the worker does it, the same as Remove from Sheet on the product page); the rest only reads, adds or changes a status or a product's two prices.
+  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks", "deleteProduct"];
   for (const action of actions) assert.ok(allowed.includes(action), `unexpected message ${action}`);
   assert.ok(actions.has("generateListing") && actions.has("saveListing"));
   for (const [line] of js.matchAll(/^.*\.innerHTML.*$/gm)) assert.match(line, /\.innerHTML = "";?\s*$/, line); // only ever cleared

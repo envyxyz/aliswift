@@ -46,7 +46,7 @@ When AI features are invoked, requests travel directly from your browser to your
 Requests are sent one at a time, and a timeout is not retried. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are not included in settings export.
 
 ## 10. How do I undo an accidental product removal or change?
-AliSwift enforces a strict non-destructive policy. It writes new product rows, updates status, tracking and the prices you edit in the inspector (never a cell that holds a formula), and adds missing SKU or Image columns when you answer yes. It never deletes rows. The only cells it clears are the ones it wrote in a product's row when you press Remove from Sheet, after a second click.
+AliSwift enforces a strict non-destructive policy. It writes new product rows, updates status, tracking and the prices you edit in the inspector (never a cell that holds a formula), and adds missing SKU or Image columns when you answer yes. It never deletes rows. The only cells it clears are the ones it wrote in a product's row when you press Remove from Sheet (after a second click) or Delete on the dashboard (after its confirmation).
 When you remove a product on the dashboard, AliSwift simply updates its status cell to Discontinued. A confirmation toast appears with an Undo button for 8 seconds. Clicking Undo immediately restores the item to its previous status. You can also view all discontinued products at any time under the Removed filter tab on the dashboard and restore them whenever you wish.
 
 ## 11. How can I back up or transfer my settings to another computer?

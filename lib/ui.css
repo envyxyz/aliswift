@@ -1460,14 +1460,14 @@ dialog form {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin {
-    animation: none;
+  /* Spinners turn slowly rather than stop: they are the only sign that work is going on. */
+  .spin,
+  .btn[data-state="loading"]::before,
+  .profile-btn[data-state="busy"]::before {
+    animation-duration: 1.6s;
   }
   .btn {
     transition: none;
-  }
-  .btn[data-state="loading"]::before {
-    animation: none;
   }
   [role="tabpanel"]:not([hidden]) {
     animation: none;
@@ -1487,9 +1487,6 @@ dialog form {
   .menu {
     --shift: 0px;
     transition-duration: 100ms;
-  }
-  .profile-btn[data-state="busy"]::before {
-    animation: none;
   }
 }
 

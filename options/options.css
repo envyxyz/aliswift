@@ -665,9 +665,12 @@ table.map {
 @media (prefers-reduced-motion: reduce) {
   :is(input, select)[data-flash],
   .gs-pane,
-  .gs-spinner,
   .confirm {
     animation: none;
+  }
+  /* A spinner is the only sign that work is going on, so it turns, slowly, instead of standing still like a frozen page. */
+  .gs-spinner {
+    animation-duration: 1.6s;
   }
 }
 

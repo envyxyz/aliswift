@@ -24,6 +24,7 @@ const handlers = {
   rate: { aliOk: true, run: (request) => getRate(request.data) },
   listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
   setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
+  deleteProduct: { pagesOnly: true, run: (request) => deleteProduct(request) },
   priceLocks: { pagesOnly: true, run: (request) => priceLocks(request) },
   updateProduct: { pagesOnly: true, run: (request) => updateProduct(request) },
   listOrders: { pagesOnly: true, run: (request) => listOrders(request.sheetId) },
@@ -56,6 +57,7 @@ const handlers = {
   sendLogs: { logsOk: true, run: async (request) => ({ success: true, ref: await diagReport(request.report) }) },
   diagCrash: { run: (request) => diagCrash(request) },
   diagFill: { ebayOnly: true, run: (request) => diagFill(request) },
+  diagStep: { ebayOnly: true, run: (request) => diagStep(request) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
@@ -109,6 +111,14 @@ function diagError(action, error) {
 // A crash in a content script, as reportCrashes (lib/errors.js) sends it.
 async function diagCrash({ message, stack } = {}) {
   await diagEvent({ kind: "crash", where: "page", message: String(message ?? "").slice(0, 500), stack: String(stack ?? "").slice(0, 4000) });
+  return { success: true };
+}
+
+// A basic box the eBay panel couldn't fill (the description): which ways it tried and what the page showed, as words and
+// yes/no only, never a value.
+async function diagStep({ step, steps, found } = {}) {
+  const flat = (o) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).slice(0, 12).map(([k, v]) => [String(k).slice(0, 30), typeof v === "boolean" ? v : String(v ?? "").slice(0, 12)]));
+  await diagEvent({ kind: "error", action: `fill-${String(step ?? "").slice(0, 20)}`, code: "unfilled", steps: flat(steps), found: flat(found) });
   return { success: true };
 }
 
@@ -482,10 +492,10 @@ async function writeRows(sheet, items) {
 
 const INDEX_TTL = 5 * 60000;
 
-async function sheetIndex(sheet) {
+async function sheetIndex(sheet, maxAge = INDEX_TTL) {
   const slot = `index:${sheet.id}`;
   const kept = (await chrome.storage.local.get({ [slot]: null }))[slot];
-  if (kept && Date.now() - kept.at < INDEX_TTL) return kept.items;
+  if (kept && Date.now() - kept.at < maxAge) return kept.items;
   const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol, sku: sheet.skuCol }, sheet.startRow);
   const items = {};
   c.link.forEach((l, i) => {
@@ -511,7 +521,9 @@ async function inSheet({ link, dest } = {}) {
     return { success: true, inSheet: Boolean(rec), sku: rec?.sku ?? "" };
   }
   const sheet = await getActiveSheet();
-  const hit = sheet ? (await sheetIndex(sheet))[id] : null;
+  // A product the index doesn't have may have been added elsewhere (the dashboard, another computer, by hand) since the
+  // index was read: look again unless it was read a moment ago.
+  const hit = sheet ? (await sheetIndex(sheet))[id] ?? (await sheetIndex(sheet, 10000))[id] : null;
   return { success: true, inSheet: Boolean(hit), sku: hit?.sku ?? "" };
 }
 
@@ -547,26 +559,58 @@ async function removeFromSheet({ link, dest } = {}) {
     const sheet = await getActiveSheet();
     if (!sheet) throw noSheet();
     await enqueue(async () => {
-      const slot = `index:${sheet.id}`;
       const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol }, sheet.startRow);
       const i = c.link.findIndex((l) => itemIdOf(l) === id);
       if (i < 0) {
-        await chrome.storage.local.remove(slot); // the index was out of date: read it again next time
+        await chrome.storage.local.remove(`index:${sheet.id}`); // the index was out of date: read it again next time
         throw changed();
       }
-      const row = sheet.startRow + i;
-      const cols = [sheet.keywordsCol, sheet.priceCol, sheet.includeSalePrice && sheet.salePriceCol, sheet.linkCol, sheet.imageCol, sheet.statusCol, !sheet.skuFormula && sheet.skuCol];
-      const ranges = [...new Set(cols.filter(Boolean))].map((col) => `${quote(sheet.sheetTab)}!${col}${row}`);
-      await sheetsFetch(`/${sheet.id}/values:batchClear`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ ranges }) });
-      const clearedKey = `cleared:${sheet.id}`;
-      const kept = await chrome.storage.local.get({ [clearedKey]: [], [slot]: null });
-      const items = { ...kept[slot]?.items };
-      delete items[id];
-      await chrome.storage.local.set({ [clearedKey]: [...new Set([...kept[clearedKey], row])].slice(-500), ...(kept[slot] && { [slot]: { ...kept[slot], items } }) });
+      await clearRow(sheet, sheet.startRow + i);
     });
   }
   await dropListing(id);
   return { success: true };
+}
+
+// The dashboard's Delete does what Remove does on the product page, to the row of the product the card shows: found again
+// by SKU, link and title from a fresh read inside the write queue (so a sorted sheet never loses the wrong row), in the
+// sheet the dashboard is showing (not only the active one) or in the on-device library. Nothing else is touched; a row
+// whose status is one merged cell across variant rows keeps that status.
+async function deleteProduct({ sheetId, key } = {}) {
+  if (!key || !(key.sku || key.link || key.title)) throw new Error("Say which product to delete.");
+  const changed = () => Object.assign(new Error("That product isn't there any more, so nothing was deleted."), { code: "row-changed" });
+  if (sheetId === LOCAL) {
+    await enqueue(async () => {
+      const { library } = await chrome.storage.local.get({ library: [] });
+      const row = findRow(libToProducts(library), key);
+      if (row < 0) throw changed();
+      await chrome.storage.local.set({ library: libTake(library, [library[row - 1].id]) });
+    });
+  } else {
+    const sheet = await sheetById(sheetId);
+    await enqueue(async () => {
+      const { products, sharedBy } = await readProducts(sheet);
+      const row = findRow(products, key);
+      if (row < 0) throw changed();
+      await clearRow(sheet, row, { keepStatus: Boolean(sharedBy[row]) });
+    });
+  }
+  await dropListing(itemIdOf(key.link));
+  return { success: true };
+}
+
+// Clears the cells AliSwift writes in `row` (name, prices, link, photo, status, and the SKU unless a formula makes it), so
+// formulas in the row stay, and remembers the row for the next Add and takes it out of the sheet's index. The one place a
+// cell is cleared. Runs inside the write queue.
+async function clearRow(sheet, row, { keepStatus = false } = {}) {
+  const cols = [sheet.keywordsCol, sheet.priceCol, sheet.includeSalePrice && sheet.salePriceCol, sheet.linkCol, sheet.imageCol, !keepStatus && sheet.statusCol, !sheet.skuFormula && sheet.skuCol];
+  const ranges = [...new Set(cols.filter(Boolean))].map((col) => `${quote(sheet.sheetTab)}!${col}${row}`);
+  await sheetsFetch(`/${sheet.id}/values:batchClear`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ ranges }) });
+  const slot = `index:${sheet.id}`;
+  const clearedKey = `cleared:${sheet.id}`;
+  const kept = await chrome.storage.local.get({ [clearedKey]: [], [slot]: null });
+  const items = Object.fromEntries(Object.entries(kept[slot]?.items ?? {}).filter(([, item]) => item.row !== row));
+  await chrome.storage.local.set({ [clearedKey]: [...new Set([...kept[clearedKey], row])].slice(-500), ...(kept[slot] && { [slot]: { ...kept[slot], items } }) });
 }
 
 async function saveLocal(data) {
@@ -644,7 +688,8 @@ async function listProducts(sheetId) {
   return { success: true, products: (await readProducts(await sheetById(sheetId))).products };
 }
 
-// Remove is this with "Discontinued", restore with "Not Listed". There is no delete anywhere.
+// The dashboard's status menu: "Removed" is this with "Discontinued", restore with "Not Listed". The row stays in the
+// sheet; Delete (deleteProduct) is what clears it.
 async function setStatus(sheetId, key, status) {
   if (!PRODUCT_STATUSES.includes(status)) throw new Error("Unknown status.");
   if (!key || !(key.sku || key.link || key.title)) throw new Error("Say which product to change.");
@@ -1364,7 +1409,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const IMAGE_BYTES = 3 * 1024 * 1024;
 
 // The AliExpress item number in a product link, or "".
-const itemIdOf = (link) => /(?:\/item\/|[?&]productId=)(\d{6,})/.exec(String(link ?? ""))?.[1] ?? "";
+const itemIdOf = (link) => /(?:\/item\/|\/i\/|[?&]productId=)(\d{6,})/.exec(String(link ?? ""))?.[1] ?? "";
 
 // What a listing is filed under: the product's AliExpress item number.
 const listingKey = (product) => itemIdOf(product?.link);
@@ -1476,13 +1521,15 @@ async function generateListing({ sheetId, product, force } = {}) {
   return { success: true, key, ...record };
 }
 
-/* The listing queue. Add queues the product's listing 3 minutes ahead (the undo window: a product removed in that time
-   never costs a request), and the ai-queue alarm writes at most one a minute, so ten adds never meet a busy key. The
-   queue lives in storage.local, so it survives the worker stopping and the browser restarting.
+/* The listing queue. Add queues the product's listing a minute ahead (a product removed in that time never costs a
+   request), and the ai-queue alarm (every minute) and the worker's start write what is due, one after another, five at
+   most per run; the key's own 4 s gap keeps ten adds from meeting a busy key. The queue lives in storage.local, so it
+   survives the worker stopping and the browser restarting.
    aiQueue: [{ itemId, sheetId, product, notBefore, tries, error, failed? }] */
 
-const QUEUE_DELAY = 3 * 60000;
+const QUEUE_DELAY = 60000;
 const QUEUE_TRIES = 5;
+const QUEUE_BATCH = 5;
 
 // One change of the queue at a time: `change` gets the list and returns the new one.
 let aiQueueLine = Promise.resolve();
@@ -1510,31 +1557,57 @@ async function dropListing(itemId) {
   await chrome.storage.local.remove(`listing:${itemId}`);
 }
 
-// Writes the first due job's listing. A rate or quota error waits until the key is back; any other error waits two
-// minutes; the fifth failure marks the job failed (the dashboard's button then writes it). With no AI key nothing runs.
-// A key problem only settings can fix (KEY_FIXES) uses no try: the job stops until the keys change.
-// One run at a time: a call while one runs gets that run (the eBay panel's Write now waits on it).
+// Writes the due jobs' listings, first come first. A rate or quota error waits until the key is back; any other error
+// waits two minutes; the fifth failure marks the job failed (the dashboard's button then writes it). With no AI key the
+// due jobs are marked failed with "nokey" (so no card claims to be writing). A key problem only settings can fix
+// (KEY_FIXES) uses no try: the job stops until the keys change. The run stops at the first failure.
+// One run at a time: a call while one runs makes that run look once more before it ends, and gets it (the eBay panel's
+// Write now waits on it), so a job queued a moment after the run began is not missed.
 const KEY_FIXES = ["nokey", "invalid-key", "bad-model"];
 chrome.storage.onChanged?.addListener((changes, area) => {
   if (area === "local" && changes.aiKeys) editAiQueue((q) => q.map((j) => (j.failed && KEY_FIXES.includes(j.error) ? { ...j, failed: false, notBefore: Date.now() } : j)));
 });
 let aiQueueRun = null;
+let aiQueueAgain = false;
 function runAiQueue() {
-  return (aiQueueRun ??= runDueJob().finally(() => (aiQueueRun = null)));
+  if (aiQueueRun) {
+    aiQueueAgain = true;
+    return aiQueueRun;
+  }
+  aiQueueRun = (async () => {
+    do {
+      aiQueueAgain = false;
+      await runDueJobs();
+    } while (aiQueueAgain);
+  })().finally(() => (aiQueueRun = null));
+  return aiQueueRun;
 }
+async function runDueJobs() {
+  for (let i = 0; i < QUEUE_BATCH; i++) if (!(await runDueJob())) return;
+}
+// Also when the worker starts (the dashboard opening wakes it): whatever came due while it slept is written now.
+runAiQueue().catch(() => {});
+// True when a job was written, so the run may take the next.
 async function runDueJob() {
   const now = Date.now();
   const { aiQueue } = await chrome.storage.local.get({ aiQueue: [] });
   const job = aiQueue.find((j) => !j.failed && j.notBefore <= now);
-  if (!job || !(await aiPool()).length) return;
+  if (!job) return false;
+  if (!(await aiPool()).length) {
+    await editAiQueue((q) => q.map((j) => (j.failed ? j : { ...j, failed: true, error: "nokey" })));
+    return false;
+  }
   try {
     await generateListing({ sheetId: job.sheetId, product: job.product });
     await editAiQueue((q) => q.filter((j) => j.itemId !== job.itemId));
+    return true;
   } catch (error) {
     const keys = KEY_FIXES.includes(error.code);
     const tries = job.tries + (keys ? 0 : 1);
     const notBefore = error.retryAt > now ? error.retryAt : now + 2 * 60000;
     await editAiQueue((q) => q.map((j) => (j.itemId === job.itemId ? { ...j, tries, error: error.code ?? "", provider: error.provider ?? "", notBefore, ...((keys || tries >= QUEUE_TRIES) && { failed: true }) } : j)));
+    if (error.code !== "rate" && error.code !== "quota") diagError("queue", error);
+    return false;
   }
 }
 

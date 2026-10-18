@@ -497,17 +497,18 @@ test("rates saved at the same moment all survive", async () => {
 
 /* Your data stays yours */
 
-test("no code the service worker loads can delete rows, and only Remove clears cells", () => {
+test("no code the service worker loads can delete rows, and only clearRow clears cells (Remove and Delete, of one product's row)", () => {
   const forbidden = /deleteDimension|deleteRange|deleteSheet|:clear|values:clear|clearBasicFilter/;
   for (const file of ["background.js", "lib/shared.js", "lib/template.js"]) {
     assert.doesNotMatch(read(file), forbidden, file);
   }
-  // The one clear is Remove's, of the product's own row.
+  // The one clear is clearRow's, and only removeFromSheet and deleteProduct call it.
   const src = read("background.js");
   assert.equal(src.match(/batchClear/g).length, 1);
   const at = src.indexOf("batchClear");
-  const from = src.indexOf("async function removeFromSheet");
+  const from = src.indexOf("async function clearRow");
   assert.ok(at > from && at < src.indexOf("\n}\n", from));
+  assert.equal(src.match(/\bclearRow\(/g).length, 3); // its definition and its two callers
   for (const file of ["lib/shared.js", "lib/template.js"]) assert.doesNotMatch(read(file), /batchClear/, file);
 });
 
