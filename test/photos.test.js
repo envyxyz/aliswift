@@ -391,7 +391,7 @@ test("B7. photoBox, photoZone, and photoCount query the DOM correctly for upload
     },
   };
   assert.equal(photoZone(rootZone), zoneEl);
-  assert.equal(zoneQuery, '[class*="uploader-ui-dropzone"]');
+  assert.equal(zoneQuery, "#uploader-ui-dropzone .file-dropzone"); // eBay's inner drop zone first
   assert.equal(photoZone({ querySelector: () => null }), null);
 
   // photoCount counts thumbnails matching the compound selector

@@ -182,8 +182,8 @@ async function aiPrices() {
 
 // The product on the page. `currency` is what price and salePrice are in ("" when the page's currency is
 // unknown); `kind` says how the page relates to the sheet (see currencyKind). When the page's currency is not
-// the sheet's, `fx` holds the raw amounts and the rate. With no rate (fx.rate null) price is the raw page
-// amount and nothing may be saved until the user supplies one. For the library (`where` is "local") there is no
+// the sheet's, `fx` holds the raw amounts and the rate. With no rate (fx.rate null: the live rate couldn't
+// be fetched) price is the raw page amount and nothing may be saved. For the library (`where` is "local") there is no
 // sheet to compare with: prices stay as shown (cost = price + shipping, no sell price), with their currency, and
 // are converted and priced by the sheet's own rules when the product is moved to a sheet.
 async function scrapeRow(where = dest) {
@@ -213,7 +213,7 @@ async function scrapeRow(where = dest) {
     row.kind = currencyKind(from, to);
     let rate = 1;
     if (row.kind === "convert") {
-      const found = await ask({ action: "rate", data: { sheetId: sheet.id, from, to } });
+      const found = await ask({ action: "rate", data: { from, to } });
       rate = found?.rate || null;
       row.fx = { from, to, price, shipping, rate, source: found?.source, at: found?.at };
     }

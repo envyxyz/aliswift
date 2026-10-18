@@ -233,6 +233,14 @@ footer a {
   --dialog-w: 520px;
 }
 
+#editDialog .dialog-body {
+  scrollbar-width: none;
+}
+
+#editDialog .dialog-body::-webkit-scrollbar {
+  display: none;
+}
+
 #addDialog {
   --dialog-w: 440px;
 }
@@ -273,10 +281,11 @@ fieldset.bare {
   border: 0;
 }
 
-.code {
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+/* The create form has two fields per row (the shared .fields-row has three). */
+@media (min-width: 472px) {
+  #addDialog .fields-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .backup-actions {
@@ -332,6 +341,17 @@ fieldset.bare {
 .col-row input.prefix {
   width: 96px;
   text-align: left;
+}
+
+.col-row.inline {
+  cursor: pointer;
+}
+
+.col-row.inline span {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.35;
 }
 
 .cols-head {

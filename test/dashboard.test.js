@@ -525,13 +525,10 @@ test("dev stub adheres to backend message reply shapes and error codes", async (
   assert.equal(typeof moveRes.skipped, "number");
   assert.equal(typeof moveRes.needRate, "number");
 
-  // rate & setRate
-  const rateRes = await sendMessage({ action: "rate", data: { sheetId: "sheet-uk-primary", from: "PKR", to: "GBP" } });
+  // rate (the live lookup; there is no typed rate any more)
+  const rateRes = await sendMessage({ action: "rate", data: { from: "PKR", to: "GBP" } });
   assert.equal(rateRes.success, true);
   assert.equal(typeof rateRes.rate, "number");
-
-  const setRateRes = await sendMessage({ action: "setRate", data: { from: "PKR", to: "GBP", rate: 375 } });
-  assert.equal(setRateRes.success, true);
 });
 
 // 15. Dates keep their day in every time zone (H10)
@@ -720,7 +717,7 @@ test("the dashboard only sends the messages it should, and never puts data into 
   const js = readFile("dashboard/dashboard.js");
   const actions = new Set([...js.matchAll(/action: "(\w+)"/g)].map((m) => m[1]));
   // Nothing here can delete a row or clear a cell: removing is setStatus, and the rest only reads, adds or changes a product's two prices.
-  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "setRate", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks"];
+  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks"];
   for (const action of actions) assert.ok(allowed.includes(action), `unexpected message ${action}`);
   assert.ok(actions.has("generateListing") && actions.has("saveListing"));
   for (const [line] of js.matchAll(/^.*\.innerHTML.*$/gm)) assert.match(line, /\.innerHTML = "";?\s*$/, line); // only ever cleared

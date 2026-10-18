@@ -9,7 +9,7 @@ const { TEMPLATE_LAYOUT } = shared;
 
 const IDS = [10, 20, 30]; // Dashboard, Inventory, Orders
 const build = (extra = {}) =>
-  buildWorkbook({ name: "My store", region: "UK", homeCurrency: "pkr", rate: 374.37, ...extra });
+  buildWorkbook({ name: "My store", region: "UK", ...extra });
 const setup = (extra) => build(extra).setup(IDS);
 
 const col = (letters) => [...letters].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1;
@@ -45,19 +45,19 @@ test("the workbook has the three tabs, sized like the template", () => {
   );
 });
 
-test("headers are exact, with the marketplace and home currency filled in", () => {
+test("headers are exact, with the marketplace currency filled in", () => {
   for (const [region, cur] of [["UK", "GBP"], ["US", "USD"], ["DE", "EUR"], ["AU", "AUD"]]) {
     const reqs = setup({ region });
     const header = (sheetId, row, n) =>
       Array.from({ length: n }, (_, i) => written(reqs, sheetId, `${String.fromCharCode(65 + i)}${row}`).userEnteredValue.stringValue);
     assert.deepEqual(header(20, 2, 15), [
       "SKU", "Product Name", "Supplier URL", `Cost Price (${cur})`, `Sell Price (${cur})`, "Ad Rate %",
-      `Ad Cost (${cur})`, `eBay Fee (${cur})`, `Order Fee (${cur})`, `Net Profit (${cur})`, "Net Profit (PKR)",
+      `Ad Cost (${cur})`, `eBay Fee (${cur})`, `Order Fee (${cur})`, `Net Profit (${cur})`, `Net Profit (${cur})`,
       "Margin %", "Status", "Notes", "Image URL",
     ]);
     assert.deepEqual(header(30, 1, 12), [
       "Order Number", "SKU", "Product Name", "Order Date", "QTY", `Sell Price (${cur})`, `Cost Price (${cur})`,
-      `Profit (${cur})`, "Profit (PKR)", "Status", "Tracking Number", "Notes",
+      `Profit (${cur})`, `Profit (${cur})`, "Status", "Tracking Number", "Notes",
     ]);
   }
 });
@@ -84,7 +84,7 @@ test("the fee strip has the seven label and value pairs for each region", () => 
   }
   assert.deepEqual(Object.keys(REGION_SHEETS), Object.keys(REGIONS)); // a region without a fee strip can't build a sheet
   for (const region of Object.keys(REGIONS)) {
-    const reqs = setup({ region, homeCurrency: "usd" });
+    const reqs = setup({ region });
     const pairs = expected[region].map((_, i) => [
       written(reqs, 20, `${String.fromCharCode(65 + i * 2)}1`).userEnteredValue.stringValue,
       written(reqs, 20, `${String.fromCharCode(66 + i * 2)}1`).userEnteredValue.numberValue,
@@ -158,29 +158,15 @@ test("the fee strip and fee columns are hidden; the Image URL column is in view,
     .map(({ updateDimensionProperties: { range: r } }) => [r.sheetId, r.dimension, r.startIndex, r.endIndex]);
   assert.deepEqual(hidden, [
     [10, "ROWS", 0, 4], // the Dashboard's exchange-rate block
+    [10, "ROWS", 10, 11], // Total Revenue (second currency)
+    [10, "ROWS", 12, 13], // Total Profit (second currency)
     [20, "ROWS", 0, 1], // the fee strip
     [20, "COLUMNS", 6, 9], // G:I
+    [20, "COLUMNS", 10, 11], // Net Profit (second currency)
+    [30, "COLUMNS", 8, 9], // Profit (second currency)
   ]);
   assert.equal(TEMPLATE.inventory.header.values[14], "Image URL"); // column O, the one the saved settings point at
   assert.match(TEMPLATE.inventory.header.notes.O, /photo/);
-});
-
-test("with the same currency on both sides the repeated home-currency rows and columns are hidden", () => {
-  const hiddenOf = (extra) =>
-    setup(extra)
-      .filter((r) => r.updateDimensionProperties?.properties.hiddenByUser)
-      .map(({ updateDimensionProperties: { range: r } }) => [r.sheetId, r.dimension, r.startIndex, r.endIndex]);
-  assert.deepEqual(hiddenOf({ homeCurrency: "GBP" }), [
-    [10, "ROWS", 0, 4],
-    [10, "ROWS", 10, 11], // Total Revenue (home)
-    [10, "ROWS", 12, 13], // Total Profit (home)
-    [20, "ROWS", 0, 1],
-    [20, "COLUMNS", 6, 9],
-    [20, "COLUMNS", 10, 11], // Net Profit (home)
-    [30, "COLUMNS", 8, 9], // Profit (home)
-  ]);
-  // The next sheet, with different currencies, is unaffected.
-  assert.equal(hiddenOf({}).length, 3);
 });
 
 test("only the sheet ids Google returned are used, and rows are frozen as in the template", () => {
@@ -194,7 +180,7 @@ test("only the sheet ids Google returned are used, and rows are frozen as in the
 
 test("the config saved for a new sheet matches the template's own columns", () => {
   const { config } = build({ skuPrefix: "UK-" });
-  assert.deepEqual(config, { ...TEMPLATE_LAYOUT, skuPrefix: "UK-", region: "UK" });
+  assert.deepEqual(config, { ...TEMPLATE_LAYOUT, skuPrefix: "UK-", skuFormula: true, region: "UK" });
 
   // TEMPLATE_LAYOUT is what the Edit dialog's preset fills in; it must agree with the workbook.
   const keyed = (tab) => Object.fromEntries(tab.columns.filter((c) => c.key).map((c) => [c.key, c.col]));
@@ -213,9 +199,7 @@ test("the config saved for a new sheet matches the template's own columns", () =
 
 test("nothing the user types can become part of a formula", () => {
   const bad = [
-    { homeCurrency: 'PKR")+1' }, { homeCurrency: "PK" }, { homeCurrency: "PKRR" }, { homeCurrency: "" },
     { skuPrefix: 'SKU-"&A1&"' }, { skuPrefix: "123456789" }, { skuPrefix: "A B" },
-    { rate: -1 }, { rate: 0 }, { rate: "1+1" }, { rate: NaN }, { rate: 1e12 }, { rate: "1e-9" },
     { region: "XX" }, { region: "__proto__" }, { name: "  " },
   ];
   for (const extra of bad) assert.throws(() => build(extra), Error, JSON.stringify(extra));
@@ -225,14 +209,17 @@ test("nothing the user types can become part of a formula", () => {
   assert.ok(!JSON.stringify(setup({ name: "=1+1" })).includes("=1+1"));
 });
 
-test("the exchange rate is a live lookup with a fallback, or 1 when both currencies match", () => {
-  const rate = (extra) => written(setup(extra), 10, "D2");
-  assert.equal(rate().userEnteredValue.formulaValue, '=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),374.37)');
-  assert.equal(rate({ rate: "" }).userEnteredValue.formulaValue, '=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),"")');
-  assert.equal(rate({ region: "US", homeCurrency: "eur", rate: null }).userEnteredValue.formulaValue, '=IFERROR(GOOGLEFINANCE("CURRENCY:USDEUR"),"")');
-  assert.deepEqual(rate({ homeCurrency: "GBP" }).userEnteredValue, { numberValue: 1 });
-  // Building a same-currency sheet must not change the template for the next one.
-  assert.match(rate().userEnteredValue.formulaValue, /GOOGLEFINANCE/);
+test("the sheet is in the marketplace currency: the rate cell is 1 and nothing looks a rate up", () => {
+  for (const region of ["UK", "US", "GLOBAL"]) {
+    const reqs = setup({ region });
+    assert.deepEqual(written(reqs, 10, "D2").userEnteredValue, { numberValue: 1 });
+    assert.ok(!JSON.stringify(reqs).includes("GOOGLEFINANCE"));
+  }
+});
+
+test("the SKU prefix chosen at creation is built into the SKU formula", () => {
+  assert.equal(repeated(setup({ skuPrefix: "OR-" }), 20, "A", 3).cell.userEnteredValue.formulaValue, '=IF($B3="","","OR-"&TEXT(ROW()-2,"00"))');
+  assert.equal(repeated(setup({ skuPrefix: "" }), 20, "A", 3).cell.userEnteredValue.formulaValue, '=IF($B3="","",""&TEXT(ROW()-2,"00"))');
 });
 
 test("alternate rows of the notes columns are banded by a rule, not 1000 requests", () => {

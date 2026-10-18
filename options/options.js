@@ -59,7 +59,6 @@ const TAB_NAMES = tabs.map((t) => t.id.slice(4));
 
 let sheets = [];
 let activeId = "";
-let homeCurrency = "";
 let editingId = "";
 let tab = "";
 let statusTimer;
@@ -92,7 +91,6 @@ async function persist(list = sheets, id = activeId) {
     await chrome.storage.sync.set({
       sheets: list,
       activeSheetId: id,
-      ...(homeCurrency && { homeCurrency }),
     });
     sheets = list;
     activeId = id;
@@ -459,20 +457,9 @@ $("editDialog").addEventListener("close", () => {
 let adding = false; // a create request is in flight
 let orphanId = ""; // a file that was created but not set up, so Retry setup can finish it
 
-// With the same currency on both sides there is no rate to look up.
-function syncRate() {
-  const same = $("homeCur").value.trim().toUpperCase() === REGIONS[$("region").value].currency;
-  $("rate").disabled = same;
-  if (same) $("rate").value = "";
-  $("rate").placeholder = same ? "Not needed" : "e.g. 374.37";
-}
-
 function validateAuto() {
-  const cur = $("homeCur");
-  cur.setCustomValidity(/^[A-Za-z]{3}$/.test(cur.value.trim()) ? "" : "Use a 3-letter currency code, like PKR.");
-  const rate = $("rate").value;
-  // 0.000001 is the smallest rate the service worker accepts.
-  $("rate").setCustomValidity(rate === "" || Number(rate) >= 1e-6 ? "" : "Enter a rate of 0.000001 or more, or leave this empty.");
+  const pfx = $("addSkuPrefix");
+  pfx.setCustomValidity(/^[A-Za-z0-9-]{0,8}$/.test(pfx.value) ? "" : "Use 8 characters or fewer: letters, numbers and dashes.");
   checkName($("sheetName"));
 }
 
@@ -515,19 +502,15 @@ function openAdd() {
   orphanId = "";
   setNotice($("addNotice"), "");
   setBusy(false, "Create sheet");
-  $("homeCur").value = homeCurrency;
-  syncRate();
   validateAuto();
   $("addDialog").showModal();
 }
 
 async function createAuto() {
-  const rate = $("rate").value;
   const data = {
     name: $("sheetName").value.trim(),
     region: $("region").value,
-    homeCurrency: $("homeCur").value.trim().toUpperCase(),
-    rate: rate === "" ? null : Number(rate),
+    skuPrefix: $("addSkuPrefix").value.trim(),
     ...(orphanId && { resumeId: orphanId }),
   };
   setNotice($("addNotice"), "");
@@ -550,7 +533,6 @@ async function createAuto() {
   const { sheet } = res;
   sheets = [...sheets, sheet];
   activeId = sheet.id;
-  homeCurrency = data.homeCurrency;
   orphanId = "";
   setBusy(false, "Create sheet");
   $("addDialog").close();
@@ -569,17 +551,7 @@ addForm.addEventListener("submit", (e) => {
   return createAuto();
 });
 
-addForm.addEventListener("change", (e) => {
-  if (e.target === $("region")) syncRate();
-});
-
-addForm.addEventListener("input", (e) => {
-  if (e.target === $("homeCur")) {
-    $("homeCur").value = $("homeCur").value.toUpperCase();
-    syncRate();
-  }
-  validateAuto();
-});
+addForm.addEventListener("input", validateAuto);
 
 // A half-built sheet must not be walked away from by accident.
 $("addDialog").addEventListener("cancel", (e) => {
@@ -1476,7 +1448,6 @@ $("impGo").addEventListener("click", async () => {
   }
   sheets = next.sheets;
   activeId = next.activeSheetId;
-  if (next.homeCurrency) homeCurrency = next.homeCurrency;
   if ("showPageButton" in next) $("showPageButton").checked = next.showPageButton;
   if ("includeImages" in next) {
     $("includeImages").checked = next.includeImages;
@@ -1590,7 +1561,6 @@ profileButton($("profile"));
     activeSheetId: "",
     showPageButton: true,
     includeImages: false,
-    homeCurrency: "",
     aiPhotos: false,
     aiInstructions: "",
     diagOn: true,
@@ -1598,7 +1568,6 @@ profileButton($("profile"));
   });
   sheets = stored.sheets;
   activeId = stored.activeSheetId;
-  homeCurrency = stored.homeCurrency;
   $("showPageButton").checked = stored.showPageButton;
   $("includeImages").checked = stored.includeImages;
   imagesNoteFor(stored.includeImages);

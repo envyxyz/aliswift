@@ -4,8 +4,6 @@ const {
   SHEET_DEFAULTS,
   detectCurrency,
   currencyKind,
-  rateFromCell,
-  validRate,
   nextSku,
   priceProduct,
   cleanSave,
@@ -56,41 +54,6 @@ test("extra-shared: currencyKind relationships", () => {
   assert.equal(currencyKind("USD", ""), "unset");
   assert.equal(currencyKind("", "GBP"), "unknown");
   assert.equal(currencyKind("", ""), "unknown");
-});
-
-test("extra-shared: rateFromCell formula and number extraction", () => {
-  // How many USD (from) buy one PKR (to)
-  // Formula referencing CURRENCY:PKRUSD returns n
-  const fDirect = '=IFERROR(GOOGLEFINANCE("CURRENCY:PKRUSD"),0.00359)';
-  assert.equal(rateFromCell(fDirect, 0.00359, "USD", "PKR"), 0.00359);
-
-  // Inverted formula referencing CURRENCY:USDPKR returns 1 / n
-  const fInv = '=IFERROR(GOOGLEFINANCE("CURRENCY:USDPKR"),278.50)';
-  assert.equal(rateFromCell(fInv, 278.50, "USD", "PKR"), 1 / 278.50);
-
-  // Unrelated formula returns null
-  assert.equal(rateFromCell(fInv, 278.50, "GBP", "PKR"), null);
-  // Null formula returns null (never guesses rate without formula verification)
-  assert.equal(rateFromCell(null, 1.25, "USD", "GBP"), null);
-  // Negative or non-numeric values rejected
-  assert.equal(rateFromCell(fDirect, -10, "USD", "PKR"), null);
-  assert.equal(rateFromCell(fDirect, 0, "USD", "PKR"), null);
-});
-
-test("extra-shared: validRate boundary checking", () => {
-  assert.equal(validRate(1), true);
-  assert.equal(validRate(0.0001), true);
-  assert.equal(validRate(10000000), true);
-  assert.equal(validRate("374.37"), true);
-  // Invalid bounds (min is 1e-6, max is 1e7)
-  assert.equal(validRate(0), false);
-  assert.equal(validRate(1e-7), false);
-  assert.equal(validRate(10000001), false);
-  assert.equal(validRate(-1), false);
-  assert.equal(validRate("not a rate"), false);
-  assert.equal(validRate(Infinity), false);
-  assert.equal(validRate(null), false);
-  assert.equal(validRate(undefined), false);
 });
 
 // 2. SKU generation with gaps and prefixes

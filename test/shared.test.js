@@ -16,9 +16,6 @@ const {
   afterRemoval,
   detectCurrency,
   currencyKind,
-  rateFromCell,
-  validRate,
-  RATE_MESSAGE,
   destination,
   httpsUrl,
   cleanSave,
@@ -131,12 +128,6 @@ test("detectCurrency: a bare ¥ is the yen or the yuan, settled by the cookie, e
   assert.equal(detectCurrency(jar("USD"), "$4.77", "ja"), "USD"); // the language only matters for a ¥
 });
 
-test("validRate accepts what setRate accepts and nothing else", () => {
-  for (const rate of [1e-6, 0.5, 374.37, "374.37", 1e7]) assert.equal(validRate(rate), true, String(rate));
-  for (const rate of [0, 1e-7, -1, 1e7 + 1, 1e9, NaN, "x", "", null, undefined]) assert.equal(validRate(rate), false, String(rate));
-  assert.match(RATE_MESSAGE, /0\.000001.*10,000,000/);
-});
-
 test("detectCurrency falls back to the cookie only when the text does not say", () => {
   const jar = (c) => `a=b; aep_usuc_f=site=glo&c_tp=${c}&region=PK&b_locale=en_US; x=y`;
   assert.equal(detectCurrency(jar("PKR"), "$4.77"), "PKR"); // a bare $ is ambiguous
@@ -157,19 +148,6 @@ test("currencyKind says how a page's prices relate to the sheet", () => {
   assert.equal(currencyKind("PKR", ""), "unset"); // the sheet has no marketplace
   assert.equal(currencyKind("", "GBP"), "unknown"); // the page's currency is not known
   assert.equal(currencyKind("", ""), "unknown");
-});
-
-test("rateFromCell takes the cell only when its formula looks up this very pair", () => {
-  const f = '=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),374.37)';
-  assert.equal(rateFromCell(f, 374.5, "PKR", "GBP"), 374.5); // 1 GBP = 374.5 PKR
-  assert.equal(rateFromCell(f, 374.5, "GBP", "PKR"), 1 / 374.5); // the inverse pair
-  assert.equal(rateFromCell(f.toLowerCase(), 4, "pkr", "gbp"), 4);
-  assert.equal(rateFromCell(f, 374.5, "PKR", "USD"), null); // another pair
-  assert.equal(rateFromCell("", 374.5, "PKR", "GBP"), null); // a typed number is not a lookup
-  assert.equal(rateFromCell(undefined, 374.5, "PKR", "GBP"), null);
-  assert.equal(rateFromCell('=GOOGLEFINANCE("CURRENCY:GBPUSD")', 1.3, "PKR", "GBP"), null);
-  for (const bad of [0, -2, NaN, Infinity, undefined, null, "x"]) assert.equal(rateFromCell(f, bad, "PKR", "GBP"), null, String(bad));
-  assert.equal(rateFromCell("=CURRENCY:", 5, "", ""), null); // empty codes match every formula
 });
 
 test("regionForCurrency picks the first marketplace that sells in a currency, and UK for any other", () => {

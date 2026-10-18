@@ -47,7 +47,7 @@ You can keep several sheets, each with its own column layout, pricing rules and 
 - **Settings backup**: export and import your sheets, settings, local library, and photo links as a file
 - **Formula or margin pricing**: customize rules such as `costPrice * 1.7` or `(costPrice + 2) * 1.5`
 - **Landed cost**: combines item price, visible shipping cost, and optional extra buffer cost
-- **Currency handling**: converts supplier currencies using sheet exchange rates or manual entries
+- **Currency handling**: converts supplier currencies automatically at the live rate from [ExchangeRate-API](https://www.exchangerate-api.com)
 - **.99 rounding**: rounds sell prices up to clean retail endings (4.77 becomes 4.99)
 - **Title cleanup**: caps word count and removes unwanted noise words
 - **Safe writes**: writes plain values into the next free row of your sheet, and only adds missing columns when you explicitly confirm; never deletes rows, and clears only the cells it wrote itself when you press Remove from Sheet
@@ -90,7 +90,7 @@ Then follow steps 2 to 4 above and select the cloned folder. There is no build s
 If you do not sign in, AliSwift runs in local library mode. The button reads **Save to library**. Products are stored safely on your device in local storage (`chrome.storage.local`). You can browse them on the dashboard, view their supplier links, and remove or restore them.
 
 ### 2. Create sheet
-Open settings (gear icon in popup), click **Create sheet** (or **Create a sheet** in the empty state), choose your marketplace (eBay UK, US, Global, Germany, Australia or Canada) and enter your currency (for example GBP, USD, or PKR). Click **Create sheet**. AliSwift creates a spreadsheet in your Google Drive with Dashboard, Inventory and Orders tabs, and configures fee calculations automatically. The Inventory tab includes an Image URL column.
+Open settings (gear icon in popup), click **Create sheet** (or **Create a sheet** in the empty state), choose your marketplace (eBay UK, US, Global, Germany, Australia or Canada) and, if you like, a SKU prefix (default `SKU-`). Click **Create sheet**. AliSwift creates a spreadsheet in your Google Drive with Dashboard, Inventory and Orders tabs, and configures fee calculations automatically. The Inventory tab includes an Image URL column.
 
 ### 3. Import from Google Sheets
 Choose **Import from Google Sheets** to pick a sheet from your Drive or paste its link. Sign-in requests a single permission list that includes read-only Drive metadata (`drive.metadata.readonly`), which is required whether picking a sheet or pasting a link. AliSwift reads sheet headers and sample rows to identify columns. If you save your Gemini API key in the AI tab, Gemini proposes the column mapping automatically. Import sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns with personal data (such as names, addresses, phone numbers, or emails); always check the preview before confirming. A mapping request waits up to 15 s and is not retried. If the sheet has no SKU column or no Image column mapped, AliSwift asks whether to add the missing columns before adding the sheet. Choosing yes adds them after the last used column of the Inventory tab, numbers existing products with SKUs, and fills known photo links without touching any existing cells. You can also decline, or add them later using the Edit dialog.
@@ -124,7 +124,7 @@ cost price = item price + shipping (if shown on page) + extra cost
 sell price = formula(cost price)   or   cost price * (1 + margin / 100)
 ```
 
-When supplier currency differs from your sheet currency, conversion uses the exchange rate defined in your sheet or configured manually.
+When supplier currency differs from your sheet currency, AliSwift converts it at the live rate from ExchangeRate-API (cached 12 hours). The sheet itself stays in the marketplace currency.
 
 ## Privacy
 

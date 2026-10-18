@@ -98,11 +98,11 @@ const PRODUCT = { sku: "SKU-01", title: "Skull ring", link: "https://www.aliexpr
 const answer = (obj) => ({ json: { candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] } });
 const named = (name, message) => Object.assign(new Error(message), { name });
 
-function setup({ local = {}, gemini = [] } = {}) {
+function setup({ local = {}, gemini = [], sheets } = {}) {
   const calls = [];
   const tabs = [];
   const store = { ...local };
-  const synced = { sheets: [{ id: SHEET, name: "UK", region: "UK" }, { id: SHEET_US, name: "US", region: "US" }] };
+  const synced = { sheets: sheets ?? [{ id: SHEET, name: "UK", region: "UK" }, { id: SHEET_US, name: "US", region: "US" }] };
   const queue = [...gemini];
   let listener;
   const chrome = {
@@ -389,7 +389,38 @@ test("the panel's cards are the products with a listing or a queued one, from st
   const list = (await big.ask({ action: "ebayProducts" }, FORM)).products;
   assert.equal(list.length, 60);
   assert.equal(list[0].sku, "S-59"); // newest first
-  assert.equal(big.calls.length, 1);
+  assert.equal(big.calls.length, 2); // one read per configured sheet (each is also checked for drafts with no listing)
+});
+
+test("the panel takes each SKU from the sheet, and offers a Draft row that has no listing or job yet", async () => {
+  const link = (id) => `https://www.aliexpress.com/item/${id}.html`;
+  const NEW = "1005006666666666";
+  const OFF = "1005007777777777";
+  const sheet = { id: SHEET, name: "UK", region: "UK", sheetTab: "Inventory", startRow: 3, skuCol: "A", keywordsCol: "B", linkCol: "C", salePriceCol: "E", statusCol: "M", imageCol: "O", skuFormula: true };
+  const local = {
+    // saved while the sheet's config still said SKU-: the formula column shows OR-01
+    [`listing:${ID}`]: { ...LISTING, sheetId: SHEET, createdAt: 5, product: { ...PRODUCT, sku: "SKU-01" } },
+  };
+  // Columns in the order the worker asks for them: link, sell price, status, SKU, title, image.
+  const rows = { json: { valueRanges: [
+    { values: [[link(ID), link(NEW), link(OFF)]] },
+    { values: [[8.99, 13.59, 4]] },
+    { values: [["Draft", "Draft", "Not Listed"]] },
+    { values: [["OR-01", "OR-02", "OR-03"]] },
+    { values: [["Skull ring", "Snake chain", "Other"]] },
+    { values: [["", "https://ae01.alicdn.com/kf/x.jpg", ""]] },
+  ] } };
+  const t = setup({ local, sheets: [sheet], gemini: [rows, rows, rows] });
+  const { products } = await t.ask({ action: "ebayProducts" }, FORM);
+  assert.deepEqual(products, [
+    { sheetId: SHEET, key: ID, sku: "OR-01", title: "Skull ring", price: 8.99, currency: "GBP", state: "ready" },
+    { sheetId: SHEET, key: NEW, sku: "OR-02", title: "Snake chain", price: 13.59, currency: "GBP", state: "none" },
+  ]);
+  assert.equal(t.calls.length, 1);
+  // The listing-less draft can be picked like any card.
+  const picked = await t.ask({ action: "ebaySelect", sheetId: SHEET, key: NEW }, FORM);
+  assert.equal(picked.success, true, JSON.stringify(picked));
+  assert.equal(t.store.ebayTarget.sku, "OR-02");
 });
 
 test("the panel offers only Draft products, and a card can still be picked whatever its status", async () => {

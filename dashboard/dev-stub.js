@@ -900,8 +900,6 @@
             res = { success: true, moved: 5, skipped: 0, needRate: 0 };
           } else if (msg.action === "rate") {
             res = { success: true, rate: 374.37 };
-          } else if (msg.action === "setRate") {
-            res = { success: true };
           } else {
             res = { success: true };
           }

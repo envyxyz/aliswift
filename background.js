@@ -21,7 +21,6 @@ const handlers = {
   signIn: { pagesOnly: true, run: () => signIn() },
   signOut: { pagesOnly: true, run: () => signOut() },
   rate: { aliOk: true, run: (request) => getRate(request.data) },
-  setRate: { pagesOnly: true, run: (request) => setRate(request.data) },
   listProducts: { pagesOnly: true, run: (request) => listProducts(request.sheetId) },
   setStatus: { pagesOnly: true, run: (request) => setStatus(request.sheetId, request.key, request.status) },
   priceLocks: { pagesOnly: true, run: (request) => priceLocks(request) },
@@ -44,7 +43,7 @@ const handlers = {
   ebayWriteNow: { ebayOnly: true, run: () => ebayWriteNow() },
   ebayListed: { ebaySell: true, run: () => ebayListed() },
   ebayPhotoList: { ebayOnly: true, run: () => ebayPhotoList() },
-  ebayThumb: { ebayOnly: true, run: (request) => ebayThumb(request.url) },
+  ebayThumb: { ebayOnly: true, run: (request) => ebayThumb(request.url, request.full === true) },
   ebayPhotosSave: { ebayOnly: true, run: (request) => ebayPhotosSave(request) },
   importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
   aiMap: { aiTask: true, run: (request, sender) => aiMap(request, sender) },
@@ -210,9 +209,10 @@ async function signOut() {
   return { success: true };
 }
 
-// Exchange rates are stored as "<to>:<from>" = how many `from` buy one `to`. A rate read from the sheet
-// is cached for 12 hours; one the user typed is kept under "<to>:<from>:typed" until they change it.
+// Exchange rates are stored as "<to>:<from>" = how many `from` buy one `to`, from ExchangeRate-API's free open
+// endpoint (no key, CORS open, daily rates, PKR included). A rate is cached for 12 hours.
 const RATE_TTL = 12 * 60 * 60 * 1000;
+const RATE_API = "https://open.er-api.com/v6/latest/";
 const CURRENCY = /^[A-Z]{3}$/;
 
 // One write at a time: it reads the whole map and writes it back, so two at once would drop one entry.
@@ -226,36 +226,25 @@ function saveRate(key, rate) {
   return run;
 }
 
-// The rate for converting `from` prices into the sheet's `to`: cache, then the sheet's own exchange-rate
-// cell, then a rate the user typed. { success: true, rate: null } when there is none.
-async function getRate({ sheetId, from, to } = {}) {
+// The rate for converting `from` prices into the sheet's `to`: a fresh cached one, else the live one. When the
+// service can't be reached an older cached rate still beats none. { success: true, rate: null } when there is none.
+async function getRate({ from, to } = {}) {
   if (!CURRENCY.test(from) || !CURRENCY.test(to) || from === to) throw new Error("Choose two different currencies.");
   const key = `${to}:${from}`;
   const { rates } = await chrome.storage.local.get({ rates: {} });
-  if (rates[key] && Date.now() - rates[key].at < RATE_TTL) return { success: true, rate: rates[key].rate, source: "sheet", at: rates[key].at };
+  const cached = rates[key] && { success: true, rate: rates[key].rate, source: "live", at: rates[key].at };
+  if (cached && Date.now() - cached.at < RATE_TTL) return cached;
   try {
-    const { sheets } = await chrome.storage.sync.get({ sheets: [] });
-    if (!sheets.some((s) => s.id === sheetId)) throw new Error("Not one of your sheets.");
-    const fields = encodeURIComponent("sheets.data.rowData.values(userEnteredValue,effectiveValue)");
-    const file = await sheetsFetch(`/${sheetId}?ranges=${encodeURIComponent("Dashboard!D2")}&fields=${fields}`);
-    const cell = file.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values?.[0];
-    const rate = rateFromCell(cell?.userEnteredValue?.formulaValue, cell?.effectiveValue?.numberValue, from, to);
-    if (rate) {
+    const res = await fetch(RATE_API + to, { signal: AbortSignal.timeout(10000) });
+    const rate = Number((await res.json())?.rates?.[from]);
+    if (res.ok && rate > 0 && Number.isFinite(rate)) {
       await saveRate(key, rate);
-      return { success: true, rate, source: "sheet", at: Date.now() };
+      return { success: true, rate, source: "live", at: Date.now() };
     }
   } catch {
-    // ponytail: signed out, a sheet without a Dashboard tab or a failed read all end here: fall back to the typed rate.
+    // ponytail: offline or the service is down: fall back to the stale cache below.
   }
-  const typed = rates[`${key}:typed`];
-  return typed ? { success: true, rate: typed.rate, source: "typed", at: typed.at } : { success: true, rate: null };
-}
-
-async function setRate({ from, to, rate } = {}) {
-  if (!CURRENCY.test(from) || !CURRENCY.test(to) || from === to) throw new Error("Choose two different currencies.");
-  if (!validRate(rate)) throw new Error(RATE_MESSAGE);
-  await saveRate(`${to}:${from}:typed`, Number(rate));
-  return { success: true };
+  return cached || { success: true, rate: null };
 }
 
 // Calls a Google API with the user's token. A 401 means the cached token is stale or revoked: drop it and retry
@@ -1043,6 +1032,14 @@ async function photoExt(url) {
 async function ebayPhotoList() {
   const { target } = await ebayPick();
   if (!target) throw new Error("Choose a product in the AliSwift panel first.");
+  // A product saved before its gallery was kept has one photo: its page is read once for the rest, and they are kept.
+  const id = itemIdOf(target.link);
+  const slot = `details:${id}`;
+  const kept = id ? (await chrome.storage.local.get({ [slot]: null }))[slot] : null;
+  if (id && !(kept?.images?.length > 1)) {
+    const images = (await fetchGallery(id)).slice(0, PHOTOS_PER_LISTING);
+    if (images.length > (kept?.images?.length ?? 0)) await chrome.storage.local.set({ [slot]: { ...kept, images } });
+  }
   const { urls, variants } = await photoSet(target);
   const sheet = target.sheetId === LOCAL ? null : await sheetById(target.sheetId).catch(() => null);
   const { photoDir, photoSort } = await chrome.storage.sync.get(PHOTO_PREFS);
@@ -1058,13 +1055,33 @@ async function ebayPhotoList() {
   };
 }
 
-// A small copy of one of the picked product's photos for the window ({ mime, data }; null when it won't load). Fetched
-// here, since eBay's page cannot read AliExpress's image host; only the picked product's own photos.
-async function ebayThumb(url) {
+// One of the picked product's photos as { mime, data }: a small copy for the window, or (full) the photo itself, to put on
+// the listing; null when it won't load. Fetched here, since eBay's page cannot read AliExpress's image host; only the
+// picked product's own photos.
+async function ebayThumb(url, full = false) {
   const { target } = await ebayPick();
   const { urls, variants } = target ? await photoSet(target) : { urls: [], variants: [] };
   if (![...urls, ...variants.map((v) => v.image)].includes(url)) throw new Error("That isn't one of this product's photos.");
-  return { success: true, image: (await fetchImage(url + SMALL_PHOTO)) ?? (await fetchImage(url)) };
+  return { success: true, image: (!full && (await fetchImage(url + SMALL_PHOTO))) || (await fetchImage(url)) };
+}
+
+// The gallery of an AliExpress item from its public page's imagePathList, at full size; [] when the page can't be had.
+async function fetchGallery(id) {
+  try {
+    const res = await fetch(`https://www.aliexpress.com/item/${id}.html`, { credentials: "omit", signal: AbortSignal.timeout(12000) });
+    return res.ok ? pageGallery((await res.text()).slice(0, 500000)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pageGallery(html) {
+  const list = /"imagePathList"\s*:\s*\[([^\]]*)\]/.exec(String(html ?? ""))?.[1] ?? "";
+  const urls = [...list.matchAll(/"([^"]+)"/g)].map(([, raw]) => {
+    const u = raw.replace(/\\/g, "").trim();
+    return fullSizePhoto(u.startsWith("//") ? `https:${u}` : u);
+  });
+  return [...new Set(urls.filter(onPhotoHost))];
 }
 
 // The photos the seller picked in the window, saved; the folder and the sorting are kept for next time (and for the
@@ -1227,7 +1244,7 @@ async function moveLocal(sheetId) {
     for (const rec of library.filter((x) => x.status !== "Discontinued")) {
       let rate = 1;
       if (currencyKind(rec.currency, to) === "convert") {
-        if (!(rec.currency in rates)) rates[rec.currency] = (await getRate({ sheetId, from: rec.currency, to })).rate;
+        if (!(rec.currency in rates)) rates[rec.currency] = (await getRate({ from: rec.currency, to })).rate;
         rate = rates[rec.currency];
       }
       if (!rate) needRate++;
@@ -1749,23 +1766,25 @@ async function ebayProductList(only) {
     if (m && record?.listing) add(m[1], record);
   }
   for (const job of all.aiQueue ?? []) if (job?.itemId) add(job.itemId, null, job);
-  const list = only
-    ? [...cards.values()].filter((c) => c.sheetId === only.sheetId && c.key === only.key)
-    : [...cards.values()].sort((a, b) => b.at - a.at).slice(0, 200);
-  await freshRows(list, all.library);
-  return only ? list : list.filter((c) => c.status === undefined || c.status === "Draft");
+  const list = [...cards.values()].filter((c) => !only || c.sheetId === only.sheetId);
+  await freshRows(list, all.library, only ? [only.sheetId] : sheets.map((s) => s.id));
+  if (only) return list.filter((c) => c.key === only.key);
+  return list.filter((c) => c.status === undefined || c.status === "Draft").sort((a, b) => b.at - a.at).slice(0, 200);
 }
 
 // A listing keeps the sell price it was written with; the seller may have changed it in the sheet since. So the cards take
 // the price and status the sheet (one read per sheet) or the library holds now. A sheet that can't be read keeps the old
 // price, and its cards and those of a sheet with no Status column keep status undefined (offered whatever they are).
 // A variant group's status is one merged cell: its first row holds it, so the first row of a link wins.
-async function freshRows(list, library = []) {
+// The SKU is the sheet's too (a listing keeps the SKU it was saved with, which a formula SKU column may not show), and
+// a Draft row of `sheetIds` with no listing or job yet is added as a card (state "none") so the panel offers every draft.
+async function freshRows(list, library = [], sheetIds = []) {
   const set = (card, row) => {
     if (row?.salePrice > 0) {
       card.price = row.salePrice;
       card.product.salePrice = row.salePrice;
     }
+    if (row?.sku) card.sku = card.product.sku = row.sku;
     if (row) card.status = row.status;
   };
   const byLink = (rows) => {
@@ -1773,7 +1792,7 @@ async function freshRows(list, library = []) {
     for (const r of rows) if (!m.has(itemIdOf(r.link))) m.set(itemIdOf(r.link), r);
     return m;
   };
-  for (const sheetId of new Set(list.map((c) => c.sheetId))) {
+  for (const sheetId of new Set([...list.map((c) => c.sheetId), ...sheetIds])) {
     const cards = list.filter((c) => c.sheetId === sheetId);
     if (sheetId === LOCAL) {
       const byId = byLink(libToProducts(library).map((p) => ({ ...p, status: p.status || "Not Listed" })));
@@ -1782,10 +1801,20 @@ async function freshRows(list, library = []) {
     }
     try {
       const sheet = await sheetById(sheetId);
-      if (!sheet.salePriceCol && !sheet.statusCol) continue;
-      const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol, salePrice: sheet.salePriceCol, status: sheet.statusCol }, sheet.startRow);
-      const byId = byLink(c.link.map((link, i) => ({ link, salePrice: num(c.salePrice[i]), status: sheet.statusCol ? text(c.status[i]) || "Not Listed" : undefined })));
+      if (!sheet.salePriceCol && !sheet.statusCol && !sheet.skuCol) continue;
+      const cols = { link: sheet.linkCol, salePrice: sheet.salePriceCol, status: sheet.statusCol, sku: sheet.skuCol, title: sheet.keywordsCol, image: sheet.imageCol };
+      const c = await readFields(sheet.id, sheet.sheetTab, cols, sheet.startRow);
+      const byId = byLink(c.link.map((link, i) => ({
+        link, salePrice: num(c.salePrice[i]), status: sheet.statusCol ? text(c.status[i]) || "Not Listed" : undefined,
+        sku: text(c.sku[i]), title: text(c.title[i]), image: text(c.image[i]),
+      })));
       for (const card of cards) set(card, byId.get(card.key) ?? (sheet.statusCol ? { status: "Not Listed" } : null));
+      const currency = REGIONS[sheet.region]?.currency ?? "";
+      for (const [key, r] of byId) {
+        if (!key || r.status !== "Draft" || cards.some((x) => x.key === key)) continue;
+        const product = { sku: r.sku, title: r.title, link: r.link, salePrice: r.salePrice || null, image: httpsUrl(r.image), currency };
+        list.push({ sheetId, key, sku: r.sku || key, title: r.title, price: r.salePrice > 0 ? r.salePrice : null, currency, state: "none", at: 0, status: "Draft", product });
+      }
     } catch {
       // the stored price stands and the card is offered
     }

@@ -560,24 +560,6 @@ a.btn {
   height: 12px;
 }
 
-.rate-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.rate-row label {
-  margin: 0;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.rate-row input {
-  flex: 0 1 120px;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;

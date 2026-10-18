@@ -342,7 +342,7 @@
                   <label for="edit-skuPrefix">SKU prefix</label>
                   <input id="edit-skuPrefix" name="skuPrefix" class="prefix" maxlength="8" placeholder="SKU-" autocomplete="off" />
                 </div>
-                <label class="inline"><input type="checkbox" name="skuFormula" /> The SKU column holds my sheet's own formula: read it, never write it</label>
+                <label class="col-row inline"><input type="checkbox" name="skuFormula" /> <span>The SKU column holds my sheet's own formula: read it, never write it</span></label>
               </div>
             </details>
           </div>
@@ -409,26 +409,16 @@
                 </div>
                 <div>
                   <div class="title-row" data-align="end">
-                    <label for="homeCur">Your currency</label>
-                    <button type="button" class="info" aria-label="About your currency" aria-describedby="tip-cur">
+                    <label for="addSkuPrefix">SKU prefix</label>
+                    <button type="button" class="info" aria-label="About the SKU prefix" aria-describedby="tip-pfx">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-                    <span id="tip-cur" role="tooltip" class="tip">The currency you actually spend. AliSwift shows profit in this currency too, using the exchange rate.</span>
+                    <span id="tip-pfx" role="tooltip" class="tip">The sheet numbers each product with this in front: SKU-01, SKU-02 and so on. Up to 8 letters, numbers or dashes.</span>
                   </div>
-                  <input id="homeCur" class="code" maxlength="3" pattern="[A-Za-z]{3}" placeholder="PKR" required autocomplete="off" />
-                </div>
-                <div>
-                  <div class="title-row" data-align="end">
-                    <label for="rate">Backup rate <span class="muted">(optional)</span></label>
-                    <button type="button" class="info" aria-label="About the backup rate" aria-describedby="tip-rate">
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
-              </button>
-                    <span id="tip-rate" role="tooltip" class="tip">The sheet looks up the live exchange rate itself. This number is only used if the lookup ever fails.</span>
-                  </div>
-                  <input id="rate" type="number" min="0" max="10000000" step="any" inputmode="decimal" placeholder="e.g. 374.37" autocomplete="off" />
+                  <input id="addSkuPrefix" class="prefix" maxlength="8" value="SKU-" placeholder="SKU-" autocomplete="off" />
                 </div>
               </div>
-              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs. To use a sheet you already have, close this and choose Import from Google Sheets.</p>
+              <p class="muted">Creates a new Google Sheet in your Drive with Dashboard, Inventory and Orders tabs, in the marketplace's currency. Supplier prices are converted at the live exchange rate. To use a sheet you already have, close this and choose Import from Google Sheets.</p>
             </fieldset>
           </fieldset>
           <p id="addStatus" class="muted" role="status" hidden></p>

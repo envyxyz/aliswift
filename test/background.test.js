@@ -48,6 +48,7 @@ function setup(sheet, replies, { local = {}, tokens = ["token"], failure = "OAut
     chrome,
     crypto,
     URL,
+    AbortSignal,
     fetch: async (url, init) => {
       calls.push({ url, method: init?.method ?? "GET", body: init?.body && JSON.parse(init.body) });
       const { status = 200, json = {} } = replies.shift();
@@ -224,7 +225,7 @@ const created = {
   spreadsheetId: "new-sheet-id-123456",
   sheets: [11, 22, 33].map((sheetId, i) => ({ properties: { sheetId, title: ["Dashboard", "Inventory", "Orders"][i] } })),
 };
-const form = { name: "UK store", region: "UK", homeCurrency: "PKR", rate: 374.37 };
+const form = { name: "UK store", region: "UK", skuPrefix: "OR-" };
 const base = "https://sheets.googleapis.com/v4/spreadsheets";
 
 test("createSheet creates the file, then sets it up with one batchUpdate", async () => {
@@ -253,12 +254,16 @@ test("createSheet creates the file, then sets it up with one batchUpdate", async
     imageCol: "O",
     profitCol: "J",
     marginCol: "L",
-    skuPrefix: "SKU-",
+    skuPrefix: "OR-",
     oTab: "Orders",
     oRow: 2,
     oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L" },
+    skuFormula: true,
     region: "UK",
   });
+  // The prefix is in the SKU formula, and nothing in the new sheet looks an exchange rate up.
+  assert.match(JSON.stringify(calls[1].body.requests), /\\"OR-\\"&TEXT\(ROW\(\)-2/);
+  assert.doesNotMatch(JSON.stringify(calls[1].body.requests), /GOOGLEFINANCE/);
 });
 
 test("a failed setup is retried once", async () => {
@@ -321,7 +326,7 @@ test("createSheet reports Google's message when the file can't be created", asyn
 
 test("createSheet refuses bad input before it calls Google", async () => {
   const { createSheet, calls } = setup(sheet, []);
-  for (const bad of [{ homeCurrency: 'PKR")' }, { skuPrefix: '"&1' }, { rate: -3 }, { region: "XX" }, { resumeId: "../x" }]) {
+  for (const bad of [{ skuPrefix: '"&1' }, { skuPrefix: "123456789" }, { region: "XX" }, { resumeId: "../x" }]) {
     assert.equal((await createSheet({ ...form, ...bad })).success, false);
   }
   assert.equal(calls.length, 0);
@@ -432,10 +437,9 @@ test("signOut is local: it sets the flag and drops the cached token, from AliSwi
 /* Currency */
 
 const uk = { ...sheet, region: "UK" };
-const dashboardCell = (formula, number) => ({
-  json: { sheets: [{ data: [{ rowData: [{ values: [{ userEnteredValue: { formulaValue: formula }, effectiveValue: { numberValue: number } }] }] }] }] },
-});
-const lookup = { sheetId: sheet.id, from: "PKR", to: "GBP" };
+// ExchangeRate-API's answer for /v6/latest/GBP: how many of each currency buy one pound.
+const liveRates = (rates = { PKR: 374.5, USD: 1.25, EUR: 1.15 }) => ({ json: { result: "success", base_code: "GBP", rates } });
+const lookup = { from: "PKR", to: "GBP" };
 
 test("a save is refused when the prices are in another currency than the sheet's", async () => {
   const wrong = setup(uk, []);
@@ -449,59 +453,46 @@ test("a save is refused when the prices are in another currency than the sheet's
   }
 });
 
-test("the rate comes from the cache, then the sheet's own cell, then the one the user typed", async () => {
+test("the rate comes from the 12-hour cache, else the live API; an old rate beats none when the API fails", async () => {
   const now = Date.now();
   // A fresh cached rate: no request at all.
   const cached = setup(sheet, [], { local: { rates: { "GBP:PKR": { rate: 370, at: now - 60 * 1000 } } } });
-  assert.deepEqual(await ask(cached.listener, { action: "rate", data: lookup }, page), { success: true, rate: 370, source: "sheet", at: now - 60 * 1000 });
+  assert.deepEqual(await ask(cached.listener, { action: "rate", data: lookup }, page), { success: true, rate: 370, source: "live", at: now - 60 * 1000 });
   assert.equal(cached.calls.length, 0);
 
-  // A stale one: read Dashboard!D2, keep it for next time.
+  // A stale one: ask the API for the sheet's currency, keep the answer for next time.
   const stale = { rates: { "GBP:PKR": { rate: 370, at: now - 13 * 3600 * 1000 } } };
-  const fresh = setup(sheet, [dashboardCell('=IFERROR(GOOGLEFINANCE("CURRENCY:GBPPKR"),374.37)', 374.5)], { local: stale });
+  const fresh = setup(sheet, [liveRates()], { local: stale });
   const found = await ask(fresh.listener, { action: "rate", data: lookup }, page);
   assert.equal(found.rate, 374.5);
-  assert.equal(found.source, "sheet");
-  assert.match(decodeURIComponent(fresh.calls[0].url), /\/sheet-id-1234567890\?ranges=Dashboard!D2&fields=sheets\.data\.rowData\.values\(userEnteredValue,effectiveValue\)$/);
+  assert.equal(found.source, "live");
+  assert.equal(fresh.calls[0].url, "https://open.er-api.com/v6/latest/GBP");
   assert.equal(fresh.store.rates["GBP:PKR"].rate, 374.5);
 
-  // A number that is not a lookup of this pair is never a rate; the typed rate is next.
-  const typed = { rates: { "GBP:PKR:typed": { rate: 360, at: 5 } } };
-  for (const reply of [dashboardCell("", 5), dashboardCell('=GOOGLEFINANCE("CURRENCY:GBPUSD")', 1.3), { status: 400, json: {} }]) {
-    const miss = setup(sheet, [reply], { local: typed });
-    assert.deepEqual(await ask(miss.listener, { action: "rate", data: lookup }, page), { success: true, rate: 360, source: "typed", at: 5 });
+  // The API down, or with no such currency: the stale rate, else nothing. No Google request either way.
+  for (const reply of [{ status: 500, json: {} }, liveRates({ USD: 1.25 }), liveRates({ PKR: 0 })]) {
+    assert.equal((await ask(setup(sheet, [reply], { local: stale }).listener, { action: "rate", data: lookup }, page)).rate, 370);
+    const none = setup(sheet, [reply]);
+    assert.deepEqual(await ask(none.listener, { action: "rate", data: lookup }, page), { success: true, rate: null });
+    assert.ok(none.calls.every((c) => c.url.startsWith("https://open.er-api.com/")));
   }
-
-  // Signed out, or a sheet that is not one of the user's: no request, typed rate or nothing.
-  const out = setup(sheet, [], { local: { ...typed, authOff: true } });
-  assert.equal((await ask(out.listener, { action: "rate", data: lookup }, page)).rate, 360);
-  const stranger = setup(sheet, []);
-  assert.deepEqual(await ask(stranger.listener, { action: "rate", data: { ...lookup, sheetId: "someone-elses-sheet" } }, page), { success: true, rate: null });
-  assert.equal(stranger.calls.length, 0);
 });
 
-test("the rate lookup refuses a bad pair; setRate is for AliSwift's pages and keeps the rate apart from the cache", async () => {
-  const { listener, store } = setup(sheet, []);
+test("the rate lookup refuses a bad pair, and there is no way to type a rate any more", async () => {
+  const { listener, calls } = setup(sheet, []);
   for (const data of [{ ...lookup, from: "pkr" }, { ...lookup, to: "GBPX" }, { ...lookup, to: "PKR" }, undefined]) {
     assert.equal((await ask(listener, { action: "rate", data }, page)).success, false);
   }
-  const set = { action: "setRate", data: { from: "PKR", to: "GBP", rate: 374.37 } };
-  assert.deepEqual(await ask(listener, set, page), { success: false, error: "Not allowed." });
-  assert.equal(store.rates, undefined);
-  assert.deepEqual(await ask(listener, set, options), { success: true });
-  assert.equal(store.rates["GBP:PKR:typed"].rate, 374.37);
-  assert.equal(store.rates["GBP:PKR"], undefined);
-  for (const rate of [0, -1, "x", 1e-7, 1e9]) {
-    assert.equal((await ask(listener, { ...set, data: { ...set.data, rate } }, options)).success, false, String(rate));
-  }
+  assert.equal(calls.length, 0);
+  assert.equal(await ask(listener, { action: "setRate", data: { from: "PKR", to: "GBP", rate: 374 } }, options), "not handled");
 });
 
 test("rates saved at the same moment all survive", async () => {
-  const { listener, store } = setup(sheet, []);
-  const save = (from, rate) => ask(listener, { action: "setRate", data: { from, to: "GBP", rate } }, options);
-  const results = await Promise.all([save("PKR", 374), save("USD", 1.25), save("EUR", 1.15)]);
-  assert.ok(results.every((r) => r.success));
-  assert.deepEqual(Object.keys(store.rates).sort(), ["GBP:EUR:typed", "GBP:PKR:typed", "GBP:USD:typed"]);
+  const { listener, store } = setup(sheet, [liveRates(), liveRates(), liveRates()]);
+  const get = (from) => ask(listener, { action: "rate", data: { from, to: "GBP" } }, page);
+  const results = await Promise.all([get("PKR"), get("USD"), get("EUR")]);
+  assert.ok(results.every((x) => x.rate > 0));
+  assert.deepEqual(Object.keys(store.rates).sort(), ["GBP:EUR", "GBP:PKR", "GBP:USD"]);
 });
 
 /* Your data stays yours */
@@ -930,9 +921,8 @@ test("moveLocal can be run again after a crash between the sheet write and the l
 
 test("moveLocal converts other currencies with the same rate lookup as a save, and leaves what has no rate", async () => {
   const library = [rec(1), rec(2, { currency: "PKR", price: 1870, salePrice: 3740 }), rec(3, { currency: "USD" })];
-  const typed = { "GBP:PKR:typed": { rate: 374, at: 5 } };
-  // Rate lookups go to Dashboard!D2 first (refused here), then the typed rate; USD has none.
-  const t = setup(full, [{ status: 400, json: {} }, { status: 400, json: {} }, sheetNow(), { json: {} }], { local: { library, rates: typed } });
+  // One live lookup per currency: PKR is found, the USD one fails and those products wait.
+  const t = setup(full, [liveRates({ PKR: 374 }), { status: 500, json: {} }, sheetNow(), { json: {} }], { local: { library } });
   const reply = await ask(t.listener, { action: "moveLocal", sheetId: full.id }, options);
   assert.deepEqual(reply, { success: true, moved: 2, skipped: 0, needRate: 1 });
   const written = cellsOf(t.calls[3]);
@@ -1006,7 +996,7 @@ test("moveLocal prices a product saved as shown with the sheet's own rules, in t
     rec(2, { price: 4, salePrice: null }), // pounds already: 4 + 2 = 6, sells at 10.2
     rec(3, { price: 4, salePrice: 9 }), // priced already (a typed sell price): written as it is
   ];
-  const t = setup(gbp, [{ status: 400, json: {} }, sheetNow(), { json: {} }], { local: { library, rates: { "GBP:PKR:typed": { rate: 374, at: 5 } } } });
+  const t = setup(gbp, [liveRates({ PKR: 374 }), sheetNow(), { json: {} }], { local: { library } });
   const reply = await ask(t.listener, { action: "moveLocal", sheetId: gbp.id }, options);
   assert.deepEqual(reply, { success: true, moved: 3, skipped: 0, needRate: 0 });
   const written = cellsOf(t.calls[2]);

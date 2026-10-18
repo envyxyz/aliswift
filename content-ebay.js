@@ -852,22 +852,63 @@ reportCrashes(); // lib/errors.js
   // eBay draws its photo box late and may draw it again, so the button is put back whenever it is missing.
   // ponytail: a one-second look; a MutationObserver if a redraw ever leaves it missing for long enough to matter.
   function placePhotoButton() {
-    if (dismissed || !location.pathname.startsWith("/lstng") || document.getElementById("aliswift-photo-btn")) return;
-    // Found by its words, whatever element eBay draws it with: the element holding the text, or the button around it.
-    const words = document.evaluate("//*[normalize-space(text())='Upload from computer']", document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    const upload = words?.closest('button, label, [role="button"]') ?? words;
+    if (dismissed || !location.pathname.startsWith("/lstng")) return;
+    // eBay's box: <div class="upload-buttons"> holds the icon, "Drag and drop files" and <div class="upload-buttons__buttons">
+    // with the Upload from computer button (seen live, 2026-10-18). The new button goes under that row.
+    const words = document.evaluate("//button[normalize-space(.)='Upload from computer']", document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    const upload = document.querySelector(".upload-buttons__buttons") ?? words;
     if (!upload) return;
+    // eBay redraws the box and may keep the old button somewhere else: it must sit right under the row, else it is put back.
+    const mine = document.getElementById("aliswift-photo-btn");
+    if (mine?.previousElementSibling === upload) return;
+    mine?.remove();
     const btn = h("button", { type: "button", class: "ali-ae-btn" }, icon(PATH.bolt, "", 16), "Add from AliExpress");
+    aeDone = h("p", { class: "ali-ae-done", role: "status", hidden: true });
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation(); // the photo box opens the file picker on a click anywhere in it
       openPhotos();
     });
-    const host = shadowHost("aliswift-photo-btn", btn);
+    const host = shadowHost("aliswift-photo-btn", h("div", { class: "ali-ae-wrap" }, btn, aeDone));
     host.style.cssText += ";display:block;margin-top:12px;text-align:center";
     upload.after(host);
   }
   setInterval(placePhotoButton, 1000);
+
+  // The one line under the button once photos were saved: "Downloaded 3 images", with a tick. It fades away after a while.
+  let aeDone;
+  let aeTimer;
+  function showDone(text) {
+    if (!aeDone) return;
+    clearTimeout(aeTimer);
+    aeDone.replaceChildren(icon(PATH.check, "", 14), text);
+    aeDone.hidden = false;
+    requestAnimationFrame(() => aeDone.toggleAttribute("data-shown", true));
+    aeTimer = setTimeout(() => aeDone.removeAttribute("data-shown"), 8000);
+  }
+
+  // How many photos the form holds: its "3/25" counter, else its thumbnails.
+  const onForm = () => Number(/(\d+)\s*\//.exec(q(".uploader-thumbnails-ux__header__photo-count")?.textContent ?? "")?.[1] ?? photoCount(document));
+
+  // The saved photos go onto the listing too: the worker hands each one over at full size (the page cannot read
+  // AliExpress's image host), and they are given to eBay's file box, else dropped on its drop zone, the way a seller's own
+  // files are. True when the form's count went up.
+  async function attachPhotos(urls) {
+    const got = await Promise.all(urls.map((url) => send({ action: "ebayThumb", url, full: true })));
+    const files = got
+      .map((res) => res.success && res.image)
+      .filter(Boolean)
+      .map(({ mime, data }, i) => new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], `img-${String(i + 1).padStart(2, "0")}.${mime.split("/")[1].replace("jpeg", "jpg")}`, { type: mime }));
+    if (!files.length) return false;
+    const input = photoBox(document);
+    const zone = photoZone(document);
+    for (const give of [input && (() => giveFiles(input, files)), zone && (() => dropFiles(zone, files))].filter(Boolean)) {
+      const before = onForm();
+      give();
+      if (await until(() => onForm() > before, 12000)) return true;
+    }
+    return false;
+  }
 
   const pickedUrls = () => [...photos.dialog.querySelectorAll('.ali-ph[aria-pressed="true"]')].map((b) => b.dataset.url);
 
@@ -994,20 +1035,20 @@ reportCrashes(); // lib/errors.js
   }
 
   async function savePicked() {
-    if (photos.save.textContent === "Done") return photos.dialog.close();
+    const urls = pickedUrls();
     const folder = photos.folder.value.trim();
     photos.save.dataset.state = "loading";
     photos.save.disabled = true;
-    const res = await send({ action: "ebayPhotosSave", urls: pickedUrls(), folder: folder === photos.defaultFolder ? "" : folder, sort: photos.sort.checked });
+    const res = await send({ action: "ebayPhotosSave", urls, folder: folder === photos.defaultFolder ? "" : folder, sort: photos.sort.checked });
     delete photos.save.dataset.state;
     if (!res.success) {
       photoNote("error", res.error ?? "The photos couldn't be saved.", res.code === "permission");
       return photoCounts();
     }
-    const missed = res.total - res.saved;
-    photoNote("ok", `Saved ${res.saved} ${res.saved === 1 ? "photo" : "photos"} to Downloads\\${res.folder}.${missed ? ` ${missed} couldn't be saved.` : ""} Drag them into the photo box.`);
-    photos.save.disabled = false;
-    photos.save.textContent = "Done";
+    photos.dialog.close();
+    const words = `Downloaded ${res.saved} ${res.saved === 1 ? "image" : "images"}`;
+    showDone(`${words}, adding to the listing...`);
+    showDone((await attachPhotos(urls)) ? words : `${words}. Drag them into the photo box.`);
   }
 
   /* Start: idle until the page is the listing form. eBay may reach /lstng from /sl/... without a page load, so look again. */

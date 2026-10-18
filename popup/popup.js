@@ -6,10 +6,6 @@ const WORDS = { sheet: { idle: "Add to Sheet", busy: "Adding..." }, local: { idl
 let tabId;
 let resetTimer;
 let row; // the product the page button would save: see scrapeRow in content.js
-let sheet; // the active sheet's settings, to price a rate typed here
-let editing = false; // the rate box is open
-let typed = false; // the rate was typed here and is saved when the product is added
-let rateBad = false; // what was typed is not a rate AliSwift accepts (see validRate)
 let signedIn = true; // false only when the account button knows the user is signed out
 let dest = "sheet"; // "sheet" or "local", see destination()
 const idle = () => WORDS[dest].idle;
@@ -64,9 +60,7 @@ function renderCurrency() {
   const { kind, fx } = row;
   const rated = kind === "convert" && !noRate();
   const warn = noRate()
-    ? rateBad
-      ? RATE_MESSAGE
-      : `No ${fx.from} to ${fx.to} rate found. Enter one to continue.`
+    ? `Couldn't get the ${fx.from} to ${fx.to} exchange rate. Check your connection and reopen this.`
     : kind === "unset" && dest === "sheet"
       ? "This sheet's marketplace isn't set, so prices are saved as shown."
       : kind === "unknown"
@@ -79,22 +73,8 @@ function renderCurrency() {
   $("fxNote").hidden = !rated;
   if (rated) {
     const day = new Date(fx.at ?? Date.now()).toLocaleDateString("en", { day: "numeric", month: "short" });
-    const how = fx.source === "typed" ? `your rate (${day})` : "sheet rate";
-    const text = `Converted from ${fx.from} ${amount(fx.price + fx.shipping)} at 1 ${fx.to} = ${Number(fx.rate.toPrecision(6))} ${fx.from}, ${how}`;
-    const change = Object.assign(document.createElement("button"), { type: "button", className: "link-btn", textContent: "Change" });
-    change.addEventListener("click", () => {
-      editing = true;
-      $("rate").value = String(Number(fx.rate.toPrecision(6)));
-      renderCurrency();
-      $("rate").focus();
-    });
-    $("fxNote").replaceChildren(text, ...(fx.source === "typed" && !editing ? [" ", change] : []));
+    $("fxNote").textContent = `Converted from ${fx.from} ${amount(fx.price + fx.shipping)} at 1 ${fx.to} = ${Number(fx.rate.toPrecision(6))} ${fx.from}, live rate (${day}, ExchangeRate-API)`;
   }
-
-  $("rateRow").hidden = kind !== "convert" || !(editing || noRate());
-  $("rate").setAttribute("aria-invalid", String(rateBad));
-  $("rateTo").textContent = fx?.to ?? "";
-  $("rateUnit").textContent = fx?.from ?? "";
 }
 
 async function loadProduct() {
@@ -104,9 +84,6 @@ async function loadProduct() {
   const found = await scrape();
   if (!found) return show("notice", "Couldn't read this page. Refresh it and try again.");
   row = found;
-  sheet = (await getActiveSheet()) ?? SHEET_DEFAULTS;
-  editing = typed = rateBad = false;
-  $("rate").value = "";
   $("title").value = row.title;
   $("link").value = row.link;
   renderPrices();
@@ -153,35 +130,11 @@ $("sheet").addEventListener("change", async () => {
   await loadProduct();
 });
 
-// A rate typed here prices the product again, in the sheet's currency, as the page button would. A rate the
-// service worker would refuse (validRate) counts as no rate, with the reason shown, so nothing is saved on it.
-$("rate").addEventListener("input", () => {
-  const text = $("rate").value.trim();
-  const rate = /^\d+([.,]\d+)?$/.test(text) ? Number(text.replace(",", ".")) : 0;
-  const { fx } = row;
-  editing = typed = true;
-  rateBad = text !== "" && !validRate(rate);
-  fx.rate = validRate(rate) ? rate : null;
-  fx.source = "typed";
-  fx.at = Date.now();
-  if (fx.rate) {
-    Object.assign(row, priceProduct(fx.price / rate, fx.shipping / rate, sheet), { currency: fx.to });
-  } else {
-    Object.assign(row, { price: (fx.price + fx.shipping).toFixed(2), salePrice: "", currency: fx.from });
-  }
-  renderPrices();
-  renderCurrency();
-});
-
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(resetTimer);
   setStatus("");
   setButton("loading", WORDS[dest].busy);
-  const { fx } = row;
-  if (typed && fx?.rate) {
-    await chrome.runtime.sendMessage({ action: "setRate", data: { from: fx.from, to: fx.to, rate: fx.rate } }).catch(() => {});
-  }
   const result = await chrome.runtime
     .sendMessage({
       action: "appendToSheet",

@@ -2200,7 +2200,6 @@ function openMoveDialog() {
   const moveSheet = document.getElementById("moveSheet");
   const moveNote = document.getElementById("moveNote");
   const moveSubmit = document.getElementById("moveSubmit");
-  const moveRates = document.getElementById("moveRates");
 
   if (!moveSheet || !moveSubmit) return;
 
@@ -2217,53 +2216,6 @@ function openMoveDialog() {
     moveNote.textContent = `Moves ${count} product${count === 1 ? "" : "s"}. Any already in the sheet are skipped.`;
   }
   moveSubmit.textContent = `Move ${count} product${count === 1 ? "" : "s"}`;
-
-  const renderMoveRates = () => {
-    if (!moveRates) return;
-    moveRates.innerHTML = "";
-    const targetSheet = sheets.find((s) => s.id === moveSheet.value);
-    const toCur = REGIONS[targetSheet?.region]?.currency || "";
-    if (!toCur) return; // a sheet with no marketplace takes prices as they are: no rate to ask for
-    const foreignCurrencies = new Set();
-    for (const p of currentProducts.filter((x) => x.status !== "Discontinued")) {
-      if (p.currency && p.currency !== toCur) {
-        foreignCurrencies.add(p.currency);
-      }
-    }
-
-    for (const fromCur of foreignCurrencies) {
-      const row = document.createElement("div");
-      row.className = "rate-row";
-
-      const lbl = document.createElement("label");
-      lbl.htmlFor = `mvRate_${fromCur}`;
-      lbl.textContent = `1 ${toCur} =`;
-
-      const inp = document.createElement("input");
-      inp.id = `mvRate_${fromCur}`;
-      inp.inputMode = "decimal";
-      inp.placeholder = "0.00";
-      inp.setAttribute("aria-describedby", `mvUnit_${fromCur}`);
-      inp.dataset.from = fromCur;
-      inp.dataset.to = toCur;
-
-      const unit = document.createElement("span");
-      unit.id = `mvUnit_${fromCur}`;
-      unit.className = "muted";
-      unit.textContent = fromCur;
-
-      row.append(lbl, inp, unit);
-
-      const note = document.createElement("p");
-      note.className = "note";
-      note.textContent = `No rate found for ${fromCur}. Enter one, or those products stay in your library.`;
-
-      moveRates.append(row, note);
-    }
-  };
-
-  moveSheet.onchange = renderMoveRates;
-  renderMoveRates();
 
   dlg.showModal();
 }
@@ -2406,11 +2358,6 @@ function setupMoveForm() {
     const keepOpen = (evt) => evt.key === "Escape" && evt.preventDefault();
     dlg.addEventListener("keydown", keepOpen);
 
-    // A typed rate is saved first; one that isn't a number above zero is left out and those products stay in the library.
-    for (const inp of dlg.querySelectorAll(".rate-row input")) {
-      const rate = Number(inp.value.trim());
-      if (rate > 0) await sendMessage({ action: "setRate", data: { from: inp.dataset.from, to: inp.dataset.to, rate } });
-    }
     const res = await callMoveLocal(targetSheetId);
 
     delete submit.dataset.state;
@@ -2424,7 +2371,7 @@ function setupMoveForm() {
       return;
     }
     dlg.close();
-    const needs = `${res.needRate} need${res.needRate === 1 ? "s" : ""} a rate.`;
+    const needs = `${res.needRate} stayed in your library: the exchange rate couldn't be fetched. Try again later.`;
     const parts = [
       res.moved > 0 && `Moved ${res.moved}.`,
       res.skipped > 0 && `${res.skipped} already in the sheet.`,

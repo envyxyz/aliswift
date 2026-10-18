@@ -4,6 +4,25 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-18
+
+### Added
+
+- **SKU prefix in Create sheet**: choose the prefix (default `SKU-`) when the sheet is made; it is built into the sheet's SKU formula (`OR-` gives OR-01, OR-02…).
+- **Add from AliExpress puts the photos on the listing too**: after saving them to Downloads it hands them to eBay's photo box, and says "Downloaded 3 images" under the button. A product saved with one photo gets the rest of its gallery from its AliExpress page.
+
+### Changed
+
+- **Exchange rates are automatic**: supplier prices in another currency are converted at the live rate from ExchangeRate-API (`open.er-api.com`, cached 12 hours; an older cached rate is used when it can't be reached). Nothing is typed any more: the popup's rate box, the dashboard's Move to a sheet rate boxes, and Create sheet's **Your currency** and **Backup rate** are gone.
+- **New sheets stay in the marketplace's currency** (USD for eBay US and Global, GBP for eBay UK): no Google Finance lookup and no second-currency columns. Existing sheets are not changed.
+- **New sheets are marked as having a formula SKU column**, so AliSwift reads their SKUs back and never writes over the formula.
+
+### Fixed
+
+- **The eBay panel shows the sheet's SKU**: a card no longer shows the SKU a listing was saved with (like SKU-46) when the sheet shows another (OR-46).
+- **The eBay panel offers every Draft**: a Draft product with no listing written or queued yet is in the list too, and can be written with Write now.
+- **Add from AliExpress stays under Upload from computer** when eBay redraws its photo box.
+
 ## [0.9.0] - 2026-10-18
 
 ### Added
@@ -166,7 +185,9 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/envyxyz/aliswift/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/envyxyz/aliswift/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/envyxyz/aliswift/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/envyxyz/aliswift/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/envyxyz/aliswift/compare/v0.6.0...v0.7.0

@@ -18,7 +18,7 @@ All fee parameters sit in editable cells at the top of your sheet, allowing you 
 
 ## 4. How does currency conversion work?
 AliSwift supports multi-currency sourcing:
-- If your AliExpress supplier displays prices in a foreign currency (such as USD or PKR) and your sheet is set up in GBP, AliSwift uses the live exchange rate formula embedded in your sheet (or your custom manual rate) to convert supplier costs.
+- If your AliExpress supplier displays prices in a foreign currency (such as USD or PKR) and your sheet is set up in GBP, AliSwift converts supplier costs at the live exchange rate from [ExchangeRate-API](https://www.exchangerate-api.com), refreshed every 12 hours. There is no rate to type in. Sheets stay in the marketplace currency: USD for eBay US and Global, GBP for eBay UK.
 - When saving to your local library, items store prices in the original currency shown on the page. Conversion occurs seamlessly when you move products to your Google Sheet.
 
 ## 5. Why are there no photos on my dashboard?
