@@ -20,7 +20,7 @@ AliSwift has no analytics and stores no product data on any server of ours. Prod
    When you use AliSwift without signing in (or choose the local library destination), your saved products remain strictly on your own device in Chrome local storage (`chrome.storage.local`).
 3. **Directly to your AI provider (optional)**:
    If you enter your own AI key in Settings (Gemini, Groq or OpenRouter) for AI column mapping, listing generation, or eBay form filling, data travels directly from your browser to that provider (`generativelanguage.googleapis.com`, `api.groq.com` or `openrouter.ai`). AliSwift asks Chrome for access to Groq or OpenRouter only when you add a key for it.
-   - Your AI keys stay in `chrome.storage.local` on this device, are sent only to their own provider, and are not included in settings export.
+   - Your AI keys stay in `chrome.storage.local` on this device, are sent only to their own provider, and are left out of settings export unless you tick **Include my AI keys** when exporting (see below).
    - The provider receives the product's text (its title, sell price, specifications and description) for listing generation, and up to two small photos only if you turn on **Send product photos to the AI** (off by default, Gemini keys only). It never receives your cost price.
    - For sheet column mapping, AliSwift sends column headers and a few sample cells to Gemini, with a filter that tries to leave out columns that look personal (names, addresses, phone, email). Because this filter is a deny-list and can miss odd or unstructured headers, always check the preview before confirming.
    - A request waits 15 to 90 s for an answer, and a timeout is not retried. When a key is busy, the next one in your list is tried.
@@ -52,13 +52,13 @@ AliSwift follows a strict non-destructive rule:
 ## What is stored in Chrome
 
 - **Extension settings (`chrome.storage.sync`)**: your sheet IDs, tab names, column mapping letters, SKU prefixes, marketplace regions, pricing rules, and UI theme preferences. If Chrome sync is enabled in your browser, Chrome syncs these preferences through your personal Google account.
-- **On-device storage (`chrome.storage.local`)**: your local library products, on-device photo links (saved under key `photos` by AliExpress item number, up to the newest 5000, used as a dashboard fallback), temporary product caches, the list of products waiting for a listing, the error reports waiting to be sent, and your AI keys. These items stay on your physical device, are never synced to other computers, and the keys are excluded from settings export.
+- **On-device storage (`chrome.storage.local`)**: your local library products, on-device photo links (saved under key `photos` by AliExpress item number, up to the newest 5000, used as a dashboard fallback), temporary product caches, the list of products waiting for a listing, the error reports waiting to be sent, and your AI keys. These items stay on your physical device, are never synced to other computers, and the keys are left out of settings export unless you choose to include them.
 
 ## Settings export and backup
 
 When you use the **Export settings** feature, a JSON backup file (`aliswift-settings.json`) is generated entirely inside your browser and downloaded to your computer.
 - The file contains your configured sheet settings (including the image inclusion setting), your saved local library products, and stored photo links (photo links only, no image data).
-- The file never contains your Google OAuth credentials, tokens, or your AI keys.
+- The file never contains your Google OAuth credentials or tokens. It contains your AI keys only if you tick **Include my AI keys** before exporting (off every time); they are then written in plain text, so keep that file private and delete it once imported. Importing such a file replaces the keys saved on that device and asks Chrome's permission for Groq or OpenRouter if a key needs it.
 
 ## Permissions and justifications
 

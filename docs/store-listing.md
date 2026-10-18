@@ -24,7 +24,7 @@ Save products directly into a custom or auto-configured Google Sheet, or store t
 - eBay Listing Photos: Optionally pass up to 12 AliExpress gallery photos to eBay's uploader when filling forms, or save them to your Downloads folder as a fallback.
 - Photos for Older Products: Automatically retrieves share photos from public AliExpress pages for previously saved items without a photo, updating dashboard cards and filling empty sheet cells.
 - Non-Destructive and Safe: AliSwift writes new rows, updates selected cells, and adds SKU, Image or Order link columns only if you say yes, after telling you which ones your sheet lacks. It never deletes rows; Remove from Sheet (after a second click) clears only the cells AliSwift wrote in that product's row.
-- Privacy First: No analytics, no account registration. Product data is stored only on your device or in your own Sheet. Error reports (codes, timings, crash traces; never keys, sheet names or order data) go to the developer and can be turned off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are not included in settings export.
+- Privacy First: No analytics, no account registration. Product data is stored only on your device or in your own Sheet. Error reports (codes, timings, crash traces; never keys, sheet names or order data) go to the developer and can be turned off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are left out of settings export unless you tick Include my AI keys.
 
 ## Single-Purpose Statement
 
@@ -50,7 +50,7 @@ Each requested permission and host permission in manifest.json is strictly requi
    Required to list spreadsheet names and verify sheets via the Google Drive API v3 (using read-only metadata scope drive.metadata.readonly). Google sign-in requests one scope list that includes this permission, which is required whether selecting a sheet from Drive or pasting a spreadsheet link.
 
 6. `https://generativelanguage.googleapis.com/*`:
-   Required to communicate directly with Google's Gemini API when the user provides their own API key to perform automated column mapping on imported spreadsheets, generate product listings, and fill eBay form item specifics. The key stays in storage.local on the device, is sent only to Google's Gemini API, and is not included in settings export. Groq and OpenRouter keys work the same way; their hosts are optional permissions asked for only when a key for them is added. Column mapping sends headers and sample cells with a deny-list filter that tries to leave out personal columns, and users can check the preview before saving.
+   Required to communicate directly with Google's Gemini API when the user provides their own API key to perform automated column mapping on imported spreadsheets, generate product listings, and fill eBay form item specifics. The key stays in storage.local on the device, is sent only to Google's Gemini API, and is left out of settings export unless the user ticks Include my AI keys. Groq and OpenRouter keys work the same way; their hosts are optional permissions asked for only when a key for them is added. Column mapping sends headers and sample cells with a deny-list filter that tries to leave out personal columns, and users can check the preview before saving.
 
 7. `https://*.alicdn.com/*`:
    Required to load product image assets from AliExpress CDN so the service worker can provide them to Gemini for listing generation.

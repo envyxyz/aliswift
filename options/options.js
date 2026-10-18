@@ -1408,6 +1408,7 @@ const countOf = (n) => `${n} ${n === 1 ? "sheet" : "sheets"}`;
 let pendingImport = null;
 let pendingLibrary = [];
 let pendingPhotos = {};
+let pendingKeys = [];
 
 $("exportBtn").addEventListener("click", async () => {
   try {
@@ -1415,11 +1416,14 @@ $("exportBtn").addEventListener("click", async () => {
     const sync = { sheets: [], activeSheetId: "", ...(await chrome.storage.sync.get(EXPORT_KEYS)) };
     // The library and the product photos live on this device only, so the file is the only way they survive a reinstall.
     const { library, photos } = await chrome.storage.local.get({ library: [], photos: {} });
-    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync, library, photos };
+    // The keys go in only when asked for, at the top level (never inside `sync`), and the file then says so.
+    const withKeys = $("exportKeys").checked && aiKeys.length > 0;
+    const file = { app: "aliswift", version: 1, exportedAt: new Date().toISOString(), sync, library, photos, ...(withKeys && { aiKeys }) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
     Object.assign(document.createElement("a"), { href: url, download: "aliswift-settings.json" }).click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast("Exported aliswift-settings.json.");
+    toast("Exported aliswift-settings.json.", withKeys ? { detail: "It holds your AI keys in plain text. Keep it private.", duration: 8000 } : {});
+    $("exportKeys").checked = false;
   } catch (e) {
     toast("Couldn't export your settings.", {
       kind: "error",
@@ -1448,6 +1452,8 @@ $("importFile").addEventListener("change", async (e) => {
   pendingImport = result.sync;
   pendingLibrary = result.library ?? [];
   pendingPhotos = result.photos ?? {};
+  pendingKeys = result.aiKeys ?? [];
+  $("impKeys").textContent = pendingKeys.length ? `The ${pendingKeys.length === 1 ? "AI key" : `${pendingKeys.length} AI keys`} in the file will replace the ones saved here.` : "Your AI keys aren't affected.";
   const [n, m] = [sheets.length, pendingImport.sheets.length];
   const from = m ? `${m} from the file` : "none from the file";
   $("impQ").textContent = n ? `Replace your ${countOf(n)} with ${from}?` : `Import ${countOf(m)} from the file?`;
@@ -1466,6 +1472,9 @@ $("impGo").addEventListener("click", async () => {
   $("impGo").setAttribute("aria-disabled", "true");
   $("impGo").textContent = "Replacing...";
   let added = 0;
+  // Asked from this click, before anything is awaited, for the providers the keys need (Gemini's host is in the manifest).
+  const hosts = [...new Set(pendingKeys.map((k) => AI_PROVIDERS[k.provider].host))];
+  const reach = hosts.length ? await chrome.permissions.request({ origins: hosts }).catch(() => false) : true;
   try {
     // First, and only ever adding: a failure here leaves the sheets as they were.
     if (pendingLibrary.length || Object.keys(pendingPhotos).length) {
@@ -1474,6 +1483,7 @@ $("impGo").addEventListener("click", async () => {
       added = res.added;
     }
     await chrome.storage.sync.set(next);
+    if (pendingKeys.length) await chrome.storage.local.set({ aiKeys: pendingKeys });
   } catch (err) {
     flash("Not saved", true);
     setNotice($("importNotice"), `Couldn't import: ${err.message}`);
@@ -1493,7 +1503,8 @@ $("impGo").addEventListener("click", async () => {
   render();
   flash("Saved");
   $("importDialog").close();
-  toast(`Imported ${countOf(next.sheets.length)}${added ? ` and ${added} saved ${added === 1 ? "product" : "products"}` : ""}.`);
+  const keyNote = pendingKeys.length ? ` and ${pendingKeys.length} AI ${pendingKeys.length === 1 ? "key" : "keys"}` : "";
+  toast(`Imported ${countOf(next.sheets.length)}${added ? `, ${added} saved ${added === 1 ? "product" : "products"}` : ""}${keyNote}.`, reach ? {} : { kind: "neutral", detail: "Allow AliSwift to reach Groq or OpenRouter when asked, or those keys won't work.", duration: 8000 });
   $("importBtn").focus();
 });
 

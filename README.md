@@ -112,7 +112,7 @@ When a sheet you connect has no **SKU**, **Image** or **Order link** column, Ali
 Once a Google Sheet is connected, click **Move to a sheet** on the dashboard library banner. AliSwift transfers products into your sheet, applies currency conversion rates, and safely skips duplicates.
 
 ### 5. Updating from an older build
-The extension signing key was rotated in 0.6.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets, library items, and photo links.
+The extension signing key was rotated in 0.6.0, so the extension ID changed. Export your settings on your previous build via **Export settings**, install the new build, and click **Import settings** to restore your sheets, library items, and photo links. Tick **Include my AI keys** before exporting if you want your keys to come along (they are then in the file in plain text, so keep it private); without the box they stay out of the file.
 
 ### 6. Photos on your eBay listing
 In Settings under the General tab, **Allow photo downloads** (synced as `includeImages`, off by default) asks Chrome for the optional `downloads` permission. On eBay's listing form, **Add from AliExpress** (under eBay's "Upload from computer") opens a window with the picked product's photos: its gallery (up to 12) and the photo of each variant. Pick the ones you want and AliSwift saves them under your Downloads folder, to drag into the photo box. The window lets you change the folder (`Downloads\<sheet name>` by default) and turn **Auto-sort downloads** on or off: on, photos go to `<folder>\<SKU>\img-01.jpg` and each variant's to `<folder>\<SKU>\<variant>\img-01.jpg`; off, all go straight into `<folder>` as `<SKU>-img-01.jpg`. Both choices are remembered and also apply to the download button on AliExpress. Fill form no longer adds photos.
@@ -141,7 +141,7 @@ When supplier currency differs from your sheet currency, AliSwift converts it at
 
 ## Privacy
 
-AliSwift collects no analytics. Product data is stored only on your own device (in your local library and exported settings file) or in your own Google Sheet. The one thing sent to the developer is error reports (codes, timings and crash traces, never keys, sheet names or order data), which you can turn off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are not included in settings export ([read full Privacy Policy](PRIVACY.md)).
+AliSwift collects no analytics. Product data is stored only on your own device (in your local library and exported settings file) or in your own Google Sheet. The one thing sent to the developer is error reports (codes, timings and crash traces, never keys, sheet names or order data), which you can turn off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are left out of settings export unless you tick **Include my AI keys** ([read full Privacy Policy](PRIVACY.md)).
 
 ## Roadmap
 

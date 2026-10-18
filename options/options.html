@@ -256,8 +256,10 @@
             <button type="button" class="info" aria-label="About settings backup" aria-describedby="tip-backup">
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
               </button>
-            <span id="tip-backup" role="tooltip" class="tip">Export saves your sheets and settings to a file. Import loads that file here, for example on a new computer. Your AI keys and saved product data are not included.</span>
+            <span id="tip-backup" role="tooltip" class="tip">Export saves your sheets and settings to a file. Import loads that file here, for example on a new computer. Your AI keys are left out unless you tick Include my AI keys.</span>
           </div>
+          <label class="inline"><input id="exportKeys" type="checkbox" /> Include my AI keys</label>
+          <p class="note">Off by default. With it on, the file holds your keys in plain text: keep it private and delete it once imported.</p>
           <div class="actions backup-actions">
             <button type="button" class="btn btn-quiet" id="exportBtn">Export settings</button>
             <button type="button" class="btn btn-quiet" id="importBtn">Import settings</button>
@@ -596,7 +598,7 @@
         <div class="dialog-head"><h2 id="impTitle">Import settings</h2></div>
         <div class="dialog-body">
           <p><strong id="impQ"></strong></p>
-          <p id="impWhy" class="muted">Other settings in the file replace yours too. Your AI keys aren't affected.</p>
+          <p id="impWhy" class="muted">Other settings in the file replace yours too. <span id="impKeys">Your AI keys aren't affected.</span></p>
         </div>
         <div class="dialog-foot">
           <div class="actions">

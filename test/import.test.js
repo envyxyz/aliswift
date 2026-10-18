@@ -405,6 +405,26 @@ test("the keys are saved on this device only: never in a backup, never synced, n
   assert.doesNotMatch(js, /EXPORT_KEYS[^;]*(geminiKey|aiKeys)/);
 });
 
+test("a backup holds the AI keys only when the seller ticked Include my AI keys, at the top level, and import reads them back checked", () => {
+  const js = read("options/options.js");
+  assert.match(js, /const withKeys = \$\("exportKeys"\)\.checked && aiKeys\.length > 0;/);
+  assert.match(js, /\.\.\.\(withKeys && \{ aiKeys \}\)/);
+  assert.match(read("options/options.html"), /<input id="exportKeys" type="checkbox" \/>/); // not checked by default
+  const keys = [{ id: "k1", provider: "gemini", key: KEY, model: "gemini-3.5-flash-lite", paid: false }, { id: "k2", provider: "groq", key: "gsk_abcdefghijklmnop", model: "openai/gpt-oss-120b", paid: true, extra: "dropped" }];
+  const file = { app: "aliswift", version: 1, sync: { sheets: [], activeSheetId: "" }, aiKeys: keys };
+  const r = shared.validateImport(file);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.aiKeys, keys.map(({ extra, ...k }) => k)); // only the known fields stay
+  assert.ok(!("aiKeys" in r.sync));
+  // No keys in the file: none in the result. Anything wrong in one key refuses the whole file.
+  assert.ok(!("aiKeys" in shared.validateImport({ app: "aliswift", version: 1, sync: file.sync })));
+  for (const bad of [{ ...keys[0], provider: "other" }, { ...keys[0], key: "has space" }, { ...keys[0], model: "../x" }, { ...keys[0], id: "" }]) {
+    assert.deepEqual(shared.validateImport({ ...file, aiKeys: [bad] }), { ok: false, reason: "structure" });
+  }
+  assert.equal(shared.validateImport({ ...file, aiKeys: [keys[0], keys[0]] }).ok, false); // one id twice
+  assert.equal(shared.validateImport({ ...file, aiKeys: "nope" }).ok, false);
+});
+
 /* Read only */
 
 // The code of one section, comments removed.

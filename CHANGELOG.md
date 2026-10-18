@@ -13,6 +13,7 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
   - The updater only writes into a folder whose manifest key is AliSwift's, only moves forward, and writes `manifest.json` last so a half-copied update never loads.
   - Run the .bat again to update right away; stop the checks with `update.ps1 -Unschedule` (see the README).
 - Each release now carries `update.ps1` and `setup-updates.bat` next to the zip.
+- **Export your AI keys with your settings (optional).** Settings, General, **Settings backup** has a new **Include my AI keys** box, off every time. Ticked, the exported file also holds your keys in plain text (so keep it private); importing it restores them, asking Chrome's permission for Groq or OpenRouter when a key needs it. Without the box the file is exactly as before, and a file without keys leaves the saved ones alone. Handy for a new computer.
 
 ### Changed
 
