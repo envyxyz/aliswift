@@ -8,6 +8,7 @@ AliSwift has no analytics and stores no product data on any server of ours. Prod
 - **Public AliExpress pages for products without a photo**: when the dashboard lists products that have a link but no photo, the service worker requests each product's public AliExpress page (`https://www.aliexpress.com/item/<item number>.html`) without cookies or sign-in, the same request your browser makes when you open the link. It reads only the page's share image address (`og:image`). The address is kept on this device, shown on the dashboard, and may be written into an empty cell of the Image column in your own Google Sheet (or saved in the product's record in your local library); it never overwrites a cell that already has a value.
 - **Your Google Sheets**: AliSwift reads column headers, existing SKUs, links and titles in the spreadsheets you explicitly configure.
 - **Your Google Drive metadata**: when you connect to Google, sign-in requests one scope list that includes read-only Drive metadata (`drive.metadata.readonly`). This allows AliSwift to list spreadsheet names and dates in the picker and verify pasted spreadsheet links. It never reads the contents of any file in your Drive except the sheet you choose to open.
+- **Your Google profile photo**: sign-in also requests the basic `userinfo.profile` scope so the account button can show your photo. AliSwift reads only the address of the photo (never your name or email), keeps it on this device for a day, and clears it when you sign out.
 - **eBay listing pages**: the content script runs on eBay's listing form (`/lstng`) on the marketplaces you can choose for a sheet (eBay UK, US, Germany, Australia and Canada sites) and reads its field names and options to fill them. Only field names and options go to Gemini, and only when you click fill, with your own key; if a box can't be found by its usual name, the names, labels and types of the form's boxes (never their contents) can go too. The product details it fills come from the product you picked in the panel and stay on your device.
 - **eBay Seller Hub order list**: on the order list (`/sh/ord`) of those sites, when you press **Add all orders to sheet**, AliSwift reads each order's number, the custom label (SKU) and quantity of each item, and the sold date, and writes them to the Orders tab of your sheet. Buyer names, usernames and addresses on the page are not read into anything AliSwift keeps or sends. If the page's wording changes and the usual reading finds no item, the row's text goes to Gemini with every piece other than an order number, custom label, quantity, amount or date replaced by a placeholder.
 
@@ -67,6 +68,7 @@ Every permission and host in `manifest.json` is listed below with a plain-langua
 | --- | --- |
 | `storage` | Stores extension configuration in Chrome sync storage, and local library items and caches in local storage. |
 | `identity` | Signs in to your Google account via OAuth 2.0 so the extension can read and append rows to your Google Sheets. |
+| `activeTab` | Lets the toolbar popup read the address of the current tab when you click the icon, to tell an AliExpress product page from any other page. It shows no install warning and gives no access to a page you have not just clicked the icon on. |
 | `alarms` | Sends queued error reports every 5 minutes and writes queued listings one at a time, even after the browser restarts. |
 | `downloads` (optional) | Saves product photos to a folder in Downloads only when the Include images setting is on and attaching to eBay's form did not work. |
 | `https://*.aliexpress.com/*`, `https://*.aliexpress.us/*` | Reads product page titles, prices, shipping rates and images, and displays the on-page save button. |
@@ -81,6 +83,7 @@ Every permission and host in `manifest.json` is listed below with a plain-langua
 
 - `https://www.googleapis.com/auth/spreadsheets`: allows AliSwift to create auto-configured dropshipping spreadsheets and write rows to the sheets you connect.
 - `https://www.googleapis.com/auth/drive.metadata.readonly`: requested during sign-in to display existing spreadsheets and verify pasted spreadsheet links without granting access to file contents.
+- `https://www.googleapis.com/auth/userinfo.profile`: requested during sign-in to show your Google account photo on the account button. Only the photo address is read; it is kept on this device for a day, and your name and email are not stored.
 
 ## Revoking access and data removal
 

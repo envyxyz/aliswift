@@ -4,6 +4,40 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-19
+
+The first stable release. AliSwift now covers the whole loop for an eBay dropshipper who sources from AliExpress: save a product, price it, write its listing, put it on eBay, and track the order that comes back, with every step working from Chrome and your own Google Sheet.
+
+### Added
+
+- **A launcher in the toolbar popup**: on any page that is not an AliExpress product page, the popup shows a search box for AliExpress and one-click **Seller Hub** and **Create listing** buttons, opening on the eBay site of your active sheet's marketplace (eBay US with no sheet). On other AliExpress pages it adds a line saying to open a product to save it. The popup reads the address of the current tab only when you click the icon (the `activeTab` permission, which shows no install warning).
+- **Your Google profile picture** on the account button, replacing the generic icon and the green dot. A Google default avatar is shown in greyscale. It needs the basic `userinfo.profile` scope, so you sign in once more after updating; your settings and AI keys are not touched. Only the photo address is read, and it is kept on the device for a day.
+- **Right-click menu on a product card**: **View Product** (opens the AliExpress page), **Add order** (opens the Add order form for that product) and **Delete**. It grows out of the pointer, flips to stay on screen and works from the keyboard.
+- **Click a product card to open it**: the card opens the product's details and listing. The status control and the old delete, add-order, View product and eye buttons are replaced by the card click and the menu; the status appears when you hover the card or focus it.
+- **Order links**: each order can keep the link to its eBay order page. New sheets get an **Order Link** column in the Orders tab. Importing from Seller Hub reads each order's link along with the order, and fills it into orders already in the sheet that have none. **Add order** needs the order link and reads the order number from it; **Edit order** can add one to an older order. The arrow on an order in the table opens it (Seller Hub by order number when there is no saved link), and the product name opens the AliExpress page.
+- **A prompt for missing columns when a sheet is connected**: Importing a sheet, or opening the Edit dialog of one, now tells you which of **SKU**, **Image** and **Order link** the sheet lacks, what each is for, where AliSwift would add it (after the last column of the Inventory or Orders tab, with a title in the header row) and what happens if you say no. Nothing is added without a Yes.
+- **A calendar for the order date**: the Add order form has its own date picker (month arrows, Today, full keyboard support) instead of the browser's.
+- **Click outside Create sheet to close it.**
+
+### Changed
+
+- **The product inspector is calmer and shows the same things with more room**: the SKU sits above the title with the status as a coloured dot and word (Draft yellow, Listed green, Not listed grey); the title stays on one line, fades at the end, scrolls like a conveyor belt when it is too long (paused under the pointer, still with reduced motion), turns accent on hover and opens the AliExpress page when clicked. Sections, labels, fees and flags have clearer hierarchy and spacing. A product with no listing shows a quiet "No listing yet." and a **Create listing** button in the footer; with a listing, **List on eBay** is the primary button. The Done button is gone.
+- **Import from Google Sheets is now Import sheet**, with the Google Sheets logo. The Create sheet explanation is an info icon next to its title. Info icons are smaller and centred with their labels.
+- **Signed out, Settings shows only a lock** and the sign-in message, centred; the tabs and panels come back when you sign in.
+- **The currency note under the prices reads "18.09 GBP ≈ 24.09 USD"**; the rate and date show on hover.
+- **Product cards are a little taller**, and their hover and context-menu transitions are short fades.
+- **The Delete product dialog** has even spacing, the product in its own box and the two buttons together on the right.
+
+### Fixed
+
+- **"+ Add tracking" was saved as a tracking number**: Seller Hub's empty tracking button was copied into the sheet. It is now ignored on import and shown as empty (the grey placeholder) everywhere, including for rows already saved that way.
+- **The Create sheet window showed a scrollbar** because a hidden tooltip counted as scrollable content.
+- **The popup had more empty space below its content than above.**
+
+### Security and privacy
+
+- New permission `activeTab` and new OAuth scope `userinfo.profile`, both explained in [PRIVACY.md](PRIVACY.md) and [docs/store-listing.md](docs/store-listing.md). Order links are only kept when they are `https` addresses on an eBay domain, and AliSwift still never fetches them.
+
 ## [0.10.0] - 2026-10-18
 
 ### Added
@@ -185,7 +219,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/envyxyz/aliswift/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/envyxyz/aliswift/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/envyxyz/aliswift/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/envyxyz/aliswift/compare/v0.7.1...v0.8.0

@@ -72,7 +72,7 @@ The manifest ships with the maintainer's OAuth client and a fixed extension key.
    node -e "const c=require('node:crypto');const d=c.createPublicKey(require('node:fs').readFileSync('key.pem')).export({type:'spki',format:'der'});console.log(d.toString('base64'));console.log(c.createHash('sha256').update(d).digest('hex').slice(0,32).replace(/[0-9a-f]/g,x=>'abcdefghijklmnop'[parseInt(x,16)]))"
    ```
 
-3. In [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Google Sheets API** and the **Google Drive API** (the import picker lists your spreadsheets with it), and set up the OAuth consent screen with the `spreadsheets` and `drive.metadata.readonly` scopes. Without the Drive API, the picker says it isn't enabled and pasting a link still works; without the scope on the consent screen, sign-in can fail.
+3. In [Google Cloud Console](https://console.cloud.google.com/), create a project, enable the **Google Sheets API** and the **Google Drive API** (the import picker lists your spreadsheets with it), and set up the OAuth consent screen with the `spreadsheets`, `drive.metadata.readonly` and `userinfo.profile` scopes. Without the Drive API, the picker says it isn't enabled and pasting a link still works; without the scope on the consent screen, sign-in can fail.
 4. Create an OAuth client ID of type **Chrome extension** and enter your extension ID as the item ID.
 5. Put the public key in `"key"` and the client ID in `oauth2.client_id` in `manifest.json`.
 

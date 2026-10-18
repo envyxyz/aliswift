@@ -12,16 +12,18 @@ Save products directly into a custom or auto-configured Google Sheet, or store t
 ### Key Features
 
 - One-Click Saving: Click the on-page save button on any AliExpress item page, or save from the extension popup.
+- Toolbar Launcher: On any other page the popup searches AliExpress and opens Seller Hub or a new eBay listing in one click.
 - Automated Pricing: Calculate your retail sell price instantly using custom formula rules (e.g., costPrice * 1.7) or target profit margins. Includes visible shipping and optional cost buffers.
 - Pre-Configured Spreadsheets: Auto-generate ready-to-use Google Sheets equipped with eBay fee breakdowns for UK, US, Global, Germany, Australia or Canada, profit calculations, currency exchange formulas, and customer order tracking.
 - Offline Local Library: No Google account required. Start dropshipping immediately by saving products directly to your browser storage, then transfer them to Google Sheets whenever you are ready.
 - Full Dashboard: Review saved products in a visual gallery, inspect supplier links, adjust listing statuses, and track fulfillment orders in a filterable table.
+- Order Links: Each order can keep the link to its eBay order page, read from Seller Hub when you import orders, and opened from the Orders table.
 - AI Listing Generation: Listings (search-optimized eBay title up to 80 characters, description and item specifics) are written in the background after you add a product, using your own Gemini, Groq or OpenRouter keys. Editable with one-click copy buttons for every field.
-- Inspector: An eye button on each dashboard card opens the product's cost, sell price, eBay fees, profit and margin, and its listing. Cost and sell price can be edited and are saved to your sheet; prices set by a sheet formula are never overwritten.
+- Inspector: Click a dashboard card to open the product's cost, sell price, eBay fees, profit and margin, and its listing. Cost and sell price can be edited and are saved to your sheet; prices set by a sheet formula are never overwritten.
 - eBay Listing Panel: An injected side panel on eBay listing pages (`ebay.com` and `ebay.co.uk`) that fills deterministic fields (title, SKU, description, price) and uses Gemini to fill item specifics. Unfillable fields become copy buttons; never presses "List it" and never fills Condition.
 - eBay Listing Photos: Optionally pass up to 12 AliExpress gallery photos to eBay's uploader when filling forms, or save them to your Downloads folder as a fallback.
 - Photos for Older Products: Automatically retrieves share photos from public AliExpress pages for previously saved items without a photo, updating dashboard cards and filling empty sheet cells.
-- Non-Destructive and Safe: AliSwift writes new rows, updates selected cells, and adds SKU or Image columns only if you say yes. It never deletes rows; Remove from Sheet (after a second click) clears only the cells AliSwift wrote in that product's row.
+- Non-Destructive and Safe: AliSwift writes new rows, updates selected cells, and adds SKU, Image or Order link columns only if you say yes, after telling you which ones your sheet lacks. It never deletes rows; Remove from Sheet (after a second click) clears only the cells AliSwift wrote in that product's row.
 - Privacy First: No analytics, no account registration. Product data is stored only on your device or in your own Sheet. Error reports (codes, timings, crash traces; never keys, sheet names or order data) go to the developer and can be turned off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are not included in settings export.
 
 ## Single-Purpose Statement
@@ -56,7 +58,10 @@ Each requested permission and host permission in manifest.json is strictly requi
 8. `https://*.aliexpress-media.com/*`:
    Required to load product media assets from AliExpress media CDN for Gemini listing generation.
 
-9. `downloads` (optional):
+9. `activeTab`:
+   Lets the toolbar popup see the address of the current tab only when you click the icon, to show the save form on an AliExpress product page and the launcher elsewhere. No page is read and nothing is sent.
+
+10. `downloads` (optional):
    Asked for only when you turn on image inclusion in settings; used to save product photos to your Downloads folder if eBay's uploader does not take them.
 
 ## Data Usage Disclosure Answers

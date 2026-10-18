@@ -22,7 +22,7 @@ AliSwift supports multi-currency sourcing:
 - When saving to your local library, items store prices in the original currency shown on the page. Conversion occurs seamlessly when you move products to your Google Sheet.
 
 ## 5. Why are there no photos on my dashboard?
-The sheet has no Image column. Accept the "Add the missing columns?" offer or add an Image URL column and map it in the sheet's Edit dialog. Photos saved from now on are also kept on this device as a fallback.
+The sheet has no Image column. Accept the "Add the missing columns?" offer (AliSwift also offers an Order link column for the Orders tab) or add an Image URL column and map it in the sheet's Edit dialog. Photos saved from now on are also kept on this device as a fallback.
 
 ## 6. Why did my older products have no photo, and how do they get one now?
 Older versions of AliSwift did not save photo links. When the dashboard lists products that have a link but no photo, the service worker requests each product's public AliExpress page without cookies or sign-in, reads the page's share image address, keeps it on this device, and fills it into an empty Image cell in your sheet or library record.
@@ -62,3 +62,6 @@ Upcoming planned features detailed on our roadmap include:
 - Adding eBay orders automatically (CSV import first).
 - Connecting AliExpress to pull orders and exact prices (research only).
 See [ROADMAP.md](../ROADMAP.md) for the complete development plan.
+
+## 14. What is the Order Link column, and what happens if my sheet has none?
+It keeps the link to each order's eBay page, so the arrow on an order in the dashboard opens that exact order. New sheets made by AliSwift have it. For a sheet you connected yourself, AliSwift tells you it is missing and offers to add it (a Yes is needed; nothing is added otherwise). Without it everything still works: the arrow opens Seller Hub by order number, and adding an order by hand uses the link only to read the order number.
