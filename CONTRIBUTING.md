@@ -90,6 +90,6 @@ Changing `"key"` changes the extension ID. Chrome then treats the build as a new
 
 1. Set the new version in `manifest.json` and move the **Unreleased** notes in `CHANGELOG.md` under it.
 2. Commit, then tag and push: `git tag v0.6.0 && git push origin main v0.6.0`.
-3. CI checks that the tag matches the manifest version, runs the tests, builds `aliswift-v0.6.0.zip` and publishes the GitHub release.
+3. CI checks that the tag matches the manifest version, runs the tests, builds `aliswift-v0.6.0.zip` and publishes the GitHub release with the version's `CHANGELOG.md` section as its notes. Don't create the release by hand; to change its text afterwards, use `gh release edit v0.6.0 --notes-file <file>`. (A release that already exists keeps its notes and only gets the zip.)
 
 The zip contains only what the extension needs. Dev files are excluded through `.gitattributes`.

@@ -16,7 +16,8 @@ jobs:
           node-version: 22
       - run: npm test
 
-  # Pushing a tag like v0.6.0 builds the zip and publishes a GitHub release.
+  # Pushing a tag like v0.6.0 builds the zip and publishes a GitHub release, its notes taken from the version's section of
+  # CHANGELOG.md. A release made by hand first (gh release create) keeps its notes and gets the zip; a re-run replaces it.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
@@ -29,7 +30,17 @@ jobs:
         run: test "v$(jq -r .version manifest.json)" = "$GITHUB_REF_NAME"
       - name: Build zip
         run: git archive --format=zip --prefix=aliswift/ -o "aliswift-$GITHUB_REF_NAME.zip" HEAD
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '/^## \[/ { if (on) exit; on = index($0, "## [" v "]") == 1; next } on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"; exit 1; }
       - name: Publish release
-        run: gh release create "$GITHUB_REF_NAME" "aliswift-$GITHUB_REF_NAME.zip" --generate-notes
+        run: |
+          zip="aliswift-$GITHUB_REF_NAME.zip"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$zip" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$zip" --title "AliSwift ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
