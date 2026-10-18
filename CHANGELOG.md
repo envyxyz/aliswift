@@ -4,6 +4,12 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-19
+
+### Fixed
+
+- **Import sheet hung on its loader.** Choosing a sheet to import never got past "Reading..." because the step that matches columns read an AI-key variable that no longer exists, so it failed before it started. It now checks the saved AI keys, so import works with or without a key. Nothing in your sheets or settings was changed by the failure.
+
 ## [1.0.0] - 2026-10-19
 
 The first stable release. AliSwift now covers the whole loop for an eBay dropshipper who sources from AliExpress: save a product, price it, write its listing, put it on eBay, and track the order that comes back, with every step working from Chrome and your own Google Sheet.
@@ -219,7 +225,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/envyxyz/aliswift/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/envyxyz/aliswift/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/envyxyz/aliswift/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/envyxyz/aliswift/compare/v0.8.0...v0.9.0

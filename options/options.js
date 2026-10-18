@@ -919,7 +919,7 @@ async function gsContinue() {
 async function gsMatch(skipAi, run = ++gsRun) {
   clearTimeout(gsAiTimer);
   $("gsSkipAi").hidden = true;
-  const ai = hasKey && !skipAi;
+  const ai = aiKeys.length > 0 && !skipAi; // aiKeys: the saved AI keys, kept up to date below
   $("gsReadMsg").textContent = ai ? "Matching columns with AI..." : "Matching columns...";
   if (ai) {
     gsAiTimer = setTimeout(() => {

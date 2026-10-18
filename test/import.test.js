@@ -469,3 +469,10 @@ test("a whole import, listing to mapping, sends only GETs to Drive and Sheets an
   }
   assert.deepEqual(t.calls.filter((c) => !google.includes(c)).map((c) => [c.method, c.url.split("/models/")[0]]), [["POST", "https://generativelanguage.googleapis.com/v1beta"]]);
 });
+
+test("the import dialog's AI step reads the saved keys; an undeclared name there left Import sheet stuck on its loader", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "options", "options.js"), "utf8");
+  assert.doesNotMatch(src, /\bhasKey\b/);
+  assert.match(src, /const ai = aiKeys\.length > 0 && !skipAi;/);
+  assert.match(src, /^let aiKeys = \[\];/m);
+});
