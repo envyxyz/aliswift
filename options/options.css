@@ -1,4 +1,7 @@
 main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
   max-width: 560px;
   margin: 0 auto;
   padding: 40px 16px 24px;
@@ -217,7 +220,8 @@ footer {
   display: flex;
   justify-content: center;
   gap: 16px;
-  margin-top: var(--sp-6);
+  margin-top: auto; /* the bottom of the page, whatever the tab's height */
+  padding-top: var(--sp-6);
   font-size: var(--fs-xs);
 }
 
@@ -664,14 +668,91 @@ table.map {
 }
 
 .key-name {
+  display: grid;
   flex: 1 1 12rem;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+.key-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.key-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone-grey-fg);
+}
+
+.key-dot[data-tone="green"] {
+  background: var(--tone-green-fg);
+}
+
+.key-dot[data-tone="amber"] {
+  background: var(--tone-amber-fg);
+}
+
+.key-dot[data-tone="red"] {
+  background: var(--tone-red-fg);
+}
+
+/* A setting's checkbox is a switch on the right, the label on the left */
+label.inline:has(> input[type="checkbox"]) {
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+label.inline > input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  order: 1;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  background: color-mix(in srgb, var(--text) 25%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast);
+}
+
+label.inline > input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 2px rgb(0 0 0 / 0.35);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+label.inline > input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+label.inline > input[type="checkbox"]:checked::before {
+  transform: translateX(16px);
+}
+
+label.inline > input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .key-actions {
   display: flex;
   gap: 4px;
+}
+
+.key-actions .icon-btn:disabled {
+  cursor: not-allowed;
 }
 
 .key-form {

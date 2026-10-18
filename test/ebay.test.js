@@ -199,7 +199,7 @@ test("the panel is told the product, the price in the marketplace's currency, an
   assert.deepEqual(ctx.target, { sku: "SKU-01", title: "Skull ring", price: "8.99", currency: "GBP", host: "www.ebay.co.uk" });
   assert.equal(ctx.listing.title, "Skull Ring Men Biker");
   assert.equal(ctx.listing.description, LISTING.listing.description);
-  assert.equal(ctx.listing.html, "<div>A heavy ring.</div><div><br></div><div><b>Material &amp; features:</b></div><div>- Steel</div>");
+  assert.equal(ctx.listing.html, "<div>A heavy ring.</div><div><br></div><div><b>Material &amp; Features:</b></div><ul><li>Steel</li></ul>");
   assert.deepEqual(ctx.listing.specifics, [{ name: "Material", value: "Steel" }]);
   await t.ask(listOn({ product: { ...PRODUCT, salePrice: null } }));
   assert.equal((await t.ask({ action: "ebayContext" }, FORM)).target.price, ""); // the form's price row then asks the seller
@@ -357,7 +357,7 @@ test("the marketplace of a library product follows its currency, with eBay Germa
   }
 });
 
-test("the panel's cards are the products with a listing or a queued one, from storage only: no sheet read, no AI call", async () => {
+test("the panel's cards are the products with a listing or a queued one, from storage, with each sheet read once for its current price, and no AI call", async () => {
   const OTHER = "1005002222222222";
   const QUEUED = "1005003333333333";
   const local = {
@@ -380,16 +380,33 @@ test("the panel's cards are the products with a listing or a queued one, from st
     { sheetId: SHEET_US, key: OTHER, sku: "US-07", title: "Other", price: 5, currency: "USD", state: "ready" },
   ]);
   assert.ok(!JSON.stringify(products).includes("Material")); // cards carry no listing text, only what they show
-  assert.equal(t.calls.length, 0);
+  assert.equal(t.calls.length, 2); // one read of the prices per sheet
 
-  // 60 products open at once, still with no request.
+  // 60 products open at once, still one read for their sheet.
   const many = {};
   for (let n = 0; n < 60; n++) many[`listing:${1005004000000000 + n}`] = { ...LISTING, sheetId: SHEET, createdAt: n, product: { sku: `S-${n}`, title: `P ${n}`, link: `https://www.aliexpress.com/item/${1005004000000000 + n}.html` } };
   const big = setup({ local: many });
   const list = (await big.ask({ action: "ebayProducts" }, FORM)).products;
   assert.equal(list.length, 60);
   assert.equal(list[0].sku, "S-59"); // newest first
-  assert.equal(big.calls.length, 0);
+  assert.equal(big.calls.length, 1);
+});
+
+test("the panel offers only Draft products, and a card can still be picked whatever its status", async () => {
+  const DRAFT = "1005005555555555";
+  const link = (id) => `https://www.aliexpress.com/item/${id}.html`;
+  const card = (id, at) => ({ ...LISTING, sheetId: "local", createdAt: at, product: { sku: id, title: id, link: link(id) } });
+  const local = {
+    library: [
+      { id: "a", sku: "L-01", title: "Draft one", link: link(DRAFT), status: "Draft" },
+      { id: "b", sku: "L-02", title: "Not listed", link: ALI },
+    ],
+    [`listing:${DRAFT}`]: card(DRAFT, 2),
+    [`listing:${ID}`]: card(ID, 1),
+  };
+  const t = setup({ local });
+  assert.deepEqual((await t.ask({ action: "ebayProducts" }, FORM)).products.map((p) => p.key), [DRAFT]);
+  assert.equal((await t.ask({ action: "ebaySelect", sheetId: "local", key: ID }, FORM)).success, true);
 });
 
 test("Mark listed sets the picked product to Listed once, and only for a product that was picked", async () => {
@@ -468,18 +485,17 @@ test("the AI points at things the page listed: its answer comes back checked, an
   assert.equal((await setup({}).ask({ action: "aiMap", task: "controls", items: list }, FORM)).code, "nokey");
 });
 
-test("floating panel placement is consistent at bottom 20px, collapses into a 48px circle, and has 300ms content delay transitions", () => {
+test("floating panel placement is consistent at bottom 20px, closes into a 48px ball, and opens by growing, then fading in", () => {
   const css = read("ebay.css");
-  // Consistent bottom: 20px, right: 20px
   assert.match(css, /\.ali\s*\{[\s\S]*?bottom:\s*20px;[\s\S]*?right:\s*20px;/);
   assert.match(css, /\.ao\s*\{[\s\S]*?right:\s*20px;[\s\S]*?bottom:\s*20px;/); // the orders panel's own box
-  // Circle ball 48x48 border-radius 50%
-  assert.match(css, /\.ali\[data-collapsed\]\s*\{[\s\S]*?width:\s*48px;[\s\S]*?height:\s*48px;[\s\S]*?border-radius:\s*50%;/);
-  // 300ms cubic-bezier transition
-  assert.match(css, /transition:\s*width\s*300ms[\s\S]*?height\s*300ms[\s\S]*?border-radius\s*300ms/);
-  // Content delayed fade-in (150ms delay on expand, 120ms immediate fade-out on collapse)
-  assert.match(css, /\.ali:not\(\[data-collapsed\]\)\s*\.ali-title[\s\S]*?opacity:\s*1;[\s\S]*?transition:\s*opacity\s*150ms\s*ease\s*150ms/);
-  assert.match(css, /\.ali\[data-collapsed\]\s*\.ali-title[\s\S]*?opacity:\s*0;[\s\S]*?transition:\s*opacity\s*120ms\s*ease\s*0s/);
+  assert.match(css, /\.ali\[data-collapsed\]\s*\{[\s\S]*?width:\s*48px;[\s\S]*?height:\s*48px;[\s\S]*?border-radius:\s*24px;/);
+  const code = read("content-ebay.js");
+  // the box grows first; its parts fade in after a delay, once it has its size
+  assert.match(code, /p\.animate\(\[box\(w0, h0, r0\), box\(w, h,/);
+  assert.match(code, /opacity: 0, transform: "translateY\(6px\)"[\s\S]*?delay: 380/);
+  // the page is never pushed sideways: only a bottom padding, and none mid-animation
+  assert.doesNotMatch(code, /paddingRight\s*=/);
 });
 
 test("orders page collapses by default, expands on circle click, collapses on outside click, and has toggle control", () => {

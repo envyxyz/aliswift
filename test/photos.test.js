@@ -126,116 +126,6 @@ function setup({ local = {}, sync = {}, downloads, images = {}, gemini = [], she
 
 /* A. Worker */
 
-test("A1. ebayContext carries photos: { on, count } and applies photo filtering rules", async () => {
-  const target = { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Ring", price: 8.99, region: "UK", link: LINK, image: IMG_A };
-  const detailsImages = [
-    IMG_A,
-    IMG_B,
-    "https://ae01.alicdn.com/kf/a.jpg_80x80.jpg",
-    "https://evil.example/x.jpg",
-    "http://ae01.alicdn.com/insecure.jpg",
-  ];
-
-  // 1. Setting off (no includeImages in sync) gives { on: false, count: 0 } even when details exist
-  const tOff = setup({
-    sync: {},
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": { images: detailsImages },
-    },
-  });
-  const rOff = await tOff.ask({ action: "ebayContext" });
-  assert.deepEqual(rOff.photos, { on: false, count: 0, variants: 0 });
-
-  // 2. Setting on: resized folds into A, foreign host and insecure URL dropped => count is 2 (A and B)
-  const tOn = setup({
-    sync: { includeImages: true },
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": { images: detailsImages },
-    },
-  });
-  const rOn = await tOn.ask({ action: "ebayContext" });
-  assert.deepEqual(rOn.photos, { on: true, count: 2, variants: 0 });
-
-  // 3. With no details but target.image set, count is 1
-  const tNoDetails = setup({
-    sync: { includeImages: true },
-    local: {
-      ebayTarget: target,
-    },
-  });
-  const rNoDetails = await tNoDetails.ask({ action: "ebayContext" });
-  assert.deepEqual(rNoDetails.photos, { on: true, count: 1, variants: 0 });
-
-  // 4. With 20 valid distinct images the count is 12 (PHOTOS_PER_LISTING)
-  const twentyImages = Array.from({ length: 20 }, (_, i) => `https://ae01.alicdn.com/kf/img${i}.jpg`);
-  const tTwenty = setup({
-    sync: { includeImages: true },
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": { images: twentyImages },
-    },
-  });
-  const rTwenty = await tTwenty.ask({ action: "ebayContext" });
-  assert.deepEqual(rTwenty.photos, { on: true, count: 12, variants: 0 });
-});
-
-test("A2. ebayPhoto { n }: returns image data with sequential names, enforces settings and sender access", async () => {
-  const target = { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", title: "Ring", price: 8.99, region: "UK", link: LINK, image: IMG_A };
-  const t = setup({
-    sync: { includeImages: true },
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": { images: [IMG_A, IMG_B, "https://ae01.alicdn.com/kf/unfetchable.jpg"] },
-    },
-    images: {
-      [IMG_A]: photo("image/jpeg"),
-      [IMG_B]: photo("image/png"),
-    },
-  });
-
-  // n 0 of a JPEG => img-01.jpg
-  const r0 = await t.ask({ action: "ebayPhoto", n: 0 });
-  assert.deepEqual(r0, { success: true, image: { mime: "image/jpeg", data: B64, name: "img-01.jpg" } });
-
-  // n 1 of a PNG => img-02.png
-  const r1 = await t.ask({ action: "ebayPhoto", n: 1 });
-  assert.deepEqual(r1, { success: true, image: { mime: "image/png", data: B64, name: "img-02.png" } });
-
-  // n out of range gives image null
-  const rOut = await t.ask({ action: "ebayPhoto", n: 99 });
-  assert.deepEqual(rOut, { success: true, image: null });
-
-  // photo that cannot be fetched gives image null
-  const rUnfetch = await t.ask({ action: "ebayPhoto", n: 2 });
-  assert.deepEqual(rUnfetch, { success: true, image: null });
-
-  // setting off gives success false mentioning "Photos are off"
-  const tOff = setup({
-    sync: { includeImages: false },
-    local: { ebayTarget: target },
-  });
-  const rOff = await tOff.ask({ action: "ebayPhoto", n: 0 });
-  assert.equal(rOff.success, false);
-  assert.match(rOff.error, /Photos are off/);
-
-  // no picked product gives error "Choose a product first."
-  const tNoPick = setup({
-    sync: { includeImages: true },
-    local: {},
-  });
-  const rNoPick = await tNoPick.ask({ action: "ebayPhoto", n: 0 });
-  assert.deepEqual(rNoPick, { success: false, error: "Choose a product first." });
-
-  // sender checks (ebayOnly): AliExpress page and options page are denied
-  const rAli = await t.ask({ action: "ebayPhoto", n: 0 }, ALI_PAGE);
-  assert.deepEqual(rAli, { success: false, error: "Not allowed." });
-
-  const rOpt = await t.ask({ action: "ebayPhoto", n: 0 }, OPTIONS);
-  assert.deepEqual(rOpt, { success: false, error: "Not allowed." });
-});
-
 test("A3. ebayPhotosSave with chrome.downloads stubbed saves photos to safe folders and returns stats", async () => {
   const urls = [
     "https://ae01.alicdn.com/kf/1.jpg",
@@ -262,7 +152,7 @@ test("A3. ebayPhotosSave with chrome.downloads stubbed saves photos to safe fold
     },
   });
 
-  const res = await t.ask({ action: "ebayPhotosSave" });
+  const res = await t.ask({ action: "ebayPhotosSave", urls });
   assert.deepEqual(res, {
     success: true,
     folder: "My-Sheet-------\\SKU-01",
@@ -288,7 +178,7 @@ test("A3. ebayPhotosSave with chrome.downloads stubbed saves photos to safe fold
       "details:1005001234567890": { images: [urls[0]] },
     },
   });
-  const rEmptyName = await tEmptyName.ask({ action: "ebayPhotosSave" });
+  const rEmptyName = await tEmptyName.ask({ action: "ebayPhotosSave", urls });
   assert.equal(rEmptyName.folder, "AliSwift\\SKU-01");
 
   // Local sheet uses "Library/<SKU>"
@@ -300,7 +190,7 @@ test("A3. ebayPhotosSave with chrome.downloads stubbed saves photos to safe fold
       "details:1005001234567890": { images: [urls[0]] },
     },
   });
-  const rLocal = await tLocal.ask({ action: "ebayPhotosSave" });
+  const rLocal = await tLocal.ask({ action: "ebayPhotosSave", urls });
   assert.equal(rLocal.folder, "Library\\L-01");
 
   // Target with no SKU uses its key
@@ -312,7 +202,7 @@ test("A3. ebayPhotosSave with chrome.downloads stubbed saves photos to safe fold
       "details:1005001234567890": { images: [urls[0]] },
     },
   });
-  const rNoSku = await tNoSku.ask({ action: "ebayPhotosSave" });
+  const rNoSku = await tNoSku.ask({ action: "ebayPhotosSave", urls });
   assert.equal(rNoSku.folder, "Library\\ITEM-999");
 });
 
@@ -335,7 +225,7 @@ test("A4. ebayPhotosSave error handling: partial failures, all throwing, missing
       "details:1005001234567890": { images: urls },
     },
   });
-  const rPartial = await tPartial.ask({ action: "ebayPhotosSave" });
+  const rPartial = await tPartial.ask({ action: "ebayPhotosSave", urls });
   assert.deepEqual(rPartial, { success: true, folder: "UK\\SKU-01", saved: 1, total: 2, variants: 0 });
 
   // When every download throws, fails with "The photos couldn't be saved."
@@ -351,7 +241,7 @@ test("A4. ebayPhotosSave error handling: partial failures, all throwing, missing
       "details:1005001234567890": { images: urls },
     },
   });
-  const rAllThrow = await tAllThrow.ask({ action: "ebayPhotosSave" });
+  const rAllThrow = await tAllThrow.ask({ action: "ebayPhotosSave", urls });
   assert.deepEqual(rAllThrow, { success: false, error: "The photos couldn't be saved." });
 
   // When chrome.downloads is undefined, fails with code "permission" and downloads nothing
@@ -363,25 +253,12 @@ test("A4. ebayPhotosSave error handling: partial failures, all throwing, missing
       "details:1005001234567890": { images: urls },
     },
   });
-  const rNoPerm = await tNoPerm.ask({ action: "ebayPhotosSave" });
+  const rNoPerm = await tNoPerm.ask({ action: "ebayPhotosSave", urls });
   assert.deepEqual(rNoPerm, {
     success: false,
     error: "Allow downloads in AliSwift's settings to save photos to a folder.",
     code: "permission",
   });
-
-  // Setting off => "Photos are off"
-  const tOff = setup({
-    downloads: true,
-    sync: { includeImages: false },
-    local: {
-      ebayTarget: { sheetId: SHEET, key: "SKU-01", sku: "SKU-01", link: LINK, region: "UK" },
-      "details:1005001234567890": { images: urls },
-    },
-  });
-  const rOff = await tOff.ask({ action: "ebayPhotosSave" });
-  assert.equal(rOff.success, false);
-  assert.match(rOff.error, /Photos are off/);
 
   // Not allowed from other senders
   const tAllowed = setup({
@@ -392,10 +269,10 @@ test("A4. ebayPhotosSave error handling: partial failures, all throwing, missing
       "details:1005001234567890": { images: urls },
     },
   });
-  const rAli = await tAllowed.ask({ action: "ebayPhotosSave" }, ALI_PAGE);
+  const rAli = await tAllowed.ask({ action: "ebayPhotosSave", urls }, ALI_PAGE);
   assert.deepEqual(rAli, { success: false, error: "Not allowed." });
 
-  const rOpt = await tAllowed.ask({ action: "ebayPhotosSave" }, OPTIONS);
+  const rOpt = await tAllowed.ask({ action: "ebayPhotosSave", urls }, OPTIONS);
   assert.deepEqual(rOpt, { success: false, error: "Not allowed." });
 });
 
@@ -680,18 +557,3 @@ test("C12. options.html has #includeImages and #imagesNote; saveIncludeImages re
   assert.match(awaitStatement, /await\s+chrome\.permissions\.request\s*\(\s*\{\s*permissions:\s*\[\s*["']downloads["']\s*\]\s*\}\s*\)/);
 });
 
-test("C13. content-ebay.js addPhotos sends only ebayPhoto and ebayPhotosSave, requesting save only after giveFiles", () => {
-  const contentEbayJs = fs.readFileSync(path.join(__dirname, "..", "content-ebay.js"), "utf8");
-  const fnMatch = /async\s+function\s+addPhotos\s*\([^)]*\)\s*\{([\s\S]*?)\n\s*(?:async\s+function|\/\*)/.exec(contentEbayJs);
-  assert.ok(fnMatch, "addPhotos function found");
-  const body = fnMatch[1];
-
-  const actions = [...body.matchAll(/action:\s*["']([^"']+)["']/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(actions)].sort(), ["ebayPhoto", "ebayPhotosSave"]);
-
-  const saveIndex = body.indexOf('"ebayPhotosSave"');
-  const giveIndex = body.indexOf("giveFiles(");
-  assert.ok(giveIndex !== -1, "giveFiles( found");
-  assert.ok(saveIndex !== -1, "ebayPhotosSave found");
-  assert.ok(saveIndex > giveIndex, "ebayPhotosSave is after giveFiles(");
-});

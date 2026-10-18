@@ -1235,17 +1235,22 @@ async function renderKeys() {
     const name = AI_PROVIDERS[k.provider].name;
     const [tone, status] = keyStatus(cool[k.id]);
     const paid = node("span", { className: "tag", textContent: k.paid ? "Paid" : "Free" });
-    const state = node("span", { className: "tag", textContent: status });
     if (k.paid) paid.dataset.tone = "blue";
-    state.dataset.tone = tone;
-    const btn = (text, label, act, off = false) => node("button", { type: "button", className: "btn btn-quiet btn-sm", textContent: text, disabled: off, ariaLabel: `${label} ${name} key ${i + 1}`, onclick: act });
+    // The status is a dot before the provider: green ready, amber busy or at its limit, red rejected.
+    const dot = node("span", { className: "key-dot", role: "img", title: status, ariaLabel: status });
+    dot.dataset.tone = tone;
+    const btn = (glyph, label, act, off = false) => {
+      const b = node("button", { type: "button", className: "icon-btn", title: label, disabled: off, ariaLabel: `${label} ${name} key ${i + 1}`, onclick: act });
+      b.innerHTML = svgIcon(ICONS[glyph], 16);
+      return b;
+    };
     return node("li", { className: "key-row" },
-      node("span", { className: "key-name" }, node("strong", { textContent: name }), " ", node("span", { className: "muted", textContent: k.model })),
-      paid, state,
+      node("span", { className: "key-name" }, node("span", { className: "key-head" }, dot, node("strong", { textContent: name })), node("span", { className: "muted", textContent: k.model })),
+      paid,
       node("span", { className: "key-actions" },
-        btn("Up", "Move up", () => moveKey(i, -1), i === 0),
-        btn("Down", "Move down", () => moveKey(i, 1), i === aiKeys.length - 1),
-        btn("Remove", "Remove", () => removeKey(i))));
+        btn("up", "Move up", () => moveKey(i, -1), i === 0),
+        btn("down", "Move down", () => moveKey(i, 1), i === aiKeys.length - 1),
+        btn("close", "Remove", () => removeKey(i))));
   }));
   $("keyState").textContent = aiKeys.length ? "" : "No key yet. Add one below; Get API keys says where.";
 }
@@ -1291,8 +1296,11 @@ $("keyCheck").addEventListener("click", async () => {
   if (!keyInput.reportValidity()) return;
   const p = AI_PROVIDERS[provider];
   // Asked here, from the click, so installing AliSwift asks for nothing new. Gemini's host is in the manifest.
-  if (!(await chrome.permissions.request({ origins: [p.host] }).catch(() => false))) {
-    $("keyState").textContent = `Allow AliSwift to reach ${p.name} to use this key.`;
+  let denied = "";
+  const ok = await chrome.permissions.request({ origins: [p.host] }).catch((e) => ((denied = e.message), false));
+  if (!ok) {
+    // A thrown error (say, a stale extension build without this host) differs from the seller pressing Block.
+    $("keyState").textContent = `Allow AliSwift to reach ${p.name} to use this key.${denied ? ` (${denied})` : ""}`;
     return;
   }
   $("keyCheck").disabled = true;
@@ -1512,7 +1520,7 @@ function showImagesNote(on, granted) {
   $("imagesNote").textContent = !on
     ? ""
     : granted
-      ? "Downloads allowed: the download button on AliExpress saves gallery and variant photos to your Downloads folder, and the eBay panel attaches photos to eBay's form."
+      ? "Downloads allowed: the download button on AliExpress saves gallery and variant photos to your Downloads folder, and Add from AliExpress on eBay's photo box saves the ones you pick."
       : "Downloads permission was not allowed. Switch this off and on to prompt for permission.";
 }
 

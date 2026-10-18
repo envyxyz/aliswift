@@ -244,61 +244,6 @@ test("1. cleanDetails keeps variants: filtering, capping at 40, length bounds, a
 });
 
 /* ================================================================
-   2. ebayContext reports photos.variants
-   ================================================================ */
-
-test("2. ebayContext reports photos.variants with includeImages setting, host filtering and deduplication", async () => {
-  const target = {
-    sheetId: SHEET_ID,
-    key: "SKU-01",
-    sku: "SKU-01",
-    title: "Ring",
-    price: 8.99,
-    region: "UK",
-    link: ITEM_LINK,
-    image: "https://ae01.alicdn.com/kf/a.jpg",
-  };
-
-  const variants = [
-    { group: "Color", name: "Purple", image: "https://ae01.alicdn.com/kf/v1.jpg" },
-    { group: "Color", name: "Blue", image: "https://ae-pic-a1.aliexpress-media.com/kf/v2.jpg" },
-    { group: "Color", name: "Green", image: "https://ae01.alicdn.com/kf/v3.jpg" },
-    { group: "Color", name: "Evil", image: "https://evil.example/v.jpg" },
-    { group: "Color", name: "Duplicate Purple", image: "https://ae01.alicdn.com/kf/v1.jpg" },
-  ];
-
-  // Setting on: 3 valid on alicdn/aliexpress-media, 1 evil dropped, 1 duplicate image deduped => variants: 3
-  const tOn = setup({
-    sync: { includeImages: true },
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": {
-        images: ["https://ae01.alicdn.com/kf/a.jpg"],
-        variants,
-      },
-    },
-  });
-
-  const resOn = await tOn.ask({ action: "ebayContext" }, EBAY_FORM);
-  assert.deepEqual(resOn.photos, { on: true, count: 1, variants: 3 });
-
-  // Setting off gives variants 0
-  const tOff = setup({
-    sync: { includeImages: false },
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": {
-        images: ["https://ae01.alicdn.com/kf/a.jpg"],
-        variants,
-      },
-    },
-  });
-
-  const resOff = await tOff.ask({ action: "ebayContext" }, EBAY_FORM);
-  assert.deepEqual(resOff.photos, { on: false, count: 0, variants: 0 });
-});
-
-/* ================================================================
    3. savePhotos downloads gallery and variants with safe folder names
    ================================================================ */
 
@@ -334,7 +279,7 @@ test("3. savePhotos downloads gallery to <sheet>/<SKU>/img-NN and variants to <s
     },
   });
 
-  const res = await t.ask({ action: "ebayPhotosSave" }, EBAY_FORM);
+  const res = await t.ask({ action: "ebayPhotosSave", urls: ["https://ae01.alicdn.com/kf/g1.jpg", ...variants.map((v) => v.image)] }, EBAY_FORM);
 
   assert.deepEqual(res, {
     success: true,
@@ -357,66 +302,40 @@ test("3. savePhotos downloads gallery to <sheet>/<SKU>/img-NN and variants to <s
    4. ebayPhotosSave with variantsOnly
    ================================================================ */
 
-test("4. ebayPhotosSave variantsOnly downloads only variants, and fails with error when no variants exist", async () => {
-  const target = {
-    sheetId: SHEET_ID,
-    key: "SKU-01",
-    sku: "SKU-01",
-    title: "Skull Ring",
-    price: 9.99,
-    region: "UK",
-    link: ITEM_LINK,
-    image: "https://ae01.alicdn.com/kf/g1.jpg",
-  };
-
+test("4. ebayPhotosSave saves only the photos picked, keeps the folder and sorting, and needs at least one", async () => {
+  const target = { sheetId: SHEET_ID, key: "SKU-01", sku: "SKU-01", title: "Skull Ring", price: 9.99, region: "UK", link: ITEM_LINK, image: "https://ae01.alicdn.com/kf/g1.jpg" };
   const variants = [
     { group: "Color", name: "Silver", image: "https://ae01.alicdn.com/kf/v1.jpg" },
     { group: "Color", name: "Gold", image: "https://ae01.alicdn.com/kf/v2.jpg" },
   ];
+  const details = { images: ["https://ae01.alicdn.com/kf/g1.jpg", "https://ae01.alicdn.com/kf/g2.jpg"], variants };
+  const t = setup({ downloads: true, local: { ebayTarget: target, "details:1005001234567890": details } });
 
-  // With variants and variantsOnly: true
-  const t = setup({
-    sync: { includeImages: true },
-    downloads: true,
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": {
-        images: ["https://ae01.alicdn.com/kf/g1.jpg", "https://ae01.alicdn.com/kf/g2.jpg"],
-        variants,
-      },
-    },
-  });
+  // Sorted (the default): the second gallery photo is numbered 01 since it is the first picked, a variant in its folder
+  const res = await t.ask({ action: "ebayPhotosSave", urls: ["https://ae01.alicdn.com/kf/g2.jpg", "https://ae01.alicdn.com/kf/v2.jpg"], folder: "", sort: true }, EBAY_FORM);
+  assert.deepEqual(res, { success: true, folder: "UK\\SKU-01", saved: 2, total: 2, variants: 2 });
+  assert.deepEqual(t.downloadCalls.map((c) => c.filename), ["UK/SKU-01/img-01.jpg", "UK/SKU-01/Gold/img-01.jpg"]);
 
-  const res = await t.ask({ action: "ebayPhotosSave", variantsOnly: true }, EBAY_FORM);
-  assert.deepEqual(res, {
-    success: true,
-    folder: "UK\\SKU-01",
-    saved: 2,
-    total: 2,
-    variants: 2,
-  });
-  assert.equal(t.downloadCalls.length, 2);
-  assert.ok(t.downloadCalls.every((c) => !c.filename.startsWith("UK/SKU-01/img-")), "no gallery photos downloaded");
+  // Unsorted, into the seller's folder (made safe, ".." dropped): all in one folder, named after the SKU
+  const t2 = setup({ downloads: true, local: { ebayTarget: target, "details:1005001234567890": details } });
+  const res2 = await t2.ask({ action: "ebayPhotosSave", urls: ["https://ae01.alicdn.com/kf/g1.jpg", "https://ae01.alicdn.com/kf/v1.jpg"], folder: "..\\Shop:/Photos", sort: false }, EBAY_FORM);
+  assert.equal(res2.folder, "Shop-\\Photos");
+  assert.deepEqual(t2.downloadCalls.map((c) => c.filename), ["Shop-/Photos/SKU-01-img-01.jpg", "Shop-/Photos/SKU-01-Silver.jpg"]);
+  // kept for next time, where the window and the AliExpress button read them
+  const list = await t2.ask({ action: "ebayPhotoList" }, EBAY_FORM);
+  assert.equal(list.folder, "Shop-/Photos");
+  assert.equal(list.sort, false);
+  assert.equal(list.sku, "SKU-01");
+  assert.deepEqual(list.photos, details.images);
+  assert.deepEqual(list.variants, [{ name: "Silver", url: variants[0].image }, { name: "Gold", url: variants[1].image }]);
 
-  // With no variants and variantsOnly: true
-  const tEmpty = setup({
-    sync: { includeImages: true },
-    downloads: true,
-    local: {
-      ebayTarget: target,
-      "details:1005001234567890": {
-        images: ["https://ae01.alicdn.com/kf/g1.jpg"],
-        variants: [],
-      },
-    },
-  });
+  // Nothing picked
+  const none = await t.ask({ action: "ebayPhotosSave", urls: [] }, EBAY_FORM);
+  assert.deepEqual(none, { success: false, error: "Pick at least one photo.", code: "nophotos" });
 
-  const resEmpty = await tEmpty.ask({ action: "ebayPhotosSave", variantsOnly: true }, EBAY_FORM);
-  assert.deepEqual(resEmpty, {
-    success: false,
-    error: "No photos found for this product.",
-    code: "nophotos",
-  });
+  // A small copy is fetched only for the product's own photos
+  const other = await t.ask({ action: "ebayThumb", url: "https://ae01.alicdn.com/kf/someone-else.jpg" }, EBAY_FORM);
+  assert.equal(other.success, false);
 });
 
 /* ================================================================
@@ -455,7 +374,7 @@ test("5. File type follows HEAD content-type (webp, png) or falls back to URL ex
     },
   });
 
-  const res = await t.ask({ action: "ebayPhotosSave" }, EBAY_FORM);
+  const res = await t.ask({ action: "ebayPhotosSave", urls: ["https://ae01.alicdn.com/kf/server-webp.jpg", "https://ae01.alicdn.com/kf/server-png.jpg"] }, EBAY_FORM);
   assert.equal(res.success, true);
   assert.equal(t.downloadCalls[0].filename, "UK/SKU-01/img-01.webp");
   assert.equal(t.downloadCalls[1].filename, "UK/SKU-01/Blue/img-01.png");
@@ -565,27 +484,3 @@ test("6. content.js getDetails() parses property blocks into variants without cl
   assert.ok(detailsFn.includes("sku-item--property") && !/\.click\(|dispatchEvent/.test(detailsFn));
 });
 
-/* ================================================================
-   7. content-ebay.js source checks
-   ================================================================ */
-
-test("7. content-ebay.js source text: saveVariants sends variantsOnly: true, called inside addPhotos if (ok) when variants truthy", () => {
-  const src = read("content-ebay.js");
-
-  // saveVariants sends { action: "ebayPhotosSave", variantsOnly: true }
-  assert.match(src, /action:\s*["']ebayPhotosSave["'][\s\S]*?variantsOnly:\s*true/);
-
-  // called only inside the if (ok) branch of addPhotos and only when variants is truthy
-  const addPhotosMatch = src.match(/async function addPhotos\(\)\s*\{[\s\S]*?\n  \}/)?.[0];
-  assert.ok(addPhotosMatch, "addPhotos function found");
-  assert.match(addPhotosMatch, /if\s*\(ok\)\s*\{[\s\S]*?if\s*\(variants\)\s*await\s*saveVariants\(variants\);/);
-
-  const saveVariantsCalls = [...src.matchAll(/\bsaveVariants\s*\(/g)];
-  assert.equal(saveVariantsCalls.length, 2, "only declaration and one call site inside addPhotos");
-
-  // row with id "variants" labelled "Variant photos"
-  assert.match(src, /row\(\s*["']variants["']\s*,\s*["']Variant photos["']/);
-
-  // failure message path mentions "folders named after"
-  assert.match(src, /folders named after/);
-});

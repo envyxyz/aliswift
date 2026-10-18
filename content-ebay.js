@@ -33,11 +33,12 @@ reportCrashes(); // lib/errors.js
   let resizer;
   let products = []; // the cards the worker offers: { sheetId, key, sku, title, price, currency, state }
   let current = null; // { sheetId, key } of the card in use
+  let choosing = false; // a card was clicked and the worker hasn't answered
   let ai = null; // the AI's reading of this form, asked at most once per Fill press: { list, pick } or {}
   const found = {}; // intent -> "page" | "ai" | "missing", for the report
   const rows = new Map(); // id -> { id, label, value, status, field?, hint? }
-  const results = {}; // step (write, basics, specifics, photos) -> true, or the failed reply: one per step, never overwritten by another
-  const saved = {}; // the page's own padding, put back on Done
+  const results = {}; // step (write, basics, specifics) -> true, or the failed reply: one per step, never overwritten by another
+  const saved = {}; // the page's own bottom padding, put back on Done
   const cardEls = new Map(); // "sheetId:key" -> { sig, el }: a card is drawn again only when its data changed
 
   // A page left open across an extension reload throws at once (not a rejected promise): that is "reloaded".
@@ -52,9 +53,9 @@ reportCrashes(); // lib/errors.js
 
   /* State */
 
-  const STEPS = ["write", "basics", "specifics", "photos"];
+  const STEPS = ["write", "basics", "specifics"];
   const BASICS = ["title", "sku", "description", "price", "format", "condition"];
-  const stepOf = (id) => (BASICS.includes(id) ? "basics" : id === "photos" || id === "variants" ? "photos" : "specifics");
+  const stepOf = (id) => (BASICS.includes(id) ? "basics" : "specifics");
   const end = () => endState(Object.fromEntries(STEPS.filter((s) => s in results).map((s) => [s, results[s]]))); // lib/errors.js
 
   const ready = () => Boolean(ctx?.target); // a product is chosen; with no listing yet, Write now writes it first
@@ -78,7 +79,7 @@ reportCrashes(); // lib/errors.js
       const need = n ? `, ${n} need you` : "";
       return !f ? `Nothing filled, ${c} to copy${need}.` : !c && !n ? `All ${f} fields filled.` : `${f} filled, ${c} to copy${need}`;
     }
-    if (ctx.listing) return "Pick your category on eBay, then press Fill form.";
+    if (ctx.listing) return ""; // the rows and the Fill form button say it all
     const q = ctx.queued;
     if (q?.failed) return `The listing isn't written yet. ${q.code ? errorView({ step: "write", code: q.code }).text : ""}`.trim();
     if (!q) return "No listing yet. Press Write now.";
@@ -120,10 +121,7 @@ reportCrashes(); // lib/errors.js
   }
 
   function renderCards() {
-    const words = ui.search.value.trim().toLowerCase();
-    const shown = products.filter((c) => !words || `${c.sku} ${c.title}`.toLowerCase().includes(words));
-    ui.search.hidden = products.length < 6;
-    const els = shown.map((c) => {
+    const els = products.map((c) => {
       const sig = JSON.stringify([c, isCurrent(c)]);
       const id = `${c.sheetId}:${c.key}`;
       let kept = cardEls.get(id);
@@ -134,10 +132,10 @@ reportCrashes(); // lib/errors.js
     if (els.length !== now.length || els.some((el, i) => now[i] !== el)) ui.cards.replaceChildren(...els);
     ui.pickNote.textContent = !products.length
       ? "Products you add from AliExpress show here once their listing is written."
-      : !shown.length ? "Nothing matches." : "";
+      : "";
   }
 
-  // The cards come from AliSwift's own storage (no sheet is read), so this is quick enough for every open of the list.
+  // The cards come from AliSwift's storage, their price and status from one read per sheet; the old cards show meanwhile.
   async function loadProducts() {
     const res = await send({ action: "ebayProducts" });
     products = res.success ? res.products : [];
@@ -146,14 +144,25 @@ reportCrashes(); // lib/errors.js
   }
 
   // The seller clicked a card: the worker makes it the product and answers its context, and the panel starts over with it.
+  // The card is pressed at once; the worker's answer (one sheet read for the price) follows.
   async function choose(card) {
-    if (running()) return;
+    if (running() || choosing) return;
+    const was = current;
+    choosing = true;
+    current = { sheetId: card.sheetId, key: card.key };
+    renderCards();
     const res = await send({ action: "ebaySelect", sheetId: card.sheetId, key: card.key });
+    choosing = false;
     if (!res.success) {
+      current = was;
       notice = { tone: "error", text: res.code ? errorView(res).text : res.error ?? "Couldn't pick that product." };
       return render();
     }
-    current = { sheetId: card.sheetId, key: card.key };
+    adopt(res);
+  }
+
+  // A product's context becomes the panel's, which starts over with it.
+  function adopt(res) {
     ctx = res;
     rows.clear();
     for (const s of Object.keys(results)) delete results[s];
@@ -164,6 +173,21 @@ reportCrashes(); // lib/errors.js
     ui.pickOpen = false;
     render();
   }
+
+  // The worker says the products changed (a listing written, a product sent from the dashboard): the cards are read
+  // again, and a product picked elsewhere, or the picked one's listing just written, is taken up without a reload.
+  let refreshing;
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.action !== "ebayRefresh" || !ui) return;
+    clearTimeout(refreshing);
+    refreshing = setTimeout(async () => {
+      const was = current?.key;
+      await loadProducts();
+      if (!ui || running() || choosing || (current?.key === was && !(ready() && !ctx.listing))) return;
+      const res = await send({ action: "ebayContext" });
+      if (ui && res.success && (current?.key !== was || res.listing)) adopt(res);
+    }, 400);
+  });
 
   /* Rows and the panel */
 
@@ -177,7 +201,9 @@ reportCrashes(); // lib/errors.js
       btn.dataset.copied = "";
       setTimeout(() => delete btn.dataset.copied, 1500);
     } else {
-      btn.closest(".copy-row").querySelector(".copy-meta").textContent = "Press Ctrl+C";
+      const meta = btn.closest(".copy-row").querySelector(".copy-meta");
+      meta.textContent = "Press Ctrl+C";
+      meta.style.cssText = "width:auto;padding:0 8px";
       setTimeout(render, 2000);
     }
   }
@@ -197,28 +223,81 @@ reportCrashes(); // lib/errors.js
       "li",
       { class: "copy-row" },
       h("span", { class: "copy-label", text: r.label }),
-      h("span", { class: "tag copy-meta", ...(tone && { "data-tone": tone }) }, icon(PATH[glyph], r.status === "filling" && "spin", 12), word),
+      h("span", { class: "tag copy-meta", role: "img", title: word, "aria-label": word, ...(tone && { "data-tone": tone }) }, icon(PATH[glyph], r.status === "filling" && "spin", 12)),
       acts,
       h("div", { class: "copy-value", text: r.value || "–" }),
       r.hint && h("p", { class: "ali-hint", text: r.hint }),
     );
   }
 
+  /* Motion. One easing for everything that moves, Apple's kind: quick to start, long to settle. */
+
+  const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const moving = () => ui.panel.dataset.anim !== undefined || ui.slide?.playState === "running";
+
+  // Draws, and slides the panel from its old height to the new one (it grows upward: it is anchored to the bottom). The
+  // product list has its own animation (showList), so a draw that opens or closes it does not slide the panel too.
   function render() {
     if (!ui) return;
+    const slide = ui.painted && !collapsed && !moving() && !calm();
+    const from = ui.panel.offsetHeight;
+    const listMoved = draw(ui.painted && !collapsed && !calm());
+    ui.painted = true;
+    const to = ui.panel.offsetHeight;
+    if (slide && !listMoved && from !== to) {
+      ui.slide = ui.panel.animate({ height: [`${from}px`, `${to}px`] }, { duration: 320, easing: EASE });
+      ui.slide.finished.then(reserve, () => {});
+    }
+  }
+
+  // The list of products grows from nothing (the panel's top edge rises with it), then its cards fade in one after
+  // another; closing folds it away. Started again from wherever it is when pressed mid-way.
+  function showList(open, animate) {
+    const el = ui.pickList;
+    const from = el.hidden ? 0 : el.offsetHeight;
+    ui.listAnim?.cancel();
+    el.hidden = false;
+    if (!animate) {
+      el.hidden = !open;
+      return;
+    }
+    const to = open ? el.offsetHeight : 0;
+    el.style.overflow = "hidden";
+    ui.listAnim = el.animate({ height: [`${from}px`, `${to}px`] }, { duration: open ? 420 : 300, easing: EASE });
+    if (open) {
+      [...ui.cards.children].slice(0, 8).forEach((card, i) =>
+        card.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 280, delay: 90 + i * 45, easing: EASE, fill: "backwards" }),
+      );
+    }
+    ui.listAnim.finished
+      .then(() => {
+        el.style.overflow = "";
+        el.hidden = !open;
+        reserve();
+      })
+      .catch(() => {}); // pressed again mid-way: the next animation takes over
+  }
+
+  // True when the product list opened or closed.
+  function draw(animate) {
     const { target } = ctx ?? {};
-    ui.prod.textContent = ready() ? `${target.sku ? `${target.sku} · ` : ""}${target.title}` : "No product chosen";
     const text = summary();
     ui.say.textContent = ui.mini.textContent = text;
+    ui.summary.hidden = !text && !running();
     ui.spin.toggleAttribute("hidden", !running());
     ui.panel.dataset.phase = phase;
 
-    // The product: the card in use, and the list to change it (open while none is chosen).
-    const open = ui.pickOpen || !ready();
-    ui.pickList.hidden = !open;
+    // The product: the card in use, and the list to change it (closed until pressed, chosen or not).
+    const open = ui.pickOpen;
+    const listMoved = open !== ui.listOpen;
     ui.pickBtn.setAttribute("aria-expanded", String(open));
-    ui.pickBtn.replaceChildren(h("span", { class: "ali-pick-now", text: ready() ? `${target.sku ? `${target.sku} · ` : ""}${target.title}` : "Choose a product" }), icon(PATH.more));
+    ui.pickNow.textContent = ready() ? target.sku || target.title : "Choose a product";
     renderCards();
+    if (listMoved) {
+      ui.listOpen = open;
+      showList(open, animate);
+    }
 
     const all = [...rows.values()];
     ui.list.replaceChildren(...["needs", "copy", "pending", "filling"].flatMap((s) => all.filter((r) => r.status === s)).map(rowEl));
@@ -256,9 +335,10 @@ reportCrashes(); // lib/errors.js
     ui.retry.textContent = secs > 0 ? `Try again in ${secs} s` : "Try again";
     ui.retry.setAttribute("aria-disabled", String(secs > 0));
     ui.fill.textContent = !ready() ? (products.length ? "Choose a product" : "Open dashboard") : busy ? "Working..." : ctx.listing ? "Fill form" : "Write now";
-    ui.fill.setAttribute("aria-disabled", String(busy || (!ready() && products.length > 0)));
+    ui.fill.setAttribute("aria-disabled", String(busy));
     if (busy) ui.fill.dataset.state = "loading";
     else delete ui.fill.dataset.state;
+    return listMoved;
   }
 
   // The buttons a message offers to fix what failed (the table's settings, keys, signin, reload): [words, action].
@@ -285,45 +365,64 @@ reportCrashes(); // lib/errors.js
     render();
   }
 
-  // Room for the panel so it never covers the form: padding on <html>, the only change made to eBay's layout.
+  // Room below the form for a narrow window, where the panel sits over its end: padding at the bottom of <html>, the only
+  // change made to eBay's layout. It only lengthens the page, so nothing on it moves; never set mid-animation.
   function reserve() {
-    const s = document.documentElement.style;
-    s.paddingRight = wide.matches && !collapsed ? "352px" : saved.right;
-    s.paddingBottom = wide.matches ? saved.bottom : `${collapsed ? 64 : ui.panel.offsetHeight + 32}px`;
+    if (!ui || moving()) return;
+    document.documentElement.style.paddingBottom = wide.matches ? saved.bottom : `${collapsed ? 64 : ui.panel.offsetHeight + 32}px`;
   }
 
+  // Opening: the ball grows into the panel (its content already at the open width, hidden), and once it has its size the
+  // content fades in, part after part. Closing: the content fades out, then the panel shrinks back into the ball. Either
+  // starts from wherever the other one is when pressed mid-way.
   function setCollapsed(on, animate = true) {
     collapsed = on;
     ui.collapsible.inert = on;
     ui.toggle.setAttribute("aria-expanded", String(!on));
     ui.toggle.setAttribute("aria-label", `${on ? "Expand" : "Collapse"} AliSwift panel`);
-    if (!animate) {
-      ui.panel.toggleAttribute("data-collapsed", on);
-      ui.panel.style.height = "";
+    const p = ui.panel;
+    const [w0, h0] = [p.offsetWidth, p.offsetHeight]; // where it is now, mid-animation included
+    const r0 = getComputedStyle(p).borderRadius;
+    for (const a of ui.anim ?? []) a.cancel();
+    ui.slide?.cancel();
+    if (!animate || calm()) {
+      p.toggleAttribute("data-collapsed", on);
+      delete p.dataset.anim;
+      return reserve();
+    }
+    const box = (w, h, r) => ({ width: `${w}px`, height: `${h}px`, borderRadius: r });
+    const bolt = (at) => ({ left: `${at}px`, top: `${at}px` });
+    const parts = () => [ui.title, ui.toggle, ...[...ui.body.children].filter((el) => !el.hidden), ui.foot];
+    const done = (a) => a.finished.then(() => {
+      delete p.dataset.anim;
       reserve();
-      return;
+    }, () => {}); // pressed again mid-way: the next animation takes over
+    if (!on) {
+      p.removeAttribute("data-collapsed");
+      const [w, h] = [p.offsetWidth, p.offsetHeight]; // the panel as it will stay
+      p.style.setProperty("--open-w", `${p.clientWidth}px`);
+      p.dataset.anim = "";
+      const grow = { duration: 560, easing: EASE };
+      ui.anim = [
+        p.animate([box(w0, h0, r0), box(w, h, getComputedStyle(p).borderRadius)], grow),
+        ui.bolt.animate([bolt(23), bolt(24)], grow),
+        ...parts().map((el, i) => el.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 340, delay: 380 + Math.min(i, 6) * 50, easing: EASE, fill: "backwards" })),
+      ];
+      return done(ui.anim[0]);
     }
-    if (on) {
-      ui.panel.style.height = `${ui.panel.offsetHeight}px`;
-      ui.panel.offsetHeight;
-      ui.panel.setAttribute("data-collapsed", "");
-      ui.panel.style.height = "48px";
-      setTimeout(() => {
-        if (collapsed) ui.panel.style.height = "";
-        reserve();
-      }, 300);
-    } else {
-      ui.panel.removeAttribute("data-collapsed");
-      const fullHeight = ui.panel.scrollHeight;
-      ui.panel.style.height = "48px";
-      ui.panel.offsetHeight;
-      ui.panel.style.height = `${fullHeight}px`;
-      setTimeout(() => {
-        if (!collapsed) ui.panel.style.height = "";
-        reserve();
-      }, 300);
-    }
-    reserve();
+    if (!p.dataset.anim) p.style.setProperty("--open-w", `${p.clientWidth}px`);
+    p.dataset.anim = "";
+    const shut = { duration: 400, delay: 110, easing: "cubic-bezier(0.4, 0, 0.2, 1)", fill: "forwards" };
+    ui.anim = [
+      p.animate([box(w0, h0, r0), box(48, 48, "24px")], shut),
+      ui.bolt.animate([bolt(24), bolt(23)], shut),
+      ...parts().map((el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: "ease-in", fill: "forwards" })),
+    ];
+    ui.anim[0].finished.then(() => {
+      p.setAttribute("data-collapsed", "");
+      for (const a of ui.anim) a.cancel();
+    }, () => {});
+    done(ui.anim[0]);
   }
 
   function mount() {
@@ -332,12 +431,11 @@ reportCrashes(); // lib/errors.js
       toggle,
       pickOpen: false,
       say: h("span"),
-      prod: h("span", { class: "ali-prod" }),
       mini: h("span", { class: "ali-mini" }),
       spin: icon(PATH.spin, "spin", 14),
       notice: h("div", { class: "notice", role: "alert", hidden: true }),
-      pickBtn: h("button", { type: "button", class: "ali-pick-btn", "aria-controls": "ali-pick-list" }),
-      search: h("input", { type: "search", class: "textbox__control ali-search", placeholder: "Search SKU or name", "aria-label": "Search products", hidden: true }),
+      pickNow: h("span", { class: "ali-pick-now" }),
+      bolt: icon(PATH.bolt, "bolt"),
       cards: h("ul", { class: "ali-cards", role: "list" }),
       pickNote: h("p", { class: "ali-hint" }),
       list: h("ul", { class: "ali-rows", role: "list" }),
@@ -348,7 +446,8 @@ reportCrashes(); // lib/errors.js
       logs: h("button", { type: "button", class: "btn btn-quiet btn-sm", id: "ali-logs", text: "Send logs", title: "Sends this run's report (the form's boxes and what happened, never your keys) to the developer", hidden: true, onclick: sendLogs }),
       retry: h("button", { type: "button", class: "btn btn-sm", id: "ali-retry", text: "Try again", hidden: true, onclick: retry }),
     };
-    ui.pickList = h("div", { class: "ali-pick-list", id: "ali-pick-list" }, ui.search, ui.cards, ui.pickNote);
+    ui.pickBtn = h("button", { type: "button", class: "ali-pick-btn", "aria-controls": "ali-pick-list" }, ui.pickNow, icon(PATH.more));
+    ui.pickList = h("div", { class: "ali-pick-list", id: "ali-pick-list" }, ui.cards, ui.pickNote);
     ui.filled = h("details", { class: "disclosure ali-filled", hidden: true }, h("summary", {}, "Filled ", ui.filledCount), ui.filledList);
     ui.collapsible = h(
       "div",
@@ -356,26 +455,26 @@ reportCrashes(); // lib/errors.js
       h(
         "div",
         { class: "ali-inner" },
-        h(
+        (ui.body = h(
           "div",
           { class: "ali-body" },
           h("section", { class: "ali-pick", "aria-label": "Product" }, ui.pickBtn, ui.pickList),
-          h("p", { class: "ali-summary", role: "status" }, ui.spin, ui.say),
+          (ui.summary = h("p", { class: "ali-summary", role: "status" }, ui.spin, ui.say)),
           ui.notice,
           ui.list,
           ui.filled,
-        ),
-        h(
+        )),
+        (ui.foot = h(
           "footer",
           { class: "ali-foot" },
           h("div", { class: "actions" }, ui.logs, ui.retry, ui.done, ui.fill),
-        ),
+        )),
       ),
     );
     ui.panel = h(
       "section",
       { class: "ali", role: "complementary", "aria-label": "AliSwift" },
-      h("header", { class: "ali-head" }, icon(PATH.bolt, "bolt"), h("div", { class: "ali-title" }, h("strong", { text: "AliSwift" }), ui.prod, ui.mini), toggle),
+      h("header", { class: "ali-head" }, ui.bolt, (ui.title = h("div", { class: "ali-title" }, h("strong", { text: "AliSwift" }), ui.mini)), toggle),
       ui.collapsible,
     );
     ui.panel.addEventListener("click", () => {
@@ -390,15 +489,14 @@ reportCrashes(); // lib/errors.js
     ui.fill.addEventListener("click", () => {
       if (!ready()) {
         if (!products.length) send({ action: "openPage", page: "dashboard" });
+        else if (!ui.pickOpen) ui.pickBtn.click(); // "Choose a product" opens the list
       } else if (!running()) fillForm();
     });
     ui.pickBtn.addEventListener("click", () => {
-      if (!ready()) return; // the list stays open while no product is chosen
       ui.pickOpen = !ui.pickOpen;
       if (ui.pickOpen) loadProducts();
       render();
     });
-    ui.search.addEventListener("input", renderCards);
     toggle.addEventListener("click", (e) => {
       e.stopPropagation();
       setCollapsed(!collapsed, true);
@@ -409,7 +507,7 @@ reportCrashes(); // lib/errors.js
       }
     });
 
-    Object.assign(saved, { right: document.documentElement.style.paddingRight, bottom: document.documentElement.style.paddingBottom });
+    saved.bottom = document.documentElement.style.paddingBottom;
     let stored = null;
     try {
       stored = sessionStorage.getItem(COLLAPSED_KEY);
@@ -432,7 +530,6 @@ reportCrashes(); // lib/errors.js
     if (t.sku) row("sku", "Custom label", t.sku, "pending");
     row("description", "Description", l?.description ?? "", "pending");
     row("price", `Price (${t.currency})`, t.price, "pending");
-    if (ctx.photos?.count) row("photos", "Photos", photoWords(ctx.photos.count), "pending");
   }
 
   function finish() {
@@ -441,7 +538,7 @@ reportCrashes(); // lib/errors.js
     clearTimeout(tick);
     resizer.disconnect();
     wide.removeEventListener("change", reserve);
-    Object.assign(document.documentElement.style, { paddingRight: saved.right, paddingBottom: saved.bottom });
+    document.documentElement.style.paddingBottom = saved.bottom;
     ui.host.remove();
     ui = null;
     send({ action: "ebayDone" });
@@ -453,7 +550,6 @@ reportCrashes(); // lib/errors.js
       report: "AliSwift form report",
       page: `${location.hostname}${location.pathname}`,
       target: ctx?.target ? { host: ctx.target.host, currency: ctx.target.currency } : null,
-      photos: ctx?.photos ? { on: ctx.photos.on, count: ctx.photos.count } : null,
       steps: Object.fromEntries(Object.entries(results).map(([s, r]) => [s, r === true ? "ok" : r.code ?? "unknown"])),
       found,
       rows: [...rows.values()].map((r) => [r.id, r.status]),
@@ -575,62 +671,6 @@ reportCrashes(); // lib/errors.js
     return missed;
   }
 
-  /* Photos (the setting "Include images"). They go to eBay's own uploader as files, the way a seller's choice in the file
-     picker does; when the form does not take them, the worker saves them to a folder in Downloads for the seller to drag in. */
-
-  const photoWords = (n) => `${n} ${n === 1 ? "photo" : "photos"}`;
-  const toFile = ({ mime, data, name }) => new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], name, { type: mime });
-
-  // A variant's photo has no place on the form of a single listing, so those are always saved, one folder per variant.
-  async function saveVariants(n) {
-    const saved = await send({ action: "ebayPhotosSave", variantsOnly: true });
-    const hint = saved.success
-      ? `Saved to Downloads\\${saved.folder}, one folder per variant.`
-      : saved.code === "permission" ? "Allow Downloads in AliSwift settings to save them to folders." : saved.error ?? "Couldn't save them.";
-    row("variants", "Variant photos", `${n} ${n === 1 ? "variant" : "variants"}`, saved.success ? "filled" : "needs", { hint });
-  }
-
-  // True when the form took them, else the failure: unfilled (saved to a folder, or not) or permission.
-  async function addPhotos() {
-    const count = ctx.photos.count;
-    const variants = ctx.photos.variants ?? 0;
-    row("photos", "Photos", photoWords(count), "filling");
-    render();
-    const files = [];
-    for (let n = 0; n < count && !dismissed; n++) {
-      const res = await send({ action: "ebayPhoto", n });
-      if (res.success && res.image) files.push(toFile(res.image));
-    }
-    if (dismissed) return true;
-    const input = await until(() => photoBox(document), 4000);
-    const zone = photoZone(document);
-    // The file box first, then a drop on the drop zone. A try counts when the form shows more photos than before.
-    const tries = [input && (() => giveFiles(input, files)), zone && (() => dropFiles(zone, files))].filter(Boolean);
-    let ok = false;
-    for (const give of files.length ? tries : []) {
-      const before = photoCount(document);
-      give();
-      ok = Boolean(await until(() => photoCount(document) > before, 12000));
-      if (ok) break;
-    }
-    found.photos = ok ? "attached" : "not attached";
-    if (ok) {
-      row("photos", "Photos", photoWords(files.length), "filled");
-      if (variants) await saveVariants(variants);
-      return true;
-    }
-    const saved = await send({ action: "ebayPhotosSave" });
-    const more = variants ? ` The ${variants === 1 ? "variant's photo is" : "variants' photos are"} in folders named after ${variants === 1 ? "it" : "them"}.` : "";
-    const hint = saved.success
-      ? `The form didn't take them. ${saved.saved} saved to Downloads\\${saved.folder}: drag them into the photo box.${more}`
-      : saved.code === "permission"
-        ? "The form didn't take them, and Downloads isn't allowed, so they couldn't be saved. Allow it in AliSwift settings, or add them yourself."
-        : `The form didn't take them. ${saved.error ?? "Add them yourself."}`;
-    found.photos += saved.success ? ", saved to a folder" : ", not saved";
-    row("photos", "Photos", photoWords(count), "needs", { field: zone, hint });
-    return { code: saved.code === "permission" ? "permission" : "unfilled" };
-  }
-
   // Lazily drawn parts of the form (the price, the description) only exist once they have scrolled into view.
   async function reveal() {
     const top = scrollY;
@@ -682,9 +722,17 @@ reportCrashes(); // lib/errors.js
       phase = "done";
       return render();
     }
+    // Show more first, so every item specific is drawn; eBay redraws them for it while the basics are filled.
+    if (runs("specifics")) await showAllSpecifics(document);
     if (runs("basics")) results.basics = (await fillBasics()) ? { code: "unfilled" } : true;
 
     if (runs("specifics")) {
+      // Typing the basics makes eBay save the draft and redraw the item specifics about 3 s later; a field read or set
+      // before that redraw is lost. So wait for it (when the basics ran) and for the specifics to be still.
+      phase = "reading";
+      render();
+      if (runs("basics")) await redrawn(document, 4500);
+      await settled(document);
       const cat = q('button[name="categoryId"]');
       const category = clean(`${cat?.textContent ?? ""} ${cat?.parentElement?.querySelector(".value-secondary")?.textContent ?? ""}`);
       const tried = new Set();
@@ -696,10 +744,6 @@ reportCrashes(); // lib/errors.js
         await fillSpecifics(category, tried);
       }
     }
-    if (runs("photos") && ctx.photos?.count && !dismissed && rows.get("photos")?.status !== "filled") {
-      phase = "filling";
-      results.photos = await addPhotos();
-    }
     phase = "done";
     render();
   }
@@ -709,7 +753,8 @@ reportCrashes(); // lib/errors.js
   // and got an answer (so a second look may find more).
   async function fillSpecifics(category, tried) {
     if (dismissed) return false;
-    const { fields } = extractFields(document);
+    let { fields } = extractFields(document);
+    if (!fields.length && (await settled(document))) ({ fields } = extractFields(document)); // caught mid-redraw
     const open = fields.filter((f) => !f.value && !tried.has(f.name));
     for (const f of fields) tried.add(f.name);
     const failed = (r) => results.specifics === true && (results.specifics = r);
@@ -756,6 +801,21 @@ reportCrashes(); // lib/errors.js
       row(name, f.label, value, ok ? "filled" : "copy", { field: f.el });
       render();
     }
+    // One more try for what didn't take, once the page is quiet: a redraw mid-way loses a click, not the value.
+    const missed = answers.filter(({ name }) => rows.get(name)?.status === "copy");
+    if (missed.length && !dismissed) {
+      await wait(800);
+      all = true;
+      for (const { name, value } of missed) {
+        const f = byName.get(name);
+        const ok = await fillSpecific(f, value);
+        all &&= ok;
+        row(name, f.label, value, ok ? "filled" : "copy", { field: f.el });
+        render();
+      }
+      const left = missed.filter(({ name }) => rows.get(name)?.status === "copy").map(({ name }) => byName.get(name));
+      if (left.length) send({ action: "diagFill", fields: left.map((f) => ({ label: f.label, kind: f.kind, custom: f.custom, listed: f.options.length })) });
+    }
     for (const f of open) if (f.required && !rows.has(f.name)) row(f.name, f.label, "", "needs", { field: f.el, hint: "Required. Choose a value on eBay." });
     return all;
   }
@@ -783,6 +843,172 @@ reportCrashes(); // lib/errors.js
     await markListed();
   }
   setInterval(watchPublished, 3000);
+
+  /* Add from AliExpress: a button under eBay's "Upload from computer" opens a window with the picked product's photos. The
+     ones the seller picks are saved to a folder in Downloads by the worker, to drag into eBay's photo box from there. */
+
+  let photos = null; // the window's parts once built: { host, dialog, grid, variants, ... }
+
+  // eBay draws its photo box late and may draw it again, so the button is put back whenever it is missing.
+  // ponytail: a one-second look; a MutationObserver if a redraw ever leaves it missing for long enough to matter.
+  function placePhotoButton() {
+    if (dismissed || !location.pathname.startsWith("/lstng") || document.getElementById("aliswift-photo-btn")) return;
+    // Found by its words, whatever element eBay draws it with: the element holding the text, or the button around it.
+    const words = document.evaluate("//*[normalize-space(text())='Upload from computer']", document.body, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    const upload = words?.closest('button, label, [role="button"]') ?? words;
+    if (!upload) return;
+    const btn = h("button", { type: "button", class: "ali-ae-btn" }, icon(PATH.bolt, "", 16), "Add from AliExpress");
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // the photo box opens the file picker on a click anywhere in it
+      openPhotos();
+    });
+    const host = shadowHost("aliswift-photo-btn", btn);
+    host.style.cssText += ";display:block;margin-top:12px;text-align:center";
+    upload.after(host);
+  }
+  setInterval(placePhotoButton, 1000);
+
+  const pickedUrls = () => [...photos.dialog.querySelectorAll('.ali-ph[aria-pressed="true"]')].map((b) => b.dataset.url);
+
+  // One photo tile: pressed means picked. Its small copy is fetched by the worker and fades in when it arrives.
+  function photoTile(url, picked, name) {
+    const img = h("img", { alt: name ?? "", draggable: "false" });
+    const tile = h("button", { type: "button", class: "ali-ph", "aria-pressed": String(picked), "aria-label": name ?? "Product photo", "data-url": url }, img, h("span", { class: "ali-ph-check" }, icon(PATH.check, "", 14)));
+    tile.addEventListener("click", () => {
+      tile.setAttribute("aria-pressed", String(tile.getAttribute("aria-pressed") !== "true"));
+      photoCounts();
+    });
+    send({ action: "ebayThumb", url }).then((res) => {
+      const pic = res.success && res.image;
+      if (!pic || !photos) return tile.classList.add("ali-ph-none");
+      const bytes = Uint8Array.from(atob(pic.data), (c) => c.charCodeAt(0));
+      img.src = URL.createObjectURL(new Blob([bytes], { type: pic.mime }));
+      photos.blobs.push(img.src);
+      img.addEventListener("load", () => img.toggleAttribute("data-loaded", true), { once: true });
+      img.addEventListener("error", () => tile.classList.add("ali-ph-none"), { once: true }); // the page may refuse blob: images
+    });
+    return h("li", {}, tile, name && h("span", { class: "ali-ph-name", text: name }));
+  }
+
+  // The words that follow the picks: how many, where they go, and what the Download button says.
+  function photoCounts() {
+    const n = pickedUrls().length;
+    const all = photos.dialog.querySelectorAll(".ali-ph").length;
+    photos.count.textContent = `${n} of ${all} picked`;
+    photos.toggleAll.textContent = n === all ? "Select none" : "Select all";
+    const dir = photos.folder.value.trim().replace(/[\\/]+$/, "") || photos.defaultFolder;
+    photos.where.textContent = photos.sort.checked
+      ? `Saves to Downloads\\${dir}\\${photos.sku}\\, each variant in a folder of its own.`
+      : `Saves straight into Downloads\\${dir}\\, each file named after ${photos.sku}.`;
+    photos.save.textContent = n ? `Download ${n} ${n === 1 ? "photo" : "photos"}` : "Download";
+    photos.save.disabled = !n || !photos.allowed;
+  }
+
+  function buildPhotos() {
+    const close = () => photos.dialog.close();
+    photos = {
+      blobs: [],
+      title: h("p", { class: "dialog-sub" }),
+      count: h("span"),
+      toggleAll: h("button", { type: "button", class: "btn btn-quiet btn-sm" }),
+      grid: h("ul", { class: "ali-ph-grid", role: "list" }),
+      variants: h("ul", { class: "ali-ph-grid", role: "list" }),
+      folder: h("input", { type: "text", "aria-label": "Folder in Downloads", spellcheck: "false", maxlength: "180" }),
+      sort: h("input", { type: "checkbox" }),
+      where: h("p", { class: "ali-hint" }),
+      note: h("div", { class: "notice", role: "status", hidden: true }),
+      save: h("button", { type: "button", class: "btn" }),
+    };
+    photos.variantsHead = h("h3", { class: "ali-ph-head", text: "Variants" });
+    photos.dialog = h(
+      "dialog",
+      { class: "ali-photos", "aria-labelledby": "ali-ph-title" },
+      h(
+        "form",
+        { onsubmit: (e) => e.preventDefault() },
+        h("div", { class: "dialog-head", "data-close": "" }, h("div", {}, h("h2", { id: "ali-ph-title", text: "Add from AliExpress" }), photos.title), h("button", { type: "button", class: "icon-btn", "aria-label": "Close", onclick: close }, icon(PATH.close))),
+        h(
+          "div",
+          { class: "dialog-body" },
+          h("div", { class: "ali-ph-bar" }, photos.count, photos.toggleAll),
+          photos.grid,
+          photos.variantsHead,
+          photos.variants,
+          h("div", { class: "ali-ph-save" }, h("label", { class: "ali-ph-label", text: "Save to" }), h("div", { class: "ali-ph-path" }, h("span", { text: "Downloads\\" }), photos.folder), h("label", { class: "inline" }, photos.sort, "Auto-sort downloads"), photos.where),
+          photos.note,
+        ),
+        h("div", { class: "dialog-foot actions" }, h("button", { type: "button", class: "btn btn-quiet", text: "Cancel", onclick: close }), photos.save),
+      ),
+    );
+    photos.toggleAll.addEventListener("click", () => {
+      const all = photos.toggleAll.textContent === "Select all";
+      for (const t of photos.dialog.querySelectorAll(".ali-ph")) t.setAttribute("aria-pressed", String(all));
+      photoCounts();
+    });
+    for (const el of [photos.folder, photos.sort]) el.addEventListener("input", photoCounts);
+    photos.save.addEventListener("click", savePicked);
+    photos.dialog.addEventListener("close", () => {
+      for (const src of photos.blobs.splice(0)) URL.revokeObjectURL(src);
+    });
+    photos.host = mountPanel("aliswift-photos", photos.dialog);
+  }
+
+  function photoNote(tone, text, fix) {
+    photos.note.hidden = !text;
+    photos.note.dataset.tone = tone;
+    photos.note.replaceChildren(icon(tone === "error" ? PATH.error : tone === "ok" ? PATH.check : PATH.warn, "", 16), h("div", { text }));
+    if (fix) photos.note.append(h("button", { type: "button", class: "btn btn-quiet btn-sm", text: "Open settings", onclick: openSettings }));
+  }
+
+  async function openPhotos() {
+    if (!photos) buildPhotos();
+    const res = await send({ action: "ebayPhotoList" });
+    photos.grid.replaceChildren();
+    photos.variants.replaceChildren();
+    photoNote("", "");
+    photos.save.hidden = false;
+    if (!res.success) {
+      photos.title.textContent = "";
+      photos.allowed = false;
+      photos.sku = "";
+      photos.defaultFolder = "AliSwift";
+      photoNote("warn", res.error ?? "Couldn't read this product's photos.");
+      photoCounts();
+      return photos.dialog.showModal();
+    }
+    Object.assign(photos, { allowed: res.allowed, sku: res.sku, defaultFolder: res.defaultFolder });
+    photos.title.textContent = `${res.sku}: pick the photos to save to your computer.`;
+    photos.grid.append(...res.photos.map((url) => photoTile(url, true)));
+    photos.variants.append(...res.variants.map((v) => photoTile(v.url, false, v.name)));
+    photos.variantsHead.hidden = photos.variants.hidden = !res.variants.length;
+    photos.folder.value = res.folder || res.defaultFolder;
+    photos.sort.checked = res.sort;
+    if (!res.allowed) photoNote("warn", "Allow downloads in AliSwift settings first (General tab), then open this again.", true);
+    photoCounts();
+    photos.dialog.showModal();
+    // The tiles arrive one after another.
+    [...photos.dialog.querySelectorAll(".ali-ph-grid > li")].slice(0, 16).forEach((li, i) =>
+      li.animate([{ opacity: 0, transform: "scale(0.96)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: 60 + i * 30, easing: EASE, fill: "backwards" }),
+    );
+  }
+
+  async function savePicked() {
+    if (photos.save.textContent === "Done") return photos.dialog.close();
+    const folder = photos.folder.value.trim();
+    photos.save.dataset.state = "loading";
+    photos.save.disabled = true;
+    const res = await send({ action: "ebayPhotosSave", urls: pickedUrls(), folder: folder === photos.defaultFolder ? "" : folder, sort: photos.sort.checked });
+    delete photos.save.dataset.state;
+    if (!res.success) {
+      photoNote("error", res.error ?? "The photos couldn't be saved.", res.code === "permission");
+      return photoCounts();
+    }
+    const missed = res.total - res.saved;
+    photoNote("ok", `Saved ${res.saved} ${res.saved === 1 ? "photo" : "photos"} to Downloads\\${res.folder}.${missed ? ` ${missed} couldn't be saved.` : ""} Drag them into the photo box.`);
+    photos.save.disabled = false;
+    photos.save.textContent = "Done";
+  }
 
   /* Start: idle until the page is the listing form. eBay may reach /lstng from /sl/... without a page load, so look again. */
 

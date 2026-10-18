@@ -1971,8 +1971,11 @@ async function callListProducts(sheetId) {
   return sendMessage({ action: "listProducts", sheetId });
 }
 
+// A changed status goes into the saved copy too, so the next open doesn't flash the old one before the sheet answers.
 async function callSetStatus(sheetId, product, status) {
-  return sendMessage(buildSetStatusRequest(sheetId, product, status));
+  const res = await sendMessage(buildSetStatusRequest(sheetId, product, status));
+  if (res.success && sheetId !== "local" && typeof chrome !== "undefined" && chrome.storage?.local) chrome.storage.local.set({ [`cache:${sheetId}`]: { at: dataAt, products: currentProducts } });
+  return res;
 }
 
 async function callListOrders(sheetId) {

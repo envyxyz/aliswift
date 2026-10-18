@@ -4,6 +4,28 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-18
+
+### Added
+
+- **Add from AliExpress** on eBay's photo box: a button under "Upload from computer" opens a window with the picked product's photos, its gallery and each variant's photo. Pick the ones you want and they are saved under your Downloads folder, to drag into the photo box. The window lets you change the folder (your sheet's name by default) and turn **Auto-sort downloads** on (each product's photos in a folder named after its SKU, each variant's in its own folder inside it) or off (all in one folder, files named after the SKU). Both choices are remembered and also apply to the download button on AliExpress pages.
+- **The eBay panel updates by itself**: a listing that finishes writing, or a product sent from the dashboard, shows in an open listing tab within a second, without a reload.
+
+### Changed
+
+- **Fill form and Try again no longer add photos** to eBay's form, and the Photos row is gone from the panel: photos come from Add from AliExpress. The setting is now **Allow photo downloads**.
+- **The panel's price is the sheet's current sell price**: a price changed in the sheet shows on the cards and is what Fill form types in (one read of each sheet when the list opens; the saved price stands when the sheet can't be read).
+- **Descriptions are formatted like eBay's own editor**: headings in capitals with a colon (Material & Features:, Size Details:, Perfect For:, Shipping:), and each run of "- " lines a real bullet list.
+- **The eBay panel moves smoothly**: the ball grows into the panel and its content then fades in, part after part; closing runs it backwards. The product list grows open and its cards fade in one by one, and the panel's height follows its content. The panel no longer pushes eBay's page sideways when it opens (on a narrow window it still adds room below the form).
+- **Panel details**: the product list starts closed and opens with its button (or with **Choose a product**); no search box or scrollbars; card titles are one line that fades out; a field's status is an icon (its word shows on hover); the "Pick your category" line is gone; the ball keeps its bolt centred and glows faintly on hover.
+- **The item specifics are filled after eBay redraws them**: eBay draws them again from scratch about 3 seconds after a box changes, and opening Show more does too; the panel opens Show more first, waits for the redraw, and finds a field again by its name when its box was replaced. A picked card is pressed at once.
+- **Settings**: checkboxes are switches on the right; the AI key list shows a status dot before the provider, the model on its own line, and arrow and cross buttons (greyed with a not-allowed cursor at the ends); the version and links sit at the bottom of the page.
+- **Dashboard**: a changed status shows at once and is kept in the saved copy, so the next open doesn't show the old one first.
+
+### Fixed
+
+- **Check asks for the provider's permission properly**: when Chrome refuses, the AI tab now says why instead of only "Allow AliSwift to reach…".
+
 ## [0.8.0] - 2026-10-18
 
 ### Added

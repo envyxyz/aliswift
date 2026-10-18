@@ -2,7 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseModel, extractFields, findBasic, findFormat, listControls, labelOf, matches, BASICS } = require("../lib/ebayform.js");
+const { parseModel, extractFields, findBasic, findFormat, listControls, labelOf, matches, live, BASICS } = require("../lib/ebayform.js");
 
 // The form code reads the page through querySelector(All), getAttribute, textContent and value. This is just enough DOM
 // for that, built from the saved-page fixture (test/fixtures/ebay-attributes.html), so no browser or package is needed.
@@ -240,4 +240,17 @@ test("matches: the same words or the same number, however eBay formats them", ()
   assert.equal(matches("", "x"), false);
   assert.equal(matches("£8.99", "8.99"), true);
   assert.deepEqual(Object.keys(BASICS), ["title", "sku", "skuSwitch", "description", "htmlSwitch", "price"]);
+});
+
+test("live: a field whose block eBay drew again is found again by its name; a block still on the page is kept", () => {
+  const old = extractFields(page()).fields.find((f) => f.name === "attributes.Features");
+  old.block.isConnected = true;
+  assert.equal(live(old), old);
+  const redrawn = page();
+  old.block.isConnected = false;
+  old.block.ownerDocument = redrawn;
+  const now = live(old);
+  assert.notEqual(now.block, old.block);
+  assert.equal(now.el, extractFields(redrawn).fields.find((f) => f.name === "attributes.Features").el);
+  assert.deepEqual([now.name, now.kind, now.options], [old.name, old.kind, old.options]); // what was read stays
 });

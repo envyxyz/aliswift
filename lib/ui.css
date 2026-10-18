@@ -1074,8 +1074,8 @@ details.disclosure > :not(summary) {
   outline-offset: 1px;
 }
 
+/* The new status shows at once; the sheet write follows. Only a second change waits for it. */
 .status[data-busy] {
-  opacity: 0.6;
   pointer-events: none;
 }
 

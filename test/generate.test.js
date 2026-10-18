@@ -126,7 +126,7 @@ test("toEbayHtml escapes the text, makes each line a div (a blank one a div with
   const html = L.toEbayHtml("Fits <script>x</script> & more.\n\n\nMaterial & features:\n- Steel\n  Size details \nshipping\nPerfect for\nGifts\n\n");
   assert.equal(
     html,
-    "<div>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</div><div><br></div><div><b>Material &amp; features:</b></div><div>- Steel</div><div><b>Size details</b></div><div><b>shipping</b></div><div><b>Perfect for</b></div><div>Gifts</div>",
+    "<div>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</div><div><br></div><div><b>Material &amp; Features:</b></div><ul><li>Steel</li></ul><div><b>Size Details:</b></div><div><b>Shipping:</b></div><div><b>Perfect For:</b></div><div>Gifts</div>",
   );
   assert.equal(L.toEbayHtml(null), "");
 });

@@ -40,11 +40,12 @@ const handlers = {
   saveListing: { pagesOnly: true, run: (request) => saveListing(request) },
   listOnEbay: { pagesOnly: true, run: (request) => listOnEbay(request) },
   ebayContext: { ebaySell: true, run: () => ebayContext() },
-  ebayProducts: { ebayOnly: true, run: () => ebayProducts() },
+  ebayProducts: { ebayOnly: true, run: (request, sender) => (rememberEbayTab(sender), ebayProducts()) },
   ebayWriteNow: { ebayOnly: true, run: () => ebayWriteNow() },
   ebayListed: { ebaySell: true, run: () => ebayListed() },
-  ebayPhoto: { ebayOnly: true, run: (request) => ebayPhoto(request.n) },
-  ebayPhotosSave: { ebayOnly: true, run: (request) => ebayPhotosSave(request.variantsOnly === true) },
+  ebayPhotoList: { ebayOnly: true, run: () => ebayPhotoList() },
+  ebayThumb: { ebayOnly: true, run: (request) => ebayThumb(request.url) },
+  ebayPhotosSave: { ebayOnly: true, run: (request) => ebayPhotosSave(request) },
   importOrders: { ordersOnly: true, run: (request) => importOrders(request) },
   aiMap: { aiTask: true, run: (request, sender) => aiMap(request, sender) },
   ebaySelect: { ebayOnly: true, run: (request) => ebaySelect(request) },
@@ -53,6 +54,7 @@ const handlers = {
   openPage: { ebayOnly: true, run: (request) => openPage(request.page) },
   sendLogs: { logsOk: true, run: async (request) => ({ success: true, ref: await diagReport(request.report) }) },
   diagCrash: { run: (request) => diagCrash(request) },
+  diagFill: { ebayOnly: true, run: (request) => diagFill(request) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
@@ -106,6 +108,13 @@ function diagError(action, error) {
 // A crash in a content script, as reportCrashes (lib/errors.js) sends it.
 async function diagCrash({ message, stack } = {}) {
   await diagEvent({ kind: "crash", where: "page", message: String(message ?? "").slice(0, 500), stack: String(stack ?? "").slice(0, 4000) });
+  return { success: true };
+}
+
+// Item specifics the eBay panel couldn't set, twice: eBay's names for them and how their boxes work, never a value.
+async function diagFill({ fields } = {}) {
+  const list = (Array.isArray(fields) ? fields : []).slice(0, 20).map((f) => ({ label: String(f?.label ?? "").slice(0, 60), kind: String(f?.kind ?? "").slice(0, 10), custom: Boolean(f?.custom), listed: Number(f?.listed) || 0 }));
+  await diagEvent({ kind: "error", action: "fill", code: "unfilled", fields: list });
   return { success: true };
 }
 
@@ -578,10 +587,12 @@ async function readProducts(sheet) {
     sku: sheet.skuCol, title: sheet.keywordsCol, link: sheet.linkCol, price: sheet.priceCol, salePrice: sheet.salePriceCol,
     status: sheet.statusCol, image: sheet.imageCol, profit: sheet.profitCol, margin: sheet.marginCol,
   };
-  const c = await readFields(sheet.id, sheet.sheetTab, cols, sheet.startRow);
+  const [c, file] = await Promise.all([
+    readFields(sheet.id, sheet.sheetTab, cols, sheet.startRow),
+    sheet.statusCol && sheetsFetch(`/${sheet.id}?fields=${encodeURIComponent("sheets(properties(title),merges)")}`),
+  ]);
   let shared = [];
   if (sheet.statusCol) {
-    const file = await sheetsFetch(`/${sheet.id}?fields=${encodeURIComponent("sheets(properties(title),merges)")}`);
     const tab = file.sheets?.find((s) => s.properties?.title === sheet.sheetTab);
     ({ values: c.status, shared } = expandMerges(c.status, tab?.merges, sheet.statusCol.charCodeAt(0) - 65, sheet.startRow));
   }
@@ -950,12 +961,13 @@ async function fillPhotos(sheetId, links, retry) {
   return { success: true, photos: found, fetched: Object.keys(found).length, missed: missed.length };
 }
 
-/* The setting "Include images when creating listings". The eBay panel gives the picked product's photos to eBay's own
-   uploader (this worker fetches them: the panel cannot read AliExpress's image host). When eBay's form does not take
-   them, the worker saves them with chrome.downloads, an optional permission the options page asks for when the setting is
-   switched on, to Downloads/<sheet name>/<SKU>/ for the seller to drag in. */
+/* Photos. "Add from AliExpress" on eBay's photo box shows the picked product's photos; the ones the seller picks are saved
+   with chrome.downloads (an optional permission the options page asks for) under Downloads, where they drag them in.
+   The AliExpress page's download button saves them the same way. */
 
-const photosOn = async () => Boolean((await chrome.storage.sync.get({ includeImages: false })).includeImages);
+// Where photos go: photoDir is a folder under Downloads ("" = the sheet's name); photoSort puts each product's photos in a
+// folder named after its SKU, and each variant's photo in a folder of its own inside it.
+const PHOTO_PREFS = { photoDir: "", photoSort: true };
 
 // Is this address a photo on one of AliExpress's image hosts?
 const onPhotoHost = (u) => {
@@ -984,27 +996,20 @@ async function photoSet(target, pageDetails = null) {
   return { urls, variants: variants.slice(0, VARIANTS_MAX) };
 }
 
-// The setting is on and a product is picked: { target, urls, variants }. The photo handlers all need that.
-async function photoTarget() {
-  if (!(await photosOn())) throw new Error("Photos are off. Turn on Include images in AliSwift settings.");
-  const { target } = await ebayPick();
-  if (!target) throw new Error("Choose a product first.");
-  return { target, ...(await photoSet(target)) };
-}
-
 const PHOTO_EXT = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
 const photoName = (n, ext) => `img-${String(Number(n) + 1).padStart(2, "0")}${ext}`;
 
-// Photo number n as { mime, data (base64), name } for the panel to turn into a file; image: null when it can't be fetched.
-async function ebayPhoto(n) {
-  const { urls } = await photoTarget();
-  const url = urls[Number(n)];
-  const image = url ? await fetchImage(url) : null;
-  return { success: true, image: image && { ...image, name: photoName(n, PHOTO_EXT[image.mime]) } };
-}
-
 // A folder or file name that is safe on Windows, Mac and Linux, and cannot climb out of Downloads.
 const safeName = (s) => text(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 60) || "AliSwift";
+
+// A folder the seller typed, under Downloads: each part made safe, at most three deep, "" when nothing is left of it.
+const safeDir = (s) =>
+  text(s)
+    .split(/[\\/]+/)
+    .map((part) => part.replace(/[<>:"|?*\u0000-\u001f]/g, "-").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 60))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("/");
 
 // One folder name per variant, after the variant: its name, with its group in front when two variants share a name
 // (Windows folders do not tell Black from black, so neither does this).
@@ -1033,38 +1038,76 @@ async function photoExt(url) {
   return m ? `.${m === "jpeg" ? "jpg" : m}`: ".jpg";
 }
 
-// The eBay panel's photos for the picked product (variantsOnly: the gallery went onto the form, a variant's photo has
-// no place on it).
-async function ebayPhotosSave(variantsOnly) {
-  const { target } = await photoTarget();
-  return savePhotos({ sheetId: target.sheetId, link: target.link, image: target.image, sku: target.sku || target.key, variantsOnly });
+// The picked product's photos for the "Add from AliExpress" window: { sku, photos: [url], variants: [{ name, url }],
+// folder (the seller's, "" for the sheet's name), defaultFolder, sort, allowed (the downloads permission) }.
+async function ebayPhotoList() {
+  const { target } = await ebayPick();
+  if (!target) throw new Error("Choose a product in the AliSwift panel first.");
+  const { urls, variants } = await photoSet(target);
+  const sheet = target.sheetId === LOCAL ? null : await sheetById(target.sheetId).catch(() => null);
+  const { photoDir, photoSort } = await chrome.storage.sync.get(PHOTO_PREFS);
+  return {
+    success: true,
+    sku: target.sku || target.key,
+    photos: urls,
+    variants: variantFolders(variants).map(({ dir, image }) => ({ name: dir, url: image })),
+    folder: photoDir,
+    defaultFolder: sheet ? safeName(sheet.name) : target.sheetId === LOCAL ? "Library" : "AliSwift",
+    sort: photoSort,
+    allowed: Boolean(chrome.downloads?.download),
+  };
 }
 
-// Saves a product's photos to Downloads/<sheet name>/<SKU>/img-01.jpg and so on, and each variant's photo to
-// Downloads/<sheet name>/<SKU>/<variant name>/img-01.jpg. The sheet is `sheetId`'s (LOCAL: Library), else the active
-// one. The SKU is the one the sheet's index (or the library) has for the item, so a formula SKU names the folder too;
-// else `sku`, else the title. `details` are what the AliExpress page sends. variantsOnly: just the variants. Needs the
-// downloads permission. The AliExpress page's button and the eBay panel both come here.
-async function savePhotos({ sheetId, link, image, title, sku, details, variantsOnly = false } = {}) {
+// A small copy of one of the picked product's photos for the window ({ mime, data }; null when it won't load). Fetched
+// here, since eBay's page cannot read AliExpress's image host; only the picked product's own photos.
+async function ebayThumb(url) {
+  const { target } = await ebayPick();
+  const { urls, variants } = target ? await photoSet(target) : { urls: [], variants: [] };
+  if (![...urls, ...variants.map((v) => v.image)].includes(url)) throw new Error("That isn't one of this product's photos.");
+  return { success: true, image: (await fetchImage(url + SMALL_PHOTO)) ?? (await fetchImage(url)) };
+}
+
+// The photos the seller picked in the window, saved; the folder and the sorting are kept for next time (and for the
+// AliExpress page's button).
+async function ebayPhotosSave({ urls, folder, sort } = {}) {
+  const { target } = await ebayPick();
+  if (!target) throw new Error("Choose a product first.");
+  if (!Array.isArray(urls) || !urls.length) throw Object.assign(new Error("Pick at least one photo."), { code: "nophotos" });
+  await chrome.storage.sync.set({ photoDir: safeDir(folder), photoSort: sort !== false });
+  return savePhotos({ sheetId: target.sheetId, link: target.link, image: target.image, sku: target.sku || target.key, urls: urls.map(String).slice(0, 60) });
+}
+
+// Saves a product's photos under Downloads. Sorted: to <folder>/<SKU>/img-01.jpg and so on, and each variant's photo to
+// <folder>/<SKU>/<variant name>/img-01.jpg. Unsorted: all in <folder>, as <SKU>-img-01.jpg and <SKU>-<variant name>.jpg.
+// The folder is the seller's (PHOTO_PREFS), else the sheet's name: `sheetId`'s (LOCAL: Library), else the active one's.
+// The SKU is the one the sheet's index (or the library) has for the item, so a formula SKU names the folder too; else
+// `sku`, else the title. `details` are what the AliExpress page sends; `urls`: only these of the product's photos.
+// Needs the downloads permission. The AliExpress page's button and the eBay window both come here.
+async function savePhotos({ sheetId, link, image, title, sku, details, urls: only } = {}) {
   if (!chrome.downloads?.download) throw Object.assign(new Error("Allow downloads in AliSwift's settings to save photos to a folder."), { code: "permission" });
   const sheet = sheetId === LOCAL ? null : sheetId ? await sheetById(sheetId) : await getActiveSheet();
   const id = itemIdOf(link);
   const known = !id ? "" : sheet ? (await sheetIndex(sheet).catch(() => ({})))[id]?.sku : (await libraryItem(id))?.sku;
   const { urls, variants } = await photoSet({ link, image }, cleanDetails(details));
-  const store = sheet ? sheet.name : sheetId === LOCAL ? "Library" : "AliSwift";
-  const folder = `${safeName(store)}/${safeName(known || sku || title || id || "product")}`;
+  const { photoDir, photoSort } = await chrome.storage.sync.get(PHOTO_PREFS);
+  const base = safeDir(photoDir) || safeName(sheet ? sheet.name : sheetId === LOCAL ? "Library" : "AliSwift");
+  const name = safeName(known || sku || title || id || "product");
+  const folder = photoSort ? `${base}/${name}` : base;
+  const wanted = (url) => !Array.isArray(only) || only.includes(url);
   const jobs = [
-    ...(variantsOnly ? [] : urls.map((url, i) => ({ url, dir: folder, n: i }))),
-    ...variantFolders(variants).map(({ dir, image: url }) => ({ url, dir: `${folder}/${dir}`, n: 0 })),
+    ...urls.filter(wanted).map((url, i) => ({ url, stem: photoSort ? photoName(i, "") : `${name}-${photoName(i, "")}` })),
+    ...variantFolders(variants)
+      .filter((v) => wanted(v.image))
+      .map(({ dir, image: url }) => ({ url, stem: photoSort ? `${dir}/${photoName(0, "")}` : `${name}-${dir}` })),
   ];
   if (!jobs.length) throw Object.assign(new Error("No photos found for this product."), { code: "nophotos" });
   let saved = 0;
   const stop = keepAlive(); // asking the host what each photo is, and saving, can take longer than the worker's 30 seconds
   try {
     const exts = await Promise.all(jobs.map((j) => photoExt(j.url)));
-    for (const [i, { url, dir, n }] of jobs.entries()) {
+    for (const [i, { url, stem }] of jobs.entries()) {
       try {
-        await chrome.downloads.download({ url, filename: `${dir}/${photoName(n, exts[i])}`, conflictAction: "uniquify" });
+        await chrome.downloads.download({ url, filename: `${folder}/${stem}${exts[i]}`, conflictAction: "uniquify" });
         saved++;
       } catch {
         // one photo that will not download does not stop the others
@@ -1074,8 +1117,25 @@ async function savePhotos({ sheetId, link, image, title, sku, details, variantsO
     stop();
   }
   if (!saved) throw new Error("The photos couldn't be saved.");
-  return { success: true, folder: folder.replace("/", "\\"), saved, total: jobs.length, variants: variants.length };
+  return { success: true, folder: folder.replaceAll("/", "\\"), saved, total: jobs.length, variants: variants.length };
 }
+
+/* The panels open on eBay's listing form are told when the products they offer change (a listing written, a product
+   sent from the dashboard), so the seller never reloads for it. Their tabs are kept here; a tab that is gone drops out. */
+
+async function rememberEbayTab(sender) {
+  const id = sender?.tab?.id;
+  if (id == null || !chrome.storage.session) return;
+  const { ebayTabs } = await chrome.storage.session.get({ ebayTabs: [] }).catch(() => ({ ebayTabs: [] }));
+  if (!ebayTabs.includes(id)) await chrome.storage.session.set({ ebayTabs: [...ebayTabs, id].slice(-20) }).catch(() => {});
+}
+
+chrome.storage.onChanged?.addListener(async (changes, area) => {
+  if (area !== "local" || !chrome.storage.session || !Object.keys(changes).some((k) => k.startsWith("listing:") || k === "aiQueue" || k === "ebayTarget")) return;
+  const { ebayTabs } = await chrome.storage.session.get({ ebayTabs: [] });
+  const told = await Promise.all(ebayTabs.map((id) => chrome.tabs.sendMessage(id, { action: "ebayRefresh" }).then(() => true, () => false)));
+  if (told.includes(false)) await chrome.storage.session.set({ ebayTabs: ebayTabs.filter((_, i) => told[i]) });
+});
 
 async function openOptions(tab = "general") {
   const url = chrome.runtime.getURL(`options/options.html${tab ? `#${tab}` : ""}`);
@@ -1645,16 +1705,16 @@ async function ebayPick() {
 // html, specifics } | null }. The description comes as plain text (to copy) and as eBay's HTML (to fill); the listing's
 // own item specifics are what the panel offers to copy when the AI step fails. With no listing yet, `queued` says where
 // its job stands: { at (when it runs), failed, code }, or null when nothing is queued.
-async function ebayContext() {
+async function ebayContext(fresh = true) {
   const { target, listing } = await ebayPick();
   if (!target) return { success: true, target: null, listing: null };
   const region = REGIONS[target.region] ?? REGIONS.UK;
-  const on = await photosOn();
   const job = listing ? null : (await chrome.storage.local.get({ aiQueue: [] })).aiQueue.find((j) => j.itemId === target.key);
+  // The price picked is a copy; the sheet's price now wins (and the picked price stays blank when it was in another currency).
+  const price = target.price == null || !fresh ? target.price : (await ebayProductList(target))[0]?.price ?? target.price;
   return {
     success: true,
-    photos: { on, ...(on ? await photoSet(target).then((s) => ({ count: s.urls.length, variants: s.variants.length })) : { count: 0, variants: 0 }) },
-    target: { sku: target.sku, title: target.title, price: target.price == null ? "" : target.price.toFixed(2), currency: region.currency, host: region.ebay },
+    target: { sku: target.sku, title: target.title, price: price == null ? "" : price.toFixed(2), currency: region.currency, host: region.ebay },
     listing: listing ? { title: listing.title, description: listing.description, html: toEbayHtml(listing.description), specifics: listing.itemSpecifics ?? [] } : null,
     ...(!listing && { queued: job ? { at: job.notBefore, failed: Boolean(job.failed), code: job.error ?? "" } : null }),
   };
@@ -1663,9 +1723,10 @@ async function ebayContext() {
 // The cards the panel offers, newest first, as { sheetId, key, sku, title, price, currency, state, product }: every product
 // with a kept listing (state "ready") or a queued one ("queued", or "failed" after its last try). All from storage, no
 // sheet read: a listing names its sheet since it is written, an older one is found in the sheets' indexes or the library,
-// and the SKU comes from the index (a formula SKU is read back there). A product whose sheet is gone is left out.
+// and the SKU comes from the index (a formula SKU is read back there). A product whose sheet is gone is left out, and so
+// is one whose status is not Draft. `only` ({ sheetId, key }) answers that one card whatever its status, reading one sheet.
 // ponytail: reads all of storage.local to find the listing:* keys; chrome.storage.local.getKeys once Chrome 130 is the minimum.
-async function ebayProductList() {
+async function ebayProductList(only) {
   const [{ sheets }, all] = await Promise.all([chrome.storage.sync.get({ sheets: [] }), chrome.storage.local.get(null)]);
   const index = (sheetId, itemId) => all[`index:${sheetId}`]?.items?.[itemId];
   const inLibrary = (itemId) => (all.library ?? []).some((x) => x.status !== "Discontinued" && itemIdOf(x.link) === itemId);
@@ -1688,7 +1749,47 @@ async function ebayProductList() {
     if (m && record?.listing) add(m[1], record);
   }
   for (const job of all.aiQueue ?? []) if (job?.itemId) add(job.itemId, null, job);
-  return [...cards.values()].sort((a, b) => b.at - a.at).slice(0, 200);
+  const list = only
+    ? [...cards.values()].filter((c) => c.sheetId === only.sheetId && c.key === only.key)
+    : [...cards.values()].sort((a, b) => b.at - a.at).slice(0, 200);
+  await freshRows(list, all.library);
+  return only ? list : list.filter((c) => c.status === undefined || c.status === "Draft");
+}
+
+// A listing keeps the sell price it was written with; the seller may have changed it in the sheet since. So the cards take
+// the price and status the sheet (one read per sheet) or the library holds now. A sheet that can't be read keeps the old
+// price, and its cards and those of a sheet with no Status column keep status undefined (offered whatever they are).
+// A variant group's status is one merged cell: its first row holds it, so the first row of a link wins.
+async function freshRows(list, library = []) {
+  const set = (card, row) => {
+    if (row?.salePrice > 0) {
+      card.price = row.salePrice;
+      card.product.salePrice = row.salePrice;
+    }
+    if (row) card.status = row.status;
+  };
+  const byLink = (rows) => {
+    const m = new Map();
+    for (const r of rows) if (!m.has(itemIdOf(r.link))) m.set(itemIdOf(r.link), r);
+    return m;
+  };
+  for (const sheetId of new Set(list.map((c) => c.sheetId))) {
+    const cards = list.filter((c) => c.sheetId === sheetId);
+    if (sheetId === LOCAL) {
+      const byId = byLink(libToProducts(library).map((p) => ({ ...p, status: p.status || "Not Listed" })));
+      for (const c of cards) set(c, byId.get(c.key) ?? { status: "Not Listed" });
+      continue;
+    }
+    try {
+      const sheet = await sheetById(sheetId);
+      if (!sheet.salePriceCol && !sheet.statusCol) continue;
+      const c = await readFields(sheet.id, sheet.sheetTab, { link: sheet.linkCol, salePrice: sheet.salePriceCol, status: sheet.statusCol }, sheet.startRow);
+      const byId = byLink(c.link.map((link, i) => ({ link, salePrice: num(c.salePrice[i]), status: sheet.statusCol ? text(c.status[i]) || "Not Listed" : undefined })));
+      for (const card of cards) set(card, byId.get(card.key) ?? (sheet.statusCol ? { status: "Not Listed" } : null));
+    } catch {
+      // the stored price stands and the card is offered
+    }
+  }
 }
 
 // The panel's "Write now": the picked product's job goes to the front of the queue (queued now when there is none) and
@@ -1731,7 +1832,7 @@ async function ebayProducts() {
   return {
     success: true,
     current: target ? { sheetId: target.sheetId, key: target.key } : null,
-    products: (await ebayProductList()).map(({ product, at, ...card }) => card),
+    products: (await ebayProductList()).map(({ product, at, status, ...card }) => card),
   };
 }
 
@@ -1739,10 +1840,10 @@ async function ebayProducts() {
 // names only the card (sheet and key): what is filled into the form, the price included, comes from this list and never
 // from the page.
 async function ebaySelect({ sheetId, key } = {}) {
-  const card = (await ebayProductList()).find((x) => x.sheetId === sheetId && x.key === key);
+  const [card] = await ebayProductList({ sheetId, key });
   if (!card) throw new Error("That product's listing is gone. Add it from its AliExpress page again.");
   await pickTarget(card.sheetId, card.key, card.product);
-  return ebayContext();
+  return ebayContext(false); // the card's price was just read
 }
 
 // The AI matches the form's empty item specifics to the saved listing, after directFillPlan took the ones the listing
