@@ -143,8 +143,30 @@ const ALARMS = { diag: 5, "ai-queue": 1 }; // minutes; Chrome's shortest is 1
 for (const [name, every] of Object.entries(ALARMS)) chrome.alarms?.get(name).then((a) => a || chrome.alarms.create(name, { periodInMinutes: every }));
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "diag") diagFlush();
-  if (alarm.name === "ai-queue") runAiQueue();
+  if (alarm.name === "ai-queue") {
+    runAiQueue();
+    reloadIfUpdated();
+  }
 });
+
+// True when version string `a` is newer than `b` (numbers separated by dots).
+function isNewerVersion(a, b) {
+  const [x, y] = [a, b].map((v) => String(v).split(".").map(Number));
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  return false;
+}
+
+// An extension loaded from a folder is updated by install/update.ps1, which writes manifest.json last. A newer version
+// there than the one running reloads the extension (not while a listing is being written). Does nothing for an
+// extension that came from a store, whose files never change under it.
+async function reloadIfUpdated() {
+  try {
+    const { version } = await (await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" })).json();
+    if (isNewerVersion(version, chrome.runtime.getManifest().version) && !aiQueueRun) chrome.runtime.reload();
+  } catch {
+    // a manifest being written, or no network call at all: the next minute looks again
+  }
+}
 
 // One write at a time: two adds racing would pick the same next row or SKU, and every library change
 // rewrites the whole array. A failed job never blocks the ones behind it.

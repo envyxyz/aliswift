@@ -4,6 +4,21 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-19
+
+### Added
+
+- **Automatic updates on Windows.** Download `setup-updates.bat` from the release, double-click it, and load the folder it opens in Chrome once (Load unpacked; Chrome does not let a script do that step). From then on a scheduled task checks GitHub at every sign-in and every hour, copies a newer release over the files (never deleting any), and the extension reloads itself within a minute, unless a listing is being written. Your settings, keys and sheets are untouched.
+  - Already loaded AliSwift from a folder? `setup-updates.bat "C:\path\to\that\folder"` keeps that copy up to date, so nothing is lost.
+  - The updater only writes into a folder whose manifest key is AliSwift's, only moves forward, and writes `manifest.json` last so a half-copied update never loads.
+  - Run the .bat again to update right away; stop the checks with `update.ps1 -Unschedule` (see the README).
+- Each release now carries `update.ps1` and `setup-updates.bat` next to the zip.
+
+### Changed
+
+- **Release notes come from this changelog.** The release workflow publishes a release's notes from the version's section here and attaches the zip and the update files; a release that already exists just gets the files. (The 1.0.1 and 1.0.2 workflow runs had failed on a release made by hand; their zips were attached afterwards.)
+- The FAQ's answer on removing a product now describes Delete and Removed as they work since 1.0.2.
+
 ## [1.0.2] - 2026-10-19
 
 ### Fixed
@@ -242,7 +257,8 @@ Multi-sheet presets, formula pricing, on-page button, spinner feedback.
 
 Initial release.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/envyxyz/aliswift/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/envyxyz/aliswift/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/envyxyz/aliswift/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/envyxyz/aliswift/compare/v0.10.0...v1.0.0

@@ -17,7 +17,7 @@ jobs:
       - run: npm test
 
   # Pushing a tag like v0.6.0 builds the zip and publishes a GitHub release, its notes taken from the version's section of
-  # CHANGELOG.md. A release made by hand first (gh release create) keeps its notes and gets the zip; a re-run replaces it.
+  # CHANGELOG.md, with the zip and the two update files (install/, linked as releases/latest/download/...). A release made by hand first (gh release create) keeps its notes and gets the zip; a re-run replaces it.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
@@ -38,9 +38,9 @@ jobs:
         run: |
           zip="aliswift-$GITHUB_REF_NAME.zip"
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$zip" --clobber
+            gh release upload "$GITHUB_REF_NAME" "$zip" install/update.ps1 install/setup-updates.bat --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$zip" --title "AliSwift ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+            gh release create "$GITHUB_REF_NAME" "$zip" install/update.ps1 install/setup-updates.bat --title "AliSwift ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
           fi
         env:
           GH_TOKEN: ${{ github.token }}

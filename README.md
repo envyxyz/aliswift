@@ -71,12 +71,21 @@ You can keep several sheets, each with its own column layout, pricing rules and 
 
 AliSwift is not on the Chrome Web Store yet. Installing takes about a minute.
 
-**From a release (recommended)**
+**On Windows, with automatic updates (recommended)**
+
+1. Download [setup-updates.bat](https://github.com/envyxyz/aliswift/releases/latest/download/setup-updates.bat) and double-click it. It puts the extension's files in `%LOCALAPPDATA%\AliSwift\extension` and opens that folder.
+2. Open `chrome://extensions` and enable **Developer mode** (top right).
+3. Click **Load unpacked** and select the folder the script opened.
+4. Pin AliSwift from the extensions menu so the icon stays accessible.
+
+That is all, ever. Chrome does not let a script add an extension for you, which is why step 3 is yours; but from then on a scheduled task checks GitHub for a new release at every sign-in and every hour, copies the new files over, and the extension reloads itself within a minute. Your settings, keys and sheets are untouched. To update right away, run `setup-updates.bat` again. To stop the checks: `powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\AliSwift\update.ps1" -Unschedule`.
+
+Already loaded AliSwift from a folder? Run `setup-updates.bat "C:\path\to\that\folder"` instead, so the same copy is kept up to date and nothing is lost (removing an extension in Chrome deletes its stored data).
+
+**By hand, from a release**
 
 1. Download the latest zip from [Releases](https://github.com/envyxyz/aliswift/releases) and unzip it to a folder named `aliswift`.
-2. Open `chrome://extensions` and enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the `aliswift` folder.
-4. Pin AliSwift from the extensions menu so the icon stays accessible.
+2. Follow steps 2 to 4 above, selecting that folder. To update, unzip the newer zip over the same folder and press the reload arrow on the extension's card.
 
 **From source**
 
@@ -84,7 +93,7 @@ AliSwift is not on the Chrome Web Store yet. Installing takes about a minute.
 git clone https://github.com/envyxyz/aliswift.git
 ```
 
-Then follow steps 2 to 4 above and select the cloned folder. There is no build step.
+Then follow steps 2 to 4 above and select the cloned folder. There is no build step. Update with `git pull` and the reload arrow.
 
 ## Set up
 

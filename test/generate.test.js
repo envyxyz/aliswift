@@ -467,6 +467,27 @@ test("a description is tidied to one layout (bullets as \"- \", headings spelled
   assert.match(L.DEFAULT_INSTRUCTIONS, /start with "- "/);
 });
 
+test("an extension updated on disk reloads itself only for a newer version", () => {
+  const t = setup();
+  const newer = (a, b) => t.ctx.isNewerVersion(a, b);
+  assert.deepEqual([newer("1.0.3", "1.0.2"), newer("1.1.0", "1.0.9"), newer("2.0", "1.9.9"), newer("1.0.10", "1.0.9")], [true, true, true, true]);
+  assert.deepEqual([newer("1.0.2", "1.0.2"), newer("1.0.1", "1.0.2"), newer("1.0", "1.0.0")], [false, false, false]);
+  const src = read("background.js");
+  assert.match(src, /isNewerVersion\(version, chrome\.runtime\.getManifest\(\)\.version\) && !aiQueueRun/); // never mid-write
+});
+
+test("install/update.ps1 only updates a folder with AliSwift's own key, writes manifest.json last, and the .bat keeps its line endings", () => {
+  const ps = read("install/update.ps1");
+  assert.match(ps, /\$local\.key -ne \$new\.key/);
+  assert.match(ps, /-ge \$latest\) \{ return/); // never goes backwards or repeats
+  assert.ok(ps.indexOf("if ($relative -eq 'manifest.json') { return }") < ps.indexOf("Copy-Item (Join-Path $src 'manifest.json')"));
+  assert.doesNotMatch(ps, /Remove-Item \$Extension|Remove-Item .*\$manifestPath/); // nothing in the user's folder is deleted
+  const bat = fs.readFileSync(path.join(__dirname, "..", "install/setup-updates.bat"), "utf8");
+  assert.ok(bat.includes("\r\n") && !bat.replaceAll("\r\n", "").includes("\n")); // every line ends CRLF, as a .bat needs
+  assert.match(read(".gitattributes"), /\*\.bat text eol=crlf/);
+  assert.match(read(".gitattributes"), /^\/install export-ignore/m); // the extension folder stays clean
+});
+
 test("a rejected key uses no try: the job stops until the keys change", async () => {
   const t = setup({ local: { geminiKey: KEY }, gemini: [{ status: 401, json: { error: { message: "API key not valid" } } }] });
   t.store.aiQueue = [{ itemId: ID, sheetId: SHEET, product: PRODUCT, notBefore: 0, tries: 2, error: "" }];

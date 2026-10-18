@@ -47,7 +47,7 @@ Requests are sent one at a time, and a timeout is not retried. Your AI keys stay
 
 ## 10. How do I undo an accidental product removal or change?
 AliSwift enforces a strict non-destructive policy. It writes new product rows, updates status, tracking and the prices you edit in the inspector (never a cell that holds a formula), and adds missing SKU or Image columns when you answer yes. It never deletes rows. The only cells it clears are the ones it wrote in a product's row when you press Remove from Sheet (after a second click) or Delete on the dashboard (after its confirmation).
-When you remove a product on the dashboard, AliSwift simply updates its status cell to Discontinued. A confirmation toast appears with an Undo button for 8 seconds. Clicking Undo immediately restores the item to its previous status. You can also view all discontinued products at any time under the Removed filter tab on the dashboard and restore them whenever you wish.
+**Delete** on the dashboard (right-click a card) asks first, then clears the product's row in the sheet like Remove from Sheet does, so there is no undo for it: add the product again from its AliExpress page. Setting a product's status to **Removed** only changes its status cell to Discontinued, with an Undo button for 8 seconds; those products stay under the Removed tab, where you can restore them.
 
 ## 11. How can I back up or transfer my settings to another computer?
 In the Settings page under the General tab, click **Export settings**. AliSwift generates an `aliswift-settings.json` file containing all your sheet configurations, pricing formulas, saved local library items, and photo links (photo links only, no image data). On your other computer, click **Import settings** to restore your setup. Your AI keys (which stay on this device in `storage.local`) and Google OAuth tokens are excluded from the backup file for your security.
@@ -65,3 +65,6 @@ See [ROADMAP.md](../ROADMAP.md) for the complete development plan.
 
 ## 14. What is the Order Link column, and what happens if my sheet has none?
 It keeps the link to each order's eBay page, so the arrow on an order in the dashboard opens that exact order. New sheets made by AliSwift have it. For a sheet you connected yourself, AliSwift tells you it is missing and offers to add it (a Yes is needed; nothing is added otherwise). Without it everything still works: the arrow opens Seller Hub by order number, and adding an order by hand uses the link only to read the order number.
+
+## 15. How do I keep AliSwift up to date?
+AliSwift is loaded from a folder, so Chrome does not update it. On Windows, run `setup-updates.bat` from the [latest release](https://github.com/envyxyz/aliswift/releases/latest) once (see the README's Install section): a scheduled task then checks GitHub at every sign-in and every hour, replaces the files, and the extension reloads itself within a minute. It never deletes files in the folder, and it refuses to write into a folder whose manifest key is not AliSwift's. On another system, unzip the newest release over the folder and press the reload arrow on `chrome://extensions`.
