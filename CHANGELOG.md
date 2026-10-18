@@ -4,6 +4,14 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-19
+
+### Fixed
+
+- **The pencil on a sheet did nothing for sheets that have every column set.** Edit sheet now opens for them too (it stopped on a line that names missing columns when none were missing), so you can rename a sheet, change its SKU settings or delete it again.
+- **Dialogs, such as Add from AliExpress on eBay, no longer show the browser's wide grey scrollbar.** They get a thin, quiet one.
+
+
 ## [1.0.3] - 2026-10-19
 
 ### Added

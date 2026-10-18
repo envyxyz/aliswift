@@ -1149,6 +1149,8 @@ dialog form {
   gap: 16px;
   padding: 16px 24px;
   overflow-y: auto;
+  scrollbar-width: thin; /* a quiet bar instead of the browser's wide grey one */
+  scrollbar-color: var(--border) transparent;
 }
 
 /* Chrome lets keyboard users focus a scrolling body; keep its ring inside the dialog. */

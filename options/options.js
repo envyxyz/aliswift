@@ -190,6 +190,7 @@ function validateEdit() {
   $("moreCount").textContent = `${set} of ${optional.length} set`;
   const lack = lacking((k) => editForm.elements[fieldOf(k)].value.trim(), Boolean(oTab.value.trim()));
   $("colsOffer").hidden = !lack.length;
+  if (!lack.length) return; // nothing to say, and nameList([]) throws
   $("colsOfferText").textContent = `This sheet has no ${nameList(lack)} column. Without ${lack.length > 1 ? "them" : "it"}, AliSwift is less useful. AliSwift can add ${lack.length > 1 ? "them" : "it"} for you.`;
 }
 

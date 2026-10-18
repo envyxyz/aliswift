@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AliSwift",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "minimum_chrome_version": "119",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqhAugC9Y2g7NUkcp/SD+Ya8LJTAtsvhPHqL/4GFEYJRL6CfUbdU23QvhwuFmLtpDa8FLMc1bxdjNIe2tEQTGYZq1yfTNNEkOZAe4y3wi8eRxAWf3GPIkAwOPcH8Ikiyt/6F/m8KpfljFASULqy/6ZfjNO0SBkZqlTgYq4uHLcW6tQDTRtdaxYaw1HtQvlyegSdaKbOc/G/XhNZihtR6Pz190yDSFI5oDpWn2rhYiWu35viyyaQLyMC/7EB+kfC5jBSOInu1Zzbg/oSwn035EL0CtJX73XKFrSL2itfHstam5VM26aypA6m5U3hB06lP2zd/GzVyrxj/a2k48rq7c6wIDAQAB",
   "description": "Save AliExpress products to Google Sheets in one click. Scrapes title, price and shipping, then adds your sell price.",
