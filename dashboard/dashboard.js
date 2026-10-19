@@ -1019,8 +1019,12 @@ function createProductCard(product, { currencyCode = "", isRemovedView = false }
   // The card itself opens the inspector (numbers, then listing). Its other controls keep their own clicks, and a click
   // that ended a text selection is not one. Right click (or the menu key) opens View Product, Add order and Delete.
   card.tabIndex = 0;
+  // A choice in the status menu ends with a click that can land on the card behind the closing menu: any press on the
+  // status, or its change, shuts the card's own click for a moment.
+  let statusAt = 0;
+  for (const type of ["pointerdown", "pointerup", "change", "click"]) card.addEventListener(type, (e) => e.target.closest?.("select, .status") && (statusAt = Date.now()), true);
   card.addEventListener("click", (e) => {
-    if (e.target.closest("button, a, select, .status, .tag, .tip") || window.getSelection().toString()) return;
+    if (Date.now() - statusAt < 700 || e.target.closest("button, a, select, .status, .tag, .tip") || window.getSelection().toString()) return;
     openInspector(product, card);
   });
   card.addEventListener("keydown", (e) => {

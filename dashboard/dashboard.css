@@ -265,7 +265,10 @@ textarea {
     transition: opacity 140ms ease-out;
   }
 
-  .card:is(:hover, :focus-within) .card-slot {
+  /* An open status menu keeps it too: the menu is a child of the status, so it would otherwise lose its pointer events (and
+     let the press through to the card) the moment the pointer is over the menu and the card no longer counts as hovered. */
+  .card:is(:hover, :focus-within) .card-slot,
+  .card-slot:has(select:open) {
     opacity: 1;
     pointer-events: auto;
     transition-duration: 220ms; /* a fade in you can see, a quicker one out */

@@ -8,6 +8,7 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **Changing a product's status on the dashboard no longer flickers or opens the listing panel.** The status menu used to lose its pointer events whenever the card stopped counting as hovered, so the pointer flipped between the menu and the card, and the click that chose a status could land on the card. The menu now holds the status in place while it is open, and a press or choice on the status never opens the card's panel.
 - **A required item specific the AI left empty is asked once more.** When Age Level, Type or another required box comes back empty from the first answer, AliSwift asks again for only those boxes with a short note, using your next AI key when you have one. If that comes back empty too, the box shows as needing you, as before.
 
 ### Added
