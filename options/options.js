@@ -1220,12 +1220,11 @@ $("gsDialog").addEventListener("close", () => {
   gsAfter = null;
 });
 
-/* AI tab: the key pool (lib/ai.js). Keys live in storage.local only: never synced, never exported, never shown back.
+/* AI tab: the key pool (lib/ai.js). Keys live in storage.local only: never synced, and exported only when the seller ticks Include my AI keys.
    A key is added only after Check has asked its provider which models it can use. */
 
 const keyInput = $("keyInput");
 let aiKeys = [];
-let checked = null; // { provider, key, paid } that the last Check passed
 
 function node(tag, props = {}, ...kids) {
   const el = Object.assign(document.createElement(tag), props);
@@ -1255,7 +1254,8 @@ async function renderKeys() {
       return b;
     };
     return node("li", { className: "key-row" },
-      node("span", { className: "key-name" }, node("span", { className: "key-head" }, dot, node("strong", { textContent: name })), node("span", { className: "muted", textContent: k.model })),
+      node("button", { type: "button", className: "key-name", title: `See or change this ${name} key`, ariaLabel: `${name} key ${i + 1}, ${k.model}. Open`, onclick: () => openKeyDialog({ id: k.id }) },
+        node("span", { className: "key-head" }, dot, node("strong", { textContent: name })), node("span", { className: "muted", textContent: k.model })),
       paid,
       node("span", { className: "key-actions" },
         btn("up", "Move up", () => moveKey(i, -1), i === 0),
@@ -1287,58 +1287,194 @@ function moveKey(i, by) {
 
 const removeKey = (i) => saveKeys(aiKeys.filter((_, j) => j !== i), { text: "Key removed.", keys: aiKeys });
 
-// Any change to what was checked means a new Check.
-function uncheck() {
-  checked = null;
-  $("keyModelRow").hidden = true;
+// Models worth picking, and why, for each provider and plan. Only those the key's own model list holds are shown.
+const AI_PICKS = {
+  gemini: {
+    free: [
+      ["gemini-3.8-flash", "Best listing quality. May cause rate limiting."],
+      ["gemini-3.5-flash-lite", "Fast, light and reads photos. Thinner listings, and it may skip item specifics."],
+    ],
+    paid: [
+      ["gemini-3.8-flash", "Best listing quality. Costs more per listing."],
+      ["gemini-3.5-flash-lite", "Cheapest and fastest. Thinner listings, and it may skip item specifics."],
+    ],
+  },
+  groq: {
+    free: [
+      ["openai/gpt-oss-120b", "Strong and very fast. Text only. Free limits are per account."],
+      ["llama-3.3-70b-versatile", "A reliable all-rounder. Text only."],
+      ["openai/gpt-oss-20b", "Quickest, but weaker at item specifics."],
+    ],
+    paid: [
+      ["openai/gpt-oss-120b", "Strong and very fast. Text only. Cheap per listing."],
+      ["llama-3.3-70b-versatile", "A reliable all-rounder. Text only."],
+      ["openai/gpt-oss-20b", "Cheapest and quickest, but weaker at item specifics."],
+    ],
+  },
+  openrouter: {
+    free: [
+      ["nvidia/nemotron-3-super-120b-a12b:free", "The default. Strong, but about 50 requests a day, and a busy one is skipped."],
+      ["nvidia/nemotron-3.5-super-vl:free", "A newer Nemotron with a very long memory. Try it when the default is busy."],
+      ["google/gemma-4-31b-it:free", "Google's open model: follows instructions well, clean wording."],
+      ["google/gemma-4-26b-a4b-it:free", "Lighter and faster than the 31B, but weaker at item specifics."],
+    ],
+    paid: [
+      ["google/gemini-3.8-flash", "Best listing quality for the price. Costs more than the budget models."],
+      ["anthropic/claude-sonnet-5.5", "Highest quality and careful with facts. Costs the most."],
+      ["anthropic/claude-haiku-5.5", "Careful with facts and cheap per listing."],
+      ["deepseek/deepseek-v4-flash", "The cheapest solid choice."],
+      ["openai/gpt-oss-120b", "Strong and very cheap."],
+    ],
+  },
+};
+
+// The round button beside the key field: an arrow, then a ring while the provider is asked, then a check or a cross.
+const go = $("keyGo");
+go.innerHTML =
+  svgIcon(ICONS.arrow, 18).replace("<svg ", '<svg class="go-arrow" ') +
+  svgIcon(ICONS.success, 18).replace("<svg ", '<svg class="go-ok" ') +
+  svgIcon(ICONS.close, 18).replace("<svg ", '<svg class="go-bad" ');
+let goTimer;
+function setGo(state, label = "Check this key") {
+  clearTimeout(goTimer);
+  go.dataset.state = state;
+  go.setAttribute("aria-label", label);
+  if (state === "bad") goTimer = setTimeout(() => setGo("idle"), 2500); // the message stays; the arrow comes back
 }
-for (const id of ["keyProvider", "keyPaid"]) $(id).addEventListener("change", uncheck);
+$("keyProvider").addEventListener("change", () => setGo("idle"));
 keyInput.addEventListener("input", () => {
-  uncheck();
+  setGo("idle");
   keyInput.setCustomValidity("");
 });
 
-$("keyCheck").addEventListener("click", async () => {
+$("keyForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (go.dataset.state === "loading") return;
   const provider = $("keyProvider").value;
-  const paid = $("keyPaid").value === "paid";
   const key = keyInput.value.trim(); // a pasted key often carries a space or a newline at its end
   keyInput.setCustomValidity(/^\S{20,200}$/.test(key) ? "" : "That doesn't look like an API key.");
   if (!keyInput.reportValidity()) return;
   const p = AI_PROVIDERS[provider];
   // Asked here, from the click, so installing AliSwift asks for nothing new. Gemini's host is in the manifest.
   let denied = "";
-  const ok = await chrome.permissions.request({ origins: [p.host] }).catch((e) => ((denied = e.message), false));
+  const ok = await chrome.permissions.request({ origins: [p.host] }).catch((err) => ((denied = err.message), false));
   if (!ok) {
     // A thrown error (say, a stale extension build without this host) differs from the seller pressing Block.
+    setGo("bad", "Key not accepted");
     $("keyState").textContent = `Allow AliSwift to reach ${p.name} to use this key.${denied ? ` (${denied})` : ""}`;
     return;
   }
-  $("keyCheck").disabled = true;
-  $("keyState").textContent = `Checking with ${p.name}…`;
+  setGo("loading", "Checking the key");
+  $("keyState").textContent = "";
   try {
-    const models = await aiModels(provider, key, paid);
+    // paid: true lists every model; the dialog narrows OpenRouter to its free ones when Free is chosen.
+    const models = await aiModels(provider, key, true);
     if (!models.length) throw new Error(`This ${p.name} key can't use any model AliSwift knows how to call.`);
-    $("keyModel").replaceChildren(...models.map((m) => node("option", { value: m, textContent: m })));
-    $("keyModel").value = models.includes(p.model) ? p.model : models[0];
-    checked = { provider, key, paid };
-    $("keyModelRow").hidden = false;
-    $("keyState").textContent = "The key works. Pick a model, then Add key.";
-    $("keyModel").focus();
-  } catch (e) {
-    $("keyState").textContent = e.message;
-  } finally {
-    $("keyCheck").disabled = false;
+    setGo("ok", "The key works");
+    await new Promise((r) => setTimeout(r, 550)); // long enough to see the check
+    openKeyDialog({ provider, key, models });
+  } catch (err) {
+    setGo("bad", "Key not accepted");
+    $("keyState").textContent = err.message;
   }
 });
 
-$("keyForm").addEventListener("submit", async (e) => {
+/* The key dialog: a new key that passed Check (choose its plan and model), or a saved one (see it, change them). */
+
+const kd = { id: "", provider: "", key: "", models: null };
+const kdPlan = () => document.querySelector('input[name="kdPlan"]:checked').value;
+
+// Refills the model list for the chosen plan, keeping `want` when the list has it.
+function kdRender(want) {
+  const plan = kdPlan();
+  let list = kd.models ?? [];
+  if (kd.provider === "openrouter" && plan === "free") list = list.filter((m) => m.endsWith(":free"));
+  if (want && !list.includes(want)) list = [want, ...list]; // a saved model stays choosable even when the list no longer holds it
+  $("kdModel").replaceChildren(...list.map((m) => node("option", { value: m, textContent: m })));
+  const fallback = AI_PICKS[kd.provider][plan].map(([m]) => m).find((m) => list.includes(m));
+  const initial = plan === "free" ? AI_PROVIDERS[kd.provider].model : fallback;
+  $("kdModel").value = list.includes(want) ? want : list.includes(initial) ? initial : (fallback ?? list[0]);
+  kdPicks();
+}
+
+function kdPicks() {
+  const have = new Set(kd.models ?? []);
+  const picks = AI_PICKS[kd.provider][kdPlan()].filter(([m]) => have.has(m));
+  $("kdPicks").hidden = !picks.length;
+  $("kdPickList").replaceChildren(
+    ...picks.map(([m, why]) => {
+      const b = node("button", { type: "button", className: "model-pick", onclick: () => (($("kdModel").value = m), kdPicks()) }, node("strong", { textContent: m }), node("span", { className: "muted", textContent: why }));
+      b.setAttribute("aria-pressed", String($("kdModel").value === m));
+      return node("li", {}, b);
+    }),
+  );
+}
+
+function openKeyDialog({ id = "", provider, key, models = null }) {
+  const saved = aiKeys.find((k) => k.id === id);
+  if (id && !saved) return;
+  Object.assign(kd, { id, provider: saved?.provider ?? provider, key: saved?.key ?? key, models });
+  $("kdTitle").textContent = `${id ? "" : "Add "}${AI_PROVIDERS[kd.provider].name} key`;
+  $("kdSave").textContent = id ? "Save" : "Add key";
+  $("kdKey").value = kd.key;
+  $("kdKey").type = "password";
+  $("kdEye").setAttribute("aria-pressed", "false");
+  $("kdEye").setAttribute("aria-label", "Show key");
+  $("kdEye").innerHTML = svgIcon(ICONS.eye, 18);
+  document.querySelector(`input[name="kdPlan"][value="${saved?.paid ? "paid" : "free"}"]`).checked = true;
+  kdRender(saved?.model);
+  $("keyDialog").showModal();
+  if (!models) {
+    // A saved key: its model list is asked for now, and the recommendations appear when it arrives.
+    const mine = kd.id;
+    aiModels(kd.provider, kd.key, true).then(
+      (list) => {
+        if (kd.id !== mine || !$("keyDialog").open) return;
+        kd.models = list;
+        kdRender($("kdModel").value);
+      },
+      () => {},
+    );
+  }
+}
+
+// A click on the key selects all of it and copies it; the line under it says so.
+let kdNoteTimer;
+$("kdKey").addEventListener("click", async () => {
+  $("kdKey").select();
+  const copied = await navigator.clipboard.writeText(kd.key).then(() => true, () => false);
+  $("kdNote").textContent = copied ? "Copied." : "Press Ctrl+C to copy.";
+  clearTimeout(kdNoteTimer);
+  kdNoteTimer = setTimeout(() => ($("kdNote").textContent = "Click the key to copy it."), 1800);
+});
+$("kdEye").addEventListener("click", () => {
+  const show = $("kdKey").type === "password";
+  $("kdKey").type = show ? "text" : "password";
+  $("kdEye").setAttribute("aria-pressed", String(show));
+  $("kdEye").setAttribute("aria-label", show ? "Hide key" : "Show key");
+  $("kdEye").innerHTML = svgIcon(show ? ICONS.eyeOff : ICONS.eye, 18);
+});
+for (const r of document.querySelectorAll('input[name="kdPlan"]')) r.addEventListener("change", () => kdRender($("kdModel").value));
+$("kdModel").addEventListener("change", kdPicks);
+$("kdCancel").addEventListener("click", () => $("keyDialog").close());
+$("keyDialog").addEventListener("close", () => {
+  kd.key = ""; // not kept in memory longer than the dialog
+  $("kdKey").value = "";
+  if (!kd.id) setGo("idle");
+});
+
+$("kdForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!checked) return $("keyCheck").focus();
-  const entry = { id: crypto.randomUUID(), ...checked, model: $("keyModel").value };
-  if (!(await saveKeys([...aiKeys, entry]))) return;
-  keyInput.value = "";
-  uncheck();
-  toast("Key added.");
+  const [paid, model] = [kdPlan() === "paid", $("kdModel").value];
+  if (!model) return;
+  if (kd.id) {
+    if (!(await saveKeys(aiKeys.map((k) => (k.id === kd.id ? { ...k, paid, model } : k))))) return;
+  } else {
+    if (!(await saveKeys([...aiKeys, { id: crypto.randomUUID(), provider: kd.provider, key: kd.key, paid, model }]))) return;
+    keyInput.value = "";
+    toast("Key added.");
+  }
+  $("keyDialog").close();
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {

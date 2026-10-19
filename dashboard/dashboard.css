@@ -15,11 +15,6 @@ textarea {
   line-height: 1.5;
 }
 
-textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .dash-sheet select {
   min-width: 160px;
 }

@@ -55,7 +55,7 @@ test("Gemini's retryDelay sets the cooldown, and the next key answers at once", 
   const t = setup({ keys: [key("a", "gemini"), key("b", "gemini")], replies: [busy([{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "37s" }]), answer({ ok: 1 })] });
   const before = Date.now();
   const r = plain(await t.call());
-  assert.deepEqual(r, { answer: { ok: 1 }, provider: "gemini", model: "gemini-3.5-flash-lite" });
+  assert.deepEqual(r, { answer: { ok: 1 }, provider: "gemini", keyId: "b", model: "gemini-3.5-flash-lite" });
   const rest = t.session.aiCool.a;
   assert.equal(rest.code, "rate");
   assert.ok(rest.until >= before + 37000 && rest.until <= Date.now() + 37000);
@@ -85,7 +85,7 @@ test("free keys go first, then paid; Groq and OpenRouter get the OpenAI chat req
   const keys = [key("p", "openrouter", { paid: true, model: "openai/gpt-x" }), key("g", "gemini"), key("q", "groq", { model: "openai/gpt-oss-120b" })];
   const t = setup({ keys, replies: [busy(), { status: 429, headers: { "retry-after": "20" }, json: {} }, chat({ ok: 3 })] });
   const r = plain(await t.call({ system: "Be brief.", user: "Hello", schema: { type: "OBJECT" }, images: [{ mime: "image/jpeg", data: "AAAA" }] }));
-  assert.deepEqual(r, { answer: { ok: 3 }, provider: "openrouter", model: "openai/gpt-x" });
+  assert.deepEqual(r, { answer: { ok: 3 }, provider: "openrouter", keyId: "p", model: "openai/gpt-x" });
   assert.deepEqual(t.calls.map((c) => new URL(c.url).hostname), ["generativelanguage.googleapis.com", "api.groq.com", "openrouter.ai"]);
   assert.equal(t.calls[0].body.contents[0].parts.length, 2); // Gemini got the photo
   const groq = t.calls[1];
@@ -116,10 +116,19 @@ test("when every key is out, the error is the one back soonest; rejected keys ne
   assert.equal(all.calls.length, 1);
 });
 
+test("a call can skip a key, so a second opinion comes from another one", async () => {
+  const t = setup({ keys: [key("a", "gemini"), key("b", "gemini")], replies: [answer({ ok: 1 }), answer({ ok: 2 })] });
+  assert.equal((await t.call()).keyId, "a");
+  assert.equal((await t.call({ user: "u", skip: ["a"] })).keyId, "b");
+  const one = setup({ keys: [key("a", "gemini")], replies: [] });
+  await assert.rejects(one.call({ user: "u", skip: ["a"] })); // every key skipped: no request is made
+  assert.equal(one.calls.length, 0);
+});
+
 test("a timeout is not retried and does not rest the key: the next key answers; a 5xx is retried once", async () => {
   const timeout = { throw: Object.assign(new Error("t"), { name: "TimeoutError" }) };
   const t = setup({ keys: [key("a", "gemini"), key("b", "groq", { paid: true })], replies: [timeout, chat({ ok: 1 })] });
-  assert.deepEqual(plain(await t.call()), { answer: { ok: 1 }, provider: "groq", model: "some/model:free" });
+  assert.deepEqual(plain(await t.call()), { answer: { ok: 1 }, provider: "groq", keyId: "b", model: "some/model:free" });
   assert.equal(t.calls.length, 2);
   assert.equal(t.session.aiCool, undefined);
   const one = setup({ keys: [key("a", "gemini")], replies: [timeout] });
@@ -136,7 +145,7 @@ test("an answer the caller's check rejects is asked once more on the fallback mo
     return raw;
   };
   const t = setup({ keys: [key("a", "gemini")], replies: [answer({ title: "" }), answer({ title: "Ring" })] });
-  assert.deepEqual(plain(await t.call({ user: "u", check })), { answer: { title: "Ring" }, provider: "gemini", model: "gemini-3.8-flash" });
+  assert.deepEqual(plain(await t.call({ user: "u", check })), { answer: { title: "Ring" }, provider: "gemini", keyId: "a", model: "gemini-3.8-flash" });
   assert.match(t.calls[1].url, /\/models\/gemini-3\.8-flash:generateContent$/);
   assert.deepEqual(t.calls[1].body.generationConfig.thinkingConfig, { thinkingLevel: "low" });
   assert.equal(t.calls[0].body.generationConfig.thinkingConfig, undefined);

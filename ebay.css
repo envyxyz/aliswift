@@ -702,8 +702,7 @@
 }
 
 .ali-ph-path:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--text) 35%, var(--border));
 }
 
 .ali-ph-path span {

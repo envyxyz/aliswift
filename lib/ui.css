@@ -290,6 +290,12 @@ input[type="radio"] {
   outline-offset: 1px;
 }
 
+/* Text fields show focus with a slightly stronger border, not the accent ring. */
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), select, textarea):focus-visible:not(:user-invalid) {
+  outline: none;
+  border-color: color-mix(in srgb, var(--text) 35%, var(--border));
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

@@ -1,6 +1,6 @@
 {
   "name": "aliswift",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Chrome extension that saves AliExpress products to Google Sheets.",
   "license": "MIT",

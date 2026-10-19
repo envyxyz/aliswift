@@ -178,29 +178,19 @@
             <button type="button" class="info" aria-label="About AI keys" aria-describedby="tip-key">
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 7.25v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="8" cy="5" r=".9" fill="currentColor" /></svg>
             </button>
-            <span id="tip-key" role="tooltip" class="tip">Used for writing listings, filling item specifics and mapping an imported sheet. Free keys are used first, top to bottom; a Paid key takes over the moment every free key is busy. Keys stay on this device. They aren't synced or exported, and each is sent only to its own provider.</span>
+            <span id="tip-key" role="tooltip" class="tip">Used for writing listings, filling item specifics and mapping an imported sheet. Free keys are used first, top to bottom; a Paid key takes over the moment every free key is busy. Keys stay on this device and aren't synced; each is sent only to its own provider. Click a key to see it or change its model.</span>
           </div>
           <ul id="keyList" class="key-list" aria-labelledby="h-key"></ul>
           <p id="keyState" class="muted" role="status"></p>
           <form id="keyForm" class="key-form">
-            <div class="fields-row">
+            <div class="key-add">
               <select id="keyProvider" aria-label="Provider">
                 <option value="gemini">Gemini</option>
                 <option value="groq">Groq</option>
                 <option value="openrouter">OpenRouter</option>
               </select>
-              <select id="keyPaid" aria-label="Free or paid">
-                <option value="free">Free</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
-            <div class="input-row">
               <input id="keyInput" type="password" aria-label="API key" required maxlength="200" placeholder="Paste an API key" autocomplete="off" spellcheck="false" />
-              <button type="button" class="btn btn-quiet" id="keyCheck">Check</button>
-            </div>
-            <div class="input-row" id="keyModelRow" hidden>
-              <select id="keyModel" aria-label="Model"></select>
-              <button type="submit" class="btn" id="keySave">Add key</button>
+              <button type="submit" class="key-go" id="keyGo" data-state="idle" aria-label="Check this key"></button>
             </div>
           </form>
           <details class="disclosure" id="keyGuide">
@@ -588,6 +578,43 @@
             <button id="colsBack" class="btn btn-quiet" type="submit" value="back">Go back</button>
             <button class="btn btn-quiet" type="submit" value="no" aria-describedby="colsIfNo">No</button>
             <button class="btn" type="submit" value="yes" aria-describedby="colsIfYes" autofocus>Yes, add them</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="keyDialog" aria-labelledby="kdTitle">
+      <form id="kdForm">
+        <div class="dialog-head"><h2 id="kdTitle">AI key</h2></div>
+        <div class="dialog-body">
+          <div>
+            <label for="kdKey">API key</label>
+            <div class="input-row">
+              <input id="kdKey" type="password" readonly spellcheck="false" autocomplete="off" aria-describedby="kdNote" title="Click to copy" />
+              <button type="button" class="icon-btn" id="kdEye" aria-label="Show key" aria-pressed="false"></button>
+            </div>
+            <p id="kdNote" class="note muted" role="status">Click the key to copy it.</p>
+          </div>
+          <div>
+            <span class="label" id="kdPlanLabel">Plan</span>
+            <div class="seg" role="radiogroup" aria-labelledby="kdPlanLabel">
+              <label><input type="radio" name="kdPlan" value="free" /><span>Free</span></label>
+              <label><input type="radio" name="kdPlan" value="paid" /><span>Paid</span></label>
+            </div>
+          </div>
+          <div>
+            <label for="kdModel">Model</label>
+            <select id="kdModel"></select>
+          </div>
+          <div id="kdPicks" hidden>
+            <span class="label">Recommended</span>
+            <ul class="picks" id="kdPickList"></ul>
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <div class="actions">
+            <button type="button" class="btn btn-quiet" id="kdCancel">Cancel</button>
+            <button type="submit" class="btn" id="kdSave">Save</button>
           </div>
         </div>
       </form>

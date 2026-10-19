@@ -752,6 +752,7 @@ reportCrashes(); // lib/errors.js
   // A Fill press, or Try again with `only` the steps that failed (rows and results of the other steps stay). The listing
   // is written first when the product has none yet (Write now).
   async function fillForm(only = null) {
+    const started = Date.now();
     const runs = (step) => !only || only.has(step);
     for (const [id, r] of rows) if (r.status !== "filled" && runs(stepOf(id))) rows.delete(id);
     for (const s of Object.keys(results)) if (runs(s)) delete results[s];
@@ -818,6 +819,9 @@ reportCrashes(); // lib/errors.js
     }
     phase = "done";
     render();
+    const counts = {};
+    for (const r of rows.values()) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    send({ action: "diagRun", steps: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v === true ? "ok" : (v?.code ?? "failed")])), rows: counts, ms: Date.now() - started });
   }
 
   // One look at the form's item specifics: the AI is asked about the empty ones that weren't on the form at an earlier

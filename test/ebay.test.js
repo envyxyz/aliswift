@@ -592,3 +592,49 @@ test("the panel's footer has no Copy report, no always-there Done and no Mark li
   assert.match(code, /code: "reloaded"/);
   assert.doesNotMatch(read("background.js"), /ebayCreateListing/);
 });
+
+test("a required box the AI left empty is asked once more, with a note, and only that box", async () => {
+  const fields = [field("Age Level", { required: true, options: ["3-5 Years", "8-11 Years", "12+ Years"] }), field("Color", { options: ["Black"] })];
+  assert.deepEqual(F.requiredLeft(fields, []).map((f) => f.label), ["Age Level"]); // Color is optional
+  assert.deepEqual(F.requiredLeft(fields, [{ name: "attributes.Age Level", value: "x" }]), []);
+  assert.match(F.buildFillRequest(fields, {}, LISTING.listing, "", "Answer each.").user, /Answer each\.\n\nForm fields/);
+
+  const t = setup({ ...withListing(), gemini: [answer({ answers: [{ name: "attributes.Color", value: "Black" }] }), answer({ answers: [{ name: "attributes.Age Level", value: "12+ years" }] })] });
+  await t.ask(listOn());
+  const reply = await t.ask({ action: "planFill", fields, category: "Toys & Hobbies > Outdoor Toys" }, FORM);
+  assert.deepEqual(reply, { success: true, answers: [{ name: "attributes.Color", value: "Black" }, { name: "attributes.Age Level", value: "12+ Years" }] });
+  assert.equal(t.calls.length, 2);
+  const second = t.calls[1].body.contents[0].parts.at(-1).text;
+  assert.match(second, /came back empty/);
+  assert.doesNotMatch(second, /"attributes\.Color"/); // only the missing box
+  await new Promise((r) => setImmediate(r));
+  const events = plain(t.store.diagQueue).filter((e) => e.task === "fill-outcome");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].category, "Toys & Hobbies > Outdoor Toys");
+  assert.deepEqual(events[0].requiredLeft, []);
+  assert.equal(events[0].retry.gained, 1);
+  assert.equal(JSON.stringify(events[0]).includes("12+"), false); // counts and field names, never a value
+
+  // Still empty after the second ask: the box is reported, and the answer still holds what was filled.
+  const again = setup({ ...withListing(), gemini: [answer({ answers: [] }), answer({ answers: [] })] });
+  await again.ask(listOn());
+  assert.deepEqual(await again.ask({ action: "planFill", fields: [fields[0]] }, FORM), { success: true, answers: [] });
+  assert.equal(again.calls.length, 2); // one more ask, not a loop
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(plain(again.store.diagQueue).find((e) => e.task === "fill-outcome").requiredLeft, ["Age Level"]);
+
+  // The second ask failing leaves the first answer standing.
+  const failing = setup({ ...withListing(), gemini: [answer({ answers: [{ name: "attributes.Color", value: "Black" }] }), { status: 429 }, { status: 429 }] });
+  await failing.ask(listOn());
+  assert.deepEqual(await failing.ask({ action: "planFill", fields }, FORM), { success: true, answers: [{ name: "attributes.Color", value: "Black" }] });
+});
+
+test("a finished listing is logged as counts: how much the AI was given and how much came back", async () => {
+  const t = setup(withListing());
+  await t.ask({ action: "diagRun", steps: { basics: "ok", specifics: "unfilled" }, rows: { filled: 4, needs: 1 }, ms: 4200 }, FORM);
+  await new Promise((r) => setImmediate(r));
+  const [run] = plain(t.store.diagQueue).filter((e) => e.task === "fill-run");
+  assert.deepEqual(run.steps, { basics: "ok", specifics: "unfilled" });
+  assert.deepEqual(run.rows, { filled: 4, needs: 1 });
+  assert.equal(run.ms, 4200);
+});

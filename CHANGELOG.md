@@ -4,6 +4,22 @@ All notable changes to AliSwift. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-19
+
+### Fixed
+
+- **A required item specific the AI left empty is asked once more.** When Age Level, Type or another required box comes back empty from the first answer, AliSwift asks again for only those boxes with a short note, using your next AI key when you have one. If that comes back empty too, the box shows as needing you, as before.
+
+### Added
+
+- **Better logs for the developer, counts and field names only** (off with Send error reports, never any product text or values): how much product detail the AI was given for a listing (numbers of specifications, description length, photos) and how much came back; for each item-specifics fill, how many boxes were asked, how many answered, which required ones stayed empty (like "Age Level"), the eBay category's name and whether the second ask helped; and for each Fill press, how each step ended and how many rows were filled, left to copy or need you. See PRIVACY.md.
+
+### Changed
+
+- **Text fields show focus with a slightly lighter or darker border instead of the thick orange ring**, in every page of the extension. Buttons, switches and links keep their ring.
+- **A calmer way to add an AI key, and a dialog for each saved key.** Pick the provider, paste the key and press the round arrow: it turns into a ring while the key is checked, then a green check or a red cross. A key that works opens a dialog to choose Free or Paid and a model, with a short list of recommended models for that provider and plan and why. Click any saved key to open the same dialog: its key is hidden by default (the eye shows it, the copy button or a click on the key copies it, it can't be edited there) and its plan and model can be changed.
+- **The AI now fills item specifics the product type implies, not only the ones the page states.** A boomerang gets an age range, a shirt a department. The listing instructions and the form-fill step used to say "omit anything the listing doesn't state", so fields like Age Level stayed empty. Barcodes, part numbers and measurements are still never guessed. The fill step changes for everyone at once; for the listing instructions, press **Reset to default** in the AI tab.
+
 ## [1.0.4] - 2026-10-19
 
 ### Fixed

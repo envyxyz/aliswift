@@ -58,6 +58,7 @@ const handlers = {
   diagCrash: { run: (request) => diagCrash(request) },
   diagFill: { ebayOnly: true, run: (request) => diagFill(request) },
   diagStep: { ebayOnly: true, run: (request) => diagStep(request) },
+  diagRun: { ebayOnly: true, run: (request) => diagRun(request) },
 };
 
 // A failed reply keeps the error's code ("signin", "currency") so a page can tell what to offer. A failed Gemini
@@ -119,6 +120,14 @@ async function diagCrash({ message, stack } = {}) {
 async function diagStep({ step, steps, found } = {}) {
   const flat = (o) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).slice(0, 12).map(([k, v]) => [String(k).slice(0, 30), typeof v === "boolean" ? v : String(v ?? "").slice(0, 12)]));
   await diagEvent({ kind: "error", action: `fill-${String(step ?? "").slice(0, 20)}`, code: "unfilled", steps: flat(steps), found: flat(found) });
+  return { success: true };
+}
+
+// How one Fill press ended, as counts and words only: each step ok or its error code, how many rows were filled, left to
+// copy by hand, or need the seller, and how long it took.
+async function diagRun({ steps, rows, ms } = {}) {
+  const words = (o, kind) => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).slice(0, 8).map(([k, v]) => [String(k).slice(0, 20), kind === "n" ? Math.max(0, Number(v) | 0) : String(v ?? "").slice(0, 20)]));
+  await diagEvent({ kind: "ai", task: "fill-run", steps: words(steps), rows: words(rows, "n"), ms: Math.max(0, Number(ms) | 0) });
   return { success: true };
 }
 
@@ -1534,6 +1543,12 @@ async function generateListing({ sheetId, product, force } = {}) {
     stop();
   }
   const { answer: { listing, warnings }, model } = reply;
+  // What the AI was given and what came back, as counts only: it shows whether a thin listing came from thin input.
+  diagEvent({
+    kind: "ai", task: "listing-outcome", model, hadDetails: Boolean(details), specsIn: details?.specs?.length ?? 0, descIn: (details?.description ?? "").length,
+    imagesIn: details?.images?.length ?? 0, photosSent: photos.length, titleLen: listing.title.length, descLen: listing.description.length,
+    specificsOut: listing.itemSpecifics?.length ?? 0, warnings: warnings?.length ?? 0, score: listing.analysis?.score ?? null,
+  });
 
   // `product` is what the eBay panel's cards show (SKU, name, sell price), kept with the listing so the panel needs no
   // sheet read. The cost price is never kept here.
@@ -2031,21 +2046,50 @@ async function planFill({ fields, category } = {}) {
   const direct = directFillPlan(list, listing);
   const matched = new Set(direct.map((a) => a.name));
   const remaining = list.filter((f) => !matched.has(f.name));
-  if (!remaining.some(askable)) return { success: true, answers: direct };
+  const outcome = { task: "fill-outcome", category: text(category).slice(0, 100), fields: list.length, asked: list.filter(askable).length, askedRequired: list.filter((f) => askable(f) && f.required).length, direct: direct.length };
+  if (!remaining.some(askable)) {
+    diagEvent({ kind: "ai", ...outcome, ai: 0, requiredLeft: [] });
+    return { success: true, answers: direct };
+  }
 
   const stop = keepAlive();
-  let raw;
   try {
-    ({ answer: raw } = await callAi({ ...buildFillRequest(remaining, target, listing, category), task: "fill", timeoutMs: 60000 }));
-  } catch (error) {
-    if (!direct.length) throw error;
-    const { code, provider, retryAt } = fail(error);
-    return { success: true, answers: direct, aiError: { code, provider, retryAt } };
+    const ask = async (asked, extra = {}) => await callAi({ ...buildFillRequest(asked, target, listing, category, extra.nudge), task: "fill", timeoutMs: 60000, skip: extra.skip });
+    let first;
+    try {
+      first = await ask(remaining);
+    } catch (error) {
+      diagEvent({ kind: "ai", ...outcome, ai: 0, code: String(error.code ?? "failed"), requiredLeft: requiredLeft(remaining, direct).map((f) => f.label).slice(0, 10) });
+      if (!direct.length) throw error;
+      const { code, provider, retryAt } = fail(error);
+      return { success: true, answers: direct, aiError: { code, provider, retryAt } };
+    }
+    const aiAnswers = validateFillPlan(first.answer, remaining);
+    const plan = [...direct, ...aiAnswers];
+    // A required box the AI left empty gets one more ask, of the next key when there is one: a second opinion, not a loop.
+    let retry = null;
+    const missing = requiredLeft(remaining, plan);
+    if (missing.length) {
+      try {
+        const keys = await aiPool();
+        const again = await ask(missing, { skip: keys.length > 1 ? [first.keyId] : [], nudge: "These required fields came back empty. Answer each with the most sensible value for what this product is, from its options when it has them. Leave one out only when no value could be right." });
+        const more = validateFillPlan(again.answer, missing);
+        plan.push(...more);
+        retry = { gained: more.length, of: missing.length, model: again.model, other: again.keyId !== first.keyId };
+      } catch (error) {
+        retry = { gained: 0, of: missing.length, code: String(error.code ?? "failed") };
+      }
+    }
+    const said = first.answer?.answers ?? first.answer;
+    diagEvent({
+      kind: "ai", ...outcome, ai: aiAnswers.length, model: first.model, provider: first.provider,
+      rawAnswers: Array.isArray(said) ? said.length : 0, // what the AI said, before the options check dropped what didn't fit
+      retry, requiredLeft: requiredLeft(remaining, plan).map((f) => f.label).slice(0, 10),
+    });
+    return { success: true, answers: plan };
   } finally {
     stop();
   }
-  const aiAnswers = validateFillPlan(raw, remaining);
-  return { success: true, answers: [...direct, ...aiAnswers] };
 }
 
 // The panel can't open extension pages itself.

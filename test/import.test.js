@@ -381,12 +381,14 @@ test("the AI helper never puts the key in a message, in a URL or in a reply", as
 
 test("the AI tab adds a key only after Check, and the dialog's reduced-motion rule comes after the animations it turns off", () => {
   const js = read("options/options.js");
-  assert.match(js, /if \(!checked\) return/); // a key is added only after Check passed, so a blank one never is
+  // A key reaches the dialog that adds it only after the provider listed its models, so a blank or wrong one never is added.
+  assert.ok(js.indexOf("await aiModels(provider, key, true)") < js.indexOf("openKeyDialog({ provider, key, models })"));
+  assert.match(js, /const kd = \{ id: "", provider: "", key: "", models: null \}/);
   // Same specificity: the later rule wins, so the reduced-motion block must come last.
   const css = read("options/options.css");
   const reduced = css.indexOf("@media (prefers-reduced-motion: reduce) {\n  :is(input, select)[data-flash]");
   assert.ok(reduced > css.lastIndexOf(".gs-pane {") && reduced > css.indexOf(".gs-spinner {"));
-  assert.match(css.slice(reduced), /\.gs-spinner \{\s*animation-duration: 1\.6s;/); // the spinner turns slowly, it never stands still
+  assert.match(css.slice(reduced), /\.gs-spinner,\s*\.key-go\[data-state="loading"\]::before \{\s*animation-duration: 1\.6s;/); // the spinner turns slowly, it never stands still
 });
 
 test("the keys are saved on this device only: never in a backup, never synced, never exported", () => {

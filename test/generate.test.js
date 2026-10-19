@@ -267,6 +267,10 @@ test("a save's details are kept, cleaned and capped, and the listing is then wri
   assert.match(prompt, /Material: Steel\nColor: Silver/);
   assert.doesNotMatch(prompt, /Listing Price/); // a library save has no sell price yet
   assert.doesNotMatch(prompt, /3\.5/);
+  // The developer's log says how much the AI was given and how much came back, as counts.
+  await new Promise((r) => setImmediate(r));
+  const [out] = plain(t.store.diagQueue).filter((e) => e.task === "listing-outcome");
+  assert.deepEqual([out.hadDetails, out.specsIn, out.descIn, out.imagesIn, out.photosSent, out.specificsOut], [true, 2, 4000, 5, 2, 2]);
 });
 
 test("details a page sends that hold nothing, or come with no item number, are not kept; a failed save keeps none", async () => {
