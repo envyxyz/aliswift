@@ -144,10 +144,11 @@ test("manifest key is the rotated public key, and no private key is in the repo"
   assert.equal(id, "oeomcphpdaicmkpdpdnfmnkjidnbghaa");
 
   const marker = "PRIVATE" + " KEY"; // split so this file does not match itself
-  const skip = new Set([".git", "node_modules", ".claude"]); // .claude is local notes, never committed
+  // Local tool folders (dot-folders other than .github) are never committed.
+  const skip = (top) => top === "node_modules" || (top.startsWith(".") && top !== ".github");
   for (const rel of fs.readdirSync(root, { recursive: true })) {
     const full = path.join(root, rel);
-    if (skip.has(rel.split(path.sep)[0]) || !fs.statSync(full).isFile()) continue;
+    if (skip(rel.split(path.sep)[0]) || !fs.statSync(full).isFile()) continue;
     assert.ok(!fs.readFileSync(full).includes(marker), `${rel} contains a private key`);
   }
 });

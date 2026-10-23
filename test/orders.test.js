@@ -12,16 +12,16 @@ const NOW = new Date("2026-10-12T10:00:00Z");
 const ROW = [
   "Ship by Oct 14", "Get shipping label", "12-34567-89012", "Some Buyer Name", "buyer_user27", "ZIP code 95210-6770",
   "3", "$29.67", "Free shipping", "$32.34", "Oct 10", "8:50pm PDT", "Oct 10",
-  "Relist", "Adjustable Gothic Ring Architectural Statement", "306000000001", "1 (8 available)", "Custom label (SKU):", "OR-08", "+ Add tracking",
-  "Relist", "Gothic Coffin Ring Stainless Steel", "306000000002", "Color: Mercury Silver", "1 (1 available)", "Custom label (SKU): OR-18_Me", "+ Add tracking",
-  "Relist", "Gothic Bat Wing Adjustable Ring", "307000000003", "2 (3 available)", "Custom label (SKU): OR-39", "+ Add tracking",
+  "Relist", "Adjustable Open Ring Minimalist Band", "306000000001", "1 (8 available)", "Custom label (SKU):", "RG-08", "+ Add tracking",
+  "Relist", "Stainless Steel Signet Ring", "306000000002", "Color: Mercury Silver", "1 (1 available)", "Custom label (SKU): RG-18_Me", "+ Add tracking",
+  "Relist", "Adjustable Wave Ring Silver", "307000000003", "2 (3 available)", "Custom label (SKU): RG-39", "+ Add tracking",
 ];
 
 test("a row is read from its text: the order number, the sold date, and each item's custom label and own quantity", () => {
   const o = O.parseOrder(ROW, NOW);
   assert.equal(o.orderNumber, "12-34567-89012");
   assert.equal(o.date, "2026-10-10"); // the sold date, not the ship-by date before it or the paid date after it
-  assert.deepEqual(o.items, [{ sku: "OR-08", qty: 1 }, { sku: "OR-18_Me", qty: 1 }, { sku: "OR-39", qty: 2 }]);
+  assert.deepEqual(o.items, [{ sku: "RG-08", qty: 1 }, { sku: "RG-18_Me", qty: 1 }, { sku: "RG-39", qty: 2 }]);
 });
 
 test("the custom label may be one piece of text or two, and a single item with no quantity of its own takes the row's", () => {
@@ -51,15 +51,15 @@ test("the AI is shown the row's shape and none of its people: names, usernames a
   const masked = O.maskTokens(ROW);
   const text = masked.join("\n");
   for (const secret of ["Some Buyer Name", "buyer_user27", "ZIP code", "95210-6770", "Adjustable Gothic", "Mercury Silver"]) assert.ok(!text.includes(secret), secret);
-  for (const kept of ["12-34567-89012", "$29.67", "Oct 10", "1 (8 available)", "Custom label (SKU): OR-18_Me", "3"]) assert.ok(masked.includes(kept), kept);
+  for (const kept of ["12-34567-89012", "$29.67", "Oct 10", "1 (8 available)", "Custom label (SKU): RG-18_Me", "3"]) assert.ok(masked.includes(kept), kept);
   assert.match(masked[3], /^\[text \d+\]$/);
   assert.equal(O.maskTokens(["someuser5129", "ABC123"]).every((x) => x.startsWith("[text")), true); // a username with digits is not money
 });
 
 test("the AI's positions are read from the real row, and anything that is not what it should be gives nothing", () => {
-  const t = ["x", "12-34567-89012", "Oct 10", "Custom label (SKU): OR-08", "2 (3 available)", "OR-77"];
+  const t = ["x", "12-34567-89012", "Oct 10", "Custom label (SKU): RG-08", "2 (3 available)", "RG-77"];
   const o = O.applyPositions(t, { order: 1, date: 2, items: [{ sku: 3, qty: 4 }, { sku: 5, qty: -1 }] }, NOW);
-  assert.deepEqual(o, { orderNumber: "12-34567-89012", date: "2026-10-10", items: [{ sku: "OR-08", qty: 2 }, { sku: "OR-77", qty: 1 }] });
+  assert.deepEqual(o, { orderNumber: "12-34567-89012", date: "2026-10-10", items: [{ sku: "RG-08", qty: 2 }, { sku: "RG-77", qty: 1 }] });
   assert.equal(O.applyPositions(t, { order: 0, date: 2, items: [] }, NOW), null); // not an order number
   assert.equal(O.applyPositions(t, { order: 99 }, NOW), null);
   assert.deepEqual(O.applyPositions(t, { order: 1, date: 0, items: [{ sku: 1, qty: 0 }, { sku: "x" }, null] }, NOW).items, []); // an order number is not a SKU
