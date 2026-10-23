@@ -1457,7 +1457,11 @@ function cleanDetails(d) {
     // The options that have a photo of their own (colour, style): { group, name, image }. Their photos are saved in a folder each.
     variants: (Array.isArray(d.variants) ? d.variants : []).slice(0, 100).map((v) => ({ group: text(v?.group).slice(0, 40), name: text(v?.name).slice(0, 80), image: httpsUrl(v?.image) })).filter((v) => v.name && v.image).slice(0, VARIANTS_MAX),
   };
-  return out.fullTitle || out.specs.length || out.description || out.images.length || out.variants.length ? { ...out, savedAt: Date.now() } : null;
+  // Every choice the buyer has: { name, choices }, a few of each.
+  out.options = (Array.isArray(d.options) ? d.options : []).slice(0, 8)
+    .map((o) => ({ name: text(o?.name).slice(0, 40), choices: [...new Set((Array.isArray(o?.choices) ? o.choices : []).map((v) => text(v).slice(0, 60)).filter(Boolean))].slice(0, 40) }))
+    .filter((o) => o.name && o.choices.length);
+  return out.fullTitle || out.specs.length || out.description || out.images.length || out.variants.length || out.options.length ? { ...out, savedAt: Date.now() } : null;
 }
 
 // Keeps a saved product's details (details:<item number>) for its listing. Never fails the save it follows.
@@ -1494,7 +1498,7 @@ async function fetchImage(url) {
 // `product` is a dashboard card's product ({ sku, title, link, salePrice, image, currency }). Only the sell price
 // goes to the AI, never the cost. Answers { success, key, listing, limited, model, createdAt, warnings, cached? }.
 // `limited` means no saved details were found, so it was written from the sheet's name alone. Photos go only with
-// the aiPhotos setting on. A failed reply has one of AI_CODES as `code`.
+// the aiPhotos setting not turned off. A failed reply has one of AI_CODES as `code`.
 async function generateListing({ sheetId, product, force } = {}) {
   const p = product && typeof product === "object" ? product : {};
   const key = listingKey(p);
@@ -1510,9 +1514,10 @@ async function generateListing({ sheetId, product, force } = {}) {
 
   const id = itemIdOf(p.link);
   const details = id ? (await chrome.storage.local.get({ [`details:${id}`]: null }))[`details:${id}`] : null;
-  const { aiInstructions, aiPhotos } = await chrome.storage.sync.get({ aiInstructions: "", aiPhotos: false });
-  // Photos only when the setting is on and a key can take them (Gemini).
-  const withPhotos = aiPhotos === true && keys.some((k) => AI_PROVIDERS[k.provider].images);
+  const { aiInstructions, aiPhotos } = await chrome.storage.sync.get({ aiInstructions: "", aiPhotos: true });
+  // Photos unless the seller turned them off, and only when a key can take them (Gemini): they show the stone, the finish and
+  // the shape that a supplier's title never says.
+  const withPhotos = aiPhotos !== false && keys.some((k) => AI_PROVIDERS[k.provider].images);
   const urls = withPhotos ? [...new Set((details?.images?.length ? details.images : [p.image]).map((u) => fullSizePhoto(u)).filter(Boolean))].slice(0, IMAGES_MAX).map((u) => u + SMALL_PHOTO) : [];
   const photos = (await Promise.all(urls.map(async (url) => ({ url, image: await fetchImage(url) })))).filter((x) => x.image);
 
@@ -1524,6 +1529,7 @@ async function generateListing({ sheetId, product, force } = {}) {
       title: details?.fullTitle || p.title,
       description: details?.description,
       specifics: details?.specs,
+      options: details?.options,
       images: photos.map((x) => x.url),
       sellPrice: p.salePrice == null ? "" : `${currency ?? ""} ${p.salePrice}`.trim(),
     },
@@ -1538,14 +1544,14 @@ async function generateListing({ sheetId, product, force } = {}) {
   const stop = keepAlive();
   let reply;
   try {
-    reply = await callAi({ ...request, task: "listing", images: photos.map((x) => x.image), temperature: 0.7, timeoutMs: 90000, check });
+    reply = await callAi({ ...request, task: "listing", images: photos.map((x) => x.image), temperature: 0.5, timeoutMs: 90000, check });
   } finally {
     stop();
   }
   const { answer: { listing, warnings }, model } = reply;
   // What the AI was given and what came back, as counts only: it shows whether a thin listing came from thin input.
   diagEvent({
-    kind: "ai", task: "listing-outcome", model, hadDetails: Boolean(details), specsIn: details?.specs?.length ?? 0, descIn: (details?.description ?? "").length,
+    kind: "ai", task: "listing-outcome", model, hadDetails: Boolean(details), specsIn: details?.specs?.length ?? 0, optionsIn: details?.options?.length ?? 0, descIn: (details?.description ?? "").length,
     imagesIn: details?.images?.length ?? 0, photosSent: photos.length, titleLen: listing.title.length, descLen: listing.description.length,
     specificsOut: listing.itemSpecifics?.length ?? 0, warnings: warnings?.length ?? 0, score: listing.analysis?.score ?? null,
   });

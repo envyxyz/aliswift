@@ -200,7 +200,7 @@ test("a listing is written from the sheet's name and photo, filed by item number
   assert.doesNotMatch(call.body, /3\.5|cost/i);
   assert.ok(!call.url.includes(KEY) && !call.body.includes(KEY));
   assert.equal(body.generationConfig.responseMimeType, "application/json");
-  assert.equal(body.generationConfig.temperature, 0.7);
+  assert.equal(body.generationConfig.temperature, 0.5);
   assert.deepEqual(body.generationConfig.responseSchema, plain(L.LISTING_SCHEMA));
   assert.ok(body.systemInstruction.parts[0].text.startsWith(L.DEFAULT_INSTRUCTIONS));
   assert.deepEqual(t.fetched(), [IMG + S]); // nothing but the small photo and Gemini
@@ -528,4 +528,45 @@ test("the settings page saves the instructions and the photo setting to sync onl
   assert.match(html, /<script src="\.\.\/lib\/listing\.js"><\/script>/);
   const hosts = JSON.parse(read("manifest.json")).host_permissions;
   assert.ok(hosts.includes("https://*.alicdn.com/*") && hosts.includes("https://*.aliexpress-media.com/*"));
+});
+
+test("the AI is given the buyer's options, and a supplier's placeholder specifications are left out", () => {
+  const user = L.buildListingInput({
+    title: "Skull ring",
+    specifics: [["Festival", "Others"], ["High-concerned chemical", "none"], ["Inlay material", "Zircon"], ["Function", "N/A"]],
+    options: [{ name: "Ring Size", choices: ["6", "7", "8"] }, { name: "Main Stone Color", choices: ["Red"] }, { name: "", choices: ["x"] }, { name: "Empty", choices: [] }],
+  });
+  assert.match(user, /Inlay material: Zircon/);
+  assert.doesNotMatch(user, /Others|High-concerned|N\/A/);
+  assert.match(user, /Options the buyer can choose:\nRing Size: 6, 7, 8\nMain Stone Color: Red$/m);
+  assert.doesNotMatch(user, /Empty|: x/);
+  assert.doesNotMatch(L.buildListingInput({ title: "Ring" }), /Options the buyer/);
+});
+
+test("the default instructions ask for an 80-character keyword-first title, distrust the supplier's specifications and add the options to the description", () => {
+  const d = L.DEFAULT_INSTRUCTIONS;
+  assert.ok(d.length < 5000);
+  assert.match(d, /75 to 80 characters, never more than 80/);
+  assert.match(d, /first 40 to 50 characters/);
+  assert.match(d, /Look at the photos/);
+  assert.match(d, /Ignore placeholders/);
+  assert.match(d, /Available Options:/);
+  const example = d.match(/Format only, not words to copy: "([^"]+)"/)[1];
+  assert.ok(example.length >= 75 && example.length <= 80, `${example.length}`);
+  assert.equal(L.toEbayHtml("Available Options:\n- Ring Size: 6, 7"), "<div><b>Available Options:</b></div><ul><li>Ring Size: 6, 7</li></ul>");
+});
+
+test("a save keeps the page's options, cleaned and capped, and the listing is written from them; photos go unless the seller turned them off", async () => {
+  const t = setup({ local: { geminiKey: KEY }, gemini: [answer(GOOD)], images: { [IMG]: photo() } });
+  const options = [{ name: " Ring Size ", choices: ["6", "6", " 7 ", "", 5] }, { name: "Color", choices: [] }, "junk", { name: "Metal Color", choices: ["Antique Silver Plated"] }];
+  await t.ask({ action: "appendToSheet", data: { title: "Skull Ring", link: LINK, price: "3.50", salePrice: "", image: IMG, currency: "GBP", dest: "local", details: { fullTitle: "Skull ring", images: [IMG], options } } }, "https://www.aliexpress.com/item/1.html");
+  assert.deepEqual(plain(t.store["details:1005001234567890"].options), [{ name: "Ring Size", choices: ["6", "7", "5"] }, { name: "Metal Color", choices: ["Antique Silver Plated"] }]);
+  await t.ask({ action: "generateListing", sheetId: "local", product: { sku: "L-01", title: "Skull Ring", link: LINK, price: 3.5, salePrice: null, image: IMG, currency: "GBP" } });
+  const parts = sent(t.gem()[0]).contents[0].parts;
+  assert.equal(parts.length, 2); // a photo, then the text: the setting was never touched, so photos are on
+  assert.match(parts.at(-1).text, /Ring Size: 6, 7, 5\nMetal Color: Antique Silver Plated/);
+
+  const off = setup({ local: { geminiKey: KEY, "details:1005001234567890": { fullTitle: "T", images: [IMG] } }, sync: { aiPhotos: false }, gemini: [answer(GOOD)], images: { [IMG]: photo() } });
+  await off.ask({ action: "generateListing", sheetId: "local", product: { sku: "L-01", title: "T", link: LINK, price: 3.5, salePrice: null, image: IMG, currency: "GBP" } });
+  assert.equal(sent(off.gem()[0]).contents[0].parts.length, 1);
 });

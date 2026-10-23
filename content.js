@@ -146,6 +146,12 @@ function getDetails() {
     const group = pick(prop, '[class*="sku-item--title"]').split(":")[0].trim();
     return [...prop.querySelectorAll('[class*="sku-item--image"] img')].map((img) => ({ group, name: (img.alt || img.title || "").trim(), image: fullSizePhoto(img.src) }));
   });
+  // Every choice the buyer has (sizes, colours, styles), with or without a photo: { name: "Ring Size", choices: ["6", "7"] }.
+  // The listing writer needs them: "Main Stone Color: Red" is a fact the specifications may not hold.
+  const options = all('[class*="sku-item--property"]').map((prop) => ({
+    name: pick(prop, '[class*="sku-item--title"]').split(":")[0].trim(),
+    choices: [...prop.querySelectorAll('[class*="sku-item--image"] img, [class*="sku-item--text"]')].map((el) => (el.alt || el.title || el.textContent || "").trim()),
+  }));
   const specs = all('[class*="specification--prop"]').slice(0, 50).map((p) => [pick(p, '[class*="specification--title"]'), pick(p, '[class*="specification--desc"]')]);
   const gallery = all('[class*="slider--img"] img, [class*="image-view"] img, [class*="slider--wrap"] img').map((img) => fullSizePhoto(img.src));
   return {
@@ -154,6 +160,7 @@ function getDetails() {
     description: document.querySelector('meta[name="description"]')?.content ?? "",
     images: [...new Set([getImage(), ...gallery].filter(Boolean))],
     variants,
+    options,
   };
 }
 

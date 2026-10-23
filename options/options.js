@@ -1527,7 +1527,7 @@ $("aiReset").addEventListener("click", () => {
 // Another tab, or a settings import, changed them.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync" || !("aiInstructions" in changes || "aiPhotos" in changes)) return;
-  if ("aiPhotos" in changes) $("aiPhotos").checked = changes.aiPhotos.newValue === true;
+  if ("aiPhotos" in changes) $("aiPhotos").checked = changes.aiPhotos.newValue !== false;
   if ("aiInstructions" in changes) aiSaved.aiInstructions = changes.aiInstructions.newValue ?? "";
   if (document.activeElement !== instInput) showAi();
 });
@@ -1746,7 +1746,7 @@ profileButton($("profile"));
     activeSheetId: "",
     showPageButton: true,
     includeImages: false,
-    aiPhotos: false,
+    aiPhotos: true,
     aiInstructions: "",
     diagOn: true,
     diagContent: false,
@@ -1757,7 +1757,7 @@ profileButton($("profile"));
   $("includeImages").checked = stored.includeImages;
   imagesNoteFor(stored.includeImages);
   Object.assign(aiSaved, { aiInstructions: stored.aiInstructions });
-  $("aiPhotos").checked = stored.aiPhotos === true;
+  $("aiPhotos").checked = stored.aiPhotos !== false;
   $("diagOn").checked = stored.diagOn !== false;
   $("diagContent").checked = stored.diagContent === true;
   showAi();
