@@ -1,21 +1,80 @@
-MIT License
+AliSwift Personal Use License
 
-Copyright (c) 2026 ameer
+Copyright (c) 2026 envyxyz (https://github.com/envyxyz). All rights reserved,
+except for the permissions given below.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+In short: you may use AliSwift for free, including to run your own store, and
+you may change it for yourself and send improvements back. You may not sell it,
+make money from it, or publish it anywhere without written permission first.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. What you may do
+
+   a. Download, install and use AliSwift, for free. Using it to run your own
+      selling business (for example your own eBay store) is allowed.
+   b. Change your own copy of AliSwift for your own use.
+   c. Fork the repository on GitHub, for the purpose of sending changes back to
+      this project as pull requests.
+
+
+2. What you may not do without written permission
+
+   a. Sell, rent, license or charge any money for AliSwift, a changed version
+      of it, or any part of its code.
+   b. Use AliSwift or its code in, or as part of, any product or service that
+      you sell or that earns money, including paid tools, paid extensions,
+      software offered as a service, and paid setup or support.
+   c. Publish, upload or distribute AliSwift or a changed version of it on any
+      platform, including the Chrome Web Store, the Microsoft Edge Add-ons
+      store, Firefox Add-ons, any other extension or app store, marketplace,
+      website, file-sharing service or social network. Linking to this
+      repository is always allowed.
+   d. Rename, rebrand or present AliSwift or its code as your own work.
+   e. Remove or change this license or the copyright notice in any copy.
+
+
+3. Asking for permission
+
+   To ask for permission for anything in section 2, open an issue at
+   https://github.com/envyxyz/aliswift/issues or contact the author through
+   https://github.com/envyxyz. Permission counts only when it is given in
+   writing by the author.
+
+
+4. Contributions
+
+   If you send a contribution (a pull request, a patch, code or text in an
+   issue), you confirm that you have the right to send it, and you allow the
+   author to use, change, publish and license it as part of AliSwift under any
+   terms, including terms other than this license.
+
+
+5. Names
+
+   This license does not give any right to use the name "AliSwift" or its logo,
+   except to describe where your copy came from. AliExpress, eBay, Google and
+   other names are trademarks of their owners. AliSwift is not made, endorsed
+   or supported by any of them.
+
+
+6. Ending
+
+   If you break this license, your permission to use AliSwift ends
+   automatically.
+
+
+7. Earlier releases
+
+   Releases up to and including v1.0.5 were published under the MIT License,
+   and copies of those releases keep that license. This license applies to
+   everything published after v1.0.5.
+
+
+8. No warranty
+
+   ALISWIFT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+   IN CONNECTION WITH ALISWIFT OR THE USE OR OTHER DEALINGS IN ALISWIFT.

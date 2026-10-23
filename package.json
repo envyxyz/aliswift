@@ -2,8 +2,8 @@
   "name": "aliswift",
   "version": "1.0.5",
   "private": true,
-  "description": "Chrome extension that saves AliExpress products to Google Sheets.",
-  "license": "MIT",
+  "description": "Chrome extension for dropshippers: AliExpress products to Google Sheets, AI listings, and eBay form fill.",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": "github:envyxyz/aliswift",
   "scripts": {
     "test": "node --test"
