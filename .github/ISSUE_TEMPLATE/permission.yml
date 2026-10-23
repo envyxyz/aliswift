@@ -1,0 +1,16 @@
+name: Permission request
+description: Ask to use AliSwift commercially or to publish it somewhere (see LICENSE section 2).
+labels: [license]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+      description: For example sell a version of it, include it in a paid service, or publish it on an extension store.
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: How can the author reach you?
+      description: Optional. A public issue is visible to everyone, so share only what you're happy to make public.

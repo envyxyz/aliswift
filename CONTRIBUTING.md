@@ -1,6 +1,8 @@
 # Contributing to AliSwift
 
-AliSwift is small on purpose: plain JavaScript, Manifest V3, no build step, no dependencies. Please keep it that way. A change that removes code is as welcome as one that adds a feature.
+AliSwift is free for personal use and source-available. It is small on purpose: plain JavaScript, Manifest V3, no build step, no dependencies. Please keep it that way. A change that removes code is as welcome as one that adds a feature.
+
+Selling AliSwift, making money from it, or publishing it on any store or platform (Chrome Web Store, Edge Add-ons, or any other site) requires the author's written permission. Ask by opening an issue on GitHub. Contributions are welcome; by sending one you agree to LICENSE section 4, which lets the author use it under any terms.
 
 ## Core Rules
 
@@ -49,7 +51,7 @@ npm test
 
 ## Google sign-in for your own build
 
-The manifest ships with the maintainer's OAuth client and a fixed extension key. Every unpacked copy of the repo therefore gets the same extension ID, and sign-in works without setup. If you publish your own build, or Google blocks sign-in for your copy, use your own client:
+The manifest ships with the maintainer's OAuth client and a fixed extension key. Every unpacked copy of the repo therefore gets the same extension ID, and sign-in works without setup. If you run your own build, or Google blocks sign-in for your copy, use your own client:
 
 1. Make a key pair. Keep `key.pem` private (`.gitignore` already blocks `*.pem`).
 

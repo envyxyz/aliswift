@@ -11,6 +11,9 @@
 /CONTRIBUTING.md export-ignore
 /CHANGELOG.md export-ignore
 /install export-ignore
+/supabase export-ignore
+/scripts export-ignore
+/.env.example export-ignore
 
 # Windows scripts keep their line endings.
 *.bat text eol=crlf

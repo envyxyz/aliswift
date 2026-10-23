@@ -1,41 +1,42 @@
 # Roadmap
 
-Planned work, in the order we intend to build it. Nothing here is promised by a date.
+Planned work, roughly in order. Nothing here has a date. Ideas and help are welcome: [open an issue](https://github.com/envyxyz/aliswift/issues/new/choose).
 
-## 1. Profit analytics on the dashboard (planned)
-Show what your Orders tab already tracks: revenue, profit and margin by week and month, best and worst products, and profit in your home currency.
-- Already in place: every auto-created sheet has an Orders tab and a Dashboard tab with these totals; cancelled orders are excluded.
-- To build: a third dashboard view that groups the orders it already loads. No new permissions required.
+## Next: Etsy and Temu
+eBay comes first. Etsy and Temu are the next marketplaces. If you sell on either and want to help shape it, open an issue with what your flow looks like.
 
-## 2. Profit across regions (planned)
-One unified view over all your sheets (eBay UK, eBay US), converted to your home currency with each sheet's exchange rate.
-- Already in place: each sheet has a region (currency, eBay site, fee settings) and its own exchange rate cell.
-- To build: read every sheet's orders and exchange rate, then combine totals. Add payout currency conversion fee settings once confirmed for your account, and per-category fee rates if a flat rate per sheet proves too coarse.
+## 1. Profit analytics on the dashboard
+- **What it is**: Show revenue, profit, and margin by week and month, top products, and profit in your home currency.
+- **Done**: Auto-created sheets track these totals in the Orders and Dashboard tabs, excluding cancelled orders.
+- **Left**: A dashboard view that groups and displays totals from loaded orders. No new permissions required.
 
-## 3. Adding eBay orders automatically (list import done, the rest planned)
-Options for adding orders automatically instead of typing them by hand from the dashboard:
-- Done: **Add all orders to sheet** on Seller Hub's order list reads the page's text (no eBay API, no Gmail) and adds the orders the sheet does not have yet. It was written from a screenshot of Seller Hub's list (the list's markup was not saved), so the first real run may need a fix; the AI fallback covers a change in the page's wording.
-- Still by hand: the order's actual sell price and tracking. The list shows neither per item.
-- Option 1 (unverified): Import eBay's own orders report. Seller Hub downloads orders as a CSV file. The dashboard reads the file and adds missing orders. No new permissions, no page scraping, works for months of history at once.
-- Option 2 (unverified): A button on Seller Hub order pages. The extension adds an "Add to AliSwift" button to an order page (and "Add all" to the orders list) to read order number, custom label, quantity and price. Falls back to the manual dialog. The Seller Hub report format and page layout have not been checked.
-- Option 3: eBay's finance and order APIs. Background sync where the finance API returns exact fees. Requires an eBay developer account and a backend server to hold the app secret securely.
-- Plan: the import first, then the button, then the API if exact fees or hands-off import matter enough to run a server. Reading sale emails from Gmail is not planned because Google treats mail access as a restricted permission requiring a costly security audit.
-- Already in place: the custom label on listings is the sheet SKU; adding an order refuses an order number and SKU pair that is already there, so imports can be repeated safely.
+## 2. Profit across regions
+- **What it is**: A unified view across all your sheets (such as eBay UK and eBay US), converted to your home currency.
+- **Done**: Each sheet tracks its own currency, eBay site, fee settings, and exchange rate.
+- **Left**: Read and combine orders and exchange rates across all sheets into one view. Add per-category fee rates if needed.
 
-## 4. Connecting AliExpress to pull orders and exact prices (planned)
-Research findings (unverified):
-- Official AliExpress Dropshipping APIs require business registration, manual approval, and cryptographic request signing with an app secret. A serverless extension cannot hold the secret securely, and approval for the official API as a private person is likely to be refused.
-- Scraping the buyer's order page: AliExpress terms forbid automated collection. A user-clicked button on the owner's own order page is a lower risk that is still unconfirmed.
-- Candidate plan: start with a manual user-clicked button on the AliExpress order detail page to capture the exact paid amount, currency and tracking number.
+## 3. Adding eBay orders automatically
+- **What it is**: Import orders from eBay Seller Hub instead of entering them by hand.
+- **Done**: "Add all orders to sheet" on the Seller Hub order list reads visible orders and adds new ones to your sheet. The AI fallback handles wording changes.
+- **Left**:
+  - CSV report import: read downloaded Seller Hub order reports from the dashboard to import months of history at once.
+  - Order page button: add an import button to individual Seller Hub order pages to read price and quantity.
+  - eBay API: background sync with exact fees if needed.
 
-## 5. Confirming eBay fee defaults against real orders (planned)
-Check the default fee rates against real order fee breakdowns in eBay Seller Hub.
-- Already in place: editable fee cells on the Inventory tab for UK final value fee (12.9%), regulatory fee (0.35%), fixed order fee (0.30 or 0.40), VAT on fees (20%), and international fee (1.55%).
-- To confirm: verify whether the 1.55% international fee applies to the account, and confirm the VAT on fees treatment against an actual invoice. Account type (business or private), buyer VAT on top, and US defaults (13.6% final value fee, 1.55% international fee) are also unconfirmed.
+## 4. Connecting AliExpress to pull orders and exact prices
+- **What it is**: Capture exact paid amounts, currency, and tracking numbers from AliExpress orders.
+- **Done**: Research into manual capture and supplier APIs.
+- **Left**: An import button on AliExpress order detail pages to record exact order costs and tracking numbers.
 
-## 6. Smaller items (planned)
-- Detect eBay "listing published" confirmation page and set product status to Listed automatically.
+## 5. Confirming eBay fee defaults against real orders
+- **What it is**: Verify default marketplace fee rates against actual eBay order breakdowns.
+- **Done**: Editable fee cells on the Inventory tab for UK (12.9% final value fee, 0.35% regulatory fee, 0.30 fixed fee, 20% VAT on fees, 1.55% international fee), US and Global (13.6% final value fee, 0.30 or 0.40 fixed fee, 1.55% international fee), and other regions.
+- **Left**: Check published defaults against real fee statements. Users can adjust fee cells at the top of their sheet at any time.
+
+## 6. Smaller items
+- Automatically set product status to Listed when the eBay confirmation page appears.
 - Minimum sell price guard per sheet.
 - Fill item condition and variations on the eBay form.
-- More marketplaces (France, Italy, Spain, Ireland): one line each in `lib/shared.js` and `lib/template.js` once their fee rules are checked. Germany, Australia, Canada and Global are in with published default rates that still need checking against real orders.
-- Chrome Web Store release, bulk save from search pages, and Firefox support.
+- More eBay marketplaces (France, Italy, Spain, Ireland). Germany, Australia, Canada, and Global are available with published default rates.
+- Bulk save from AliExpress search pages.
+- Chrome Web Store release and Firefox support.

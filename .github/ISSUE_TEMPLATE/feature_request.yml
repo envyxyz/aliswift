@@ -1,5 +1,5 @@
-name: Feature request
-description: Suggest something AliSwift should do.
+name: Idea or feature request
+description: Suggest something AliSwift should do, including a new marketplace (Etsy, Temu or another).
 labels: [enhancement]
 body:
   - type: textarea
@@ -9,3 +9,14 @@ body:
       description: Describe the problem first. A solution is welcome but optional.
     validations:
       required: true
+  - type: input
+    id: marketplace
+    attributes:
+      label: Marketplace (if this is about one)
+      description: For example Etsy, Temu, Shopify, or an eBay site that isn't supported yet.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping out
+      options:
+        - label: I'd like to help build or test this.

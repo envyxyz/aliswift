@@ -1,30 +1,30 @@
 # Chrome Web Store Listing
 
-## Short Description (131 characters / max 132)
+## Short Description (130 characters / max 132)
 Save AliExpress products to Google Sheets in one click. Calculate dropshipping margins, track orders, and manage inventory easily.
 
 ## Detailed Description
 
-AliSwift is a lightweight dropshipping tool for eBay and Shopify sellers sourcing products from AliExpress. Instead of copying titles, supplier links, prices, and images by hand, AliSwift captures them in a single click and calculates your profitable selling price instantly.
+AliSwift is a lightweight dropshipping tool for eBay sellers sourcing products from AliExpress. Instead of copying titles, supplier links, prices, and images by hand, AliSwift captures them in a single click and works out your sell price instantly.
 
-Save products directly into a custom or auto-configured Google Sheet, or store them on your device in your offline library without creating an account. Product data is stored only on the device or in the user's own Sheet, never on our servers (we have none).
+Save products directly into a custom or auto-configured Google Sheet, or store them on your device in your offline library without creating an account. AliSwift has no account system and stores no product or order data on any server.
 
 ### Key Features
 
 - One-Click Saving: Click the on-page save button on any AliExpress item page, or save from the extension popup.
-- Toolbar Launcher: On any other page the popup searches AliExpress and opens Seller Hub or a new eBay listing in one click.
-- Automated Pricing: Calculate your retail sell price instantly using custom formula rules (e.g., costPrice * 1.7) or target profit margins. Includes visible shipping and optional cost buffers.
+- Toolbar Launcher: On any other page, the popup searches AliExpress and opens Seller Hub or a new eBay listing in one click.
+- Automated Pricing: Calculate your retail sell price instantly using custom formula rules (e.g., `costPrice * 1.7`) or target profit margins. Includes visible shipping and optional cost buffers.
 - Pre-Configured Spreadsheets: Auto-generate ready-to-use Google Sheets equipped with eBay fee breakdowns for UK, US, Global, Germany, Australia or Canada, profit calculations, currency exchange formulas, and customer order tracking.
 - Offline Local Library: No Google account required. Start dropshipping immediately by saving products directly to your browser storage, then transfer them to Google Sheets whenever you are ready.
 - Full Dashboard: Review saved products in a visual gallery, inspect supplier links, adjust listing statuses, and track fulfillment orders in a filterable table.
 - Order Links: Each order can keep the link to its eBay order page, read from Seller Hub when you import orders, and opened from the Orders table.
-- AI Listing Generation: Listings (search-optimized eBay title up to 80 characters, description and item specifics) are written in the background after you add a product, using your own Gemini, Groq or OpenRouter keys. Editable with one-click copy buttons for every field.
-- Inspector: Click a dashboard card to open the product's cost, sell price, eBay fees, profit and margin, and its listing. Cost and sell price can be edited and are saved to your sheet; prices set by a sheet formula are never overwritten.
-- eBay Listing Panel: An injected side panel on eBay listing pages (`ebay.com` and `ebay.co.uk`) that fills deterministic fields (title, SKU, description, price) and uses Gemini to fill item specifics. Unfillable fields become copy buttons; never presses "List it" and never fills Condition.
+- AI Listing Generation: Listings (eBay title up to 80 characters, description, and item specifics) are written in the background after you add a product, using your own Gemini, Groq, or OpenRouter keys. Editable with one-click copy buttons for every field.
+- Inspector: Click a dashboard card to inspect the product's cost, sell price, eBay fees, profit and margin, and its listing. Cost and sell price can be edited and are saved to your sheet; prices set by a sheet formula are never overwritten.
+- eBay Listing Panel: A side panel on eBay listing pages (`ebay.com` and `ebay.co.uk`) that fills standard fields (title, SKU, description, price) and uses Gemini to fill item specifics. Unfillable fields become copy buttons; never presses "List it" and never fills Condition.
 - eBay Listing Photos: Optionally pass up to 12 AliExpress gallery photos to eBay's uploader when filling forms, or save them to your Downloads folder as a fallback.
-- Photos for Older Products: Automatically retrieves share photos from public AliExpress pages for previously saved items without a photo, updating dashboard cards and filling empty sheet cells.
-- Non-Destructive and Safe: AliSwift writes new rows, updates selected cells, and adds SKU, Image or Order link columns only if you say yes, after telling you which ones your sheet lacks. It never deletes rows; Remove from Sheet (after a second click) clears only the cells AliSwift wrote in that product's row.
-- Privacy First: No analytics, no account registration. Product data is stored only on your device or in your own Sheet. Error reports (codes, timings, crash traces; never keys, sheet names or order data) go to the developer and can be turned off in Settings. Your AI keys stay in storage.local on this device, are sent only to their own provider, and are left out of settings export unless you tick Include my AI keys.
+- Photos for Saved Products: Automatically retrieves share photos from public AliExpress pages for saved items without a photo, updating dashboard cards and filling empty sheet cells.
+- Non-Destructive and Safe: AliSwift writes new rows, updates selected cells, and adds SKU, Image or Order link columns only when you confirm. It never deletes rows; Remove from Sheet (after a second click) clears only the cells AliSwift wrote in that product's row.
+- Privacy First: No account registration. Product data is stored only on your device or in your own Sheet. Error reports (failure codes, timings, crash traces, counts; never keys, sheet names or order data) can be turned off in Settings. Your AI keys stay in local storage on this device, are sent only to their own provider, and are left out of settings export unless you tick Include my AI keys.
 
 ## Single-Purpose Statement
 
@@ -50,7 +50,7 @@ Each requested permission and host permission in manifest.json is strictly requi
    Required to list spreadsheet names and verify sheets via the Google Drive API v3 (using read-only metadata scope drive.metadata.readonly). Google sign-in requests one scope list that includes this permission, which is required whether selecting a sheet from Drive or pasting a spreadsheet link.
 
 6. `https://generativelanguage.googleapis.com/*`:
-   Required to communicate directly with Google's Gemini API when the user provides their own API key to perform automated column mapping on imported spreadsheets, generate product listings, and fill eBay form item specifics. The key stays in storage.local on the device, is sent only to Google's Gemini API, and is left out of settings export unless the user ticks Include my AI keys. Groq and OpenRouter keys work the same way; their hosts are optional permissions asked for only when a key for them is added. Column mapping sends headers and sample cells with a deny-list filter that tries to leave out personal columns, and users can check the preview before saving.
+   Required to communicate directly with Google's Gemini API when you provide your own API key to perform automated column mapping on imported spreadsheets, generate product listings, and fill eBay form item specifics. The key stays in local storage on the device, is sent only to Google's Gemini API, and is left out of settings export unless you tick Include my AI keys. Groq and OpenRouter keys work the same way; their hosts are optional permissions requested only when a key for them is added. Column mapping sends headers and sample cells with a deny-list filter to exclude personal columns, and you can check the preview before saving.
 
 7. `https://*.alicdn.com/*`:
    Required to load product image assets from AliExpress CDN so the service worker can provide them to Gemini for listing generation.
@@ -62,14 +62,14 @@ Each requested permission and host permission in manifest.json is strictly requi
    Lets the toolbar popup see the address of the current tab only when you click the icon, to show the save form on an AliExpress product page and the launcher elsewhere. No page is read and nothing is sent.
 
 10. `downloads` (optional):
-   Asked for only when you turn on image inclusion in settings; used to save product photos to your Downloads folder if eBay's uploader does not take them.
+   Requested only when you turn on image inclusion in settings; used to save product photos to your Downloads folder if eBay's uploader does not take them.
 
 ## Data Usage Disclosure Answers
 
 - Collection of Personal Information:
-  No. AliSwift does not collect personal information. Product data is stored only on the device or in the user's own Sheet, never on our servers (we have none).
+  No. AliSwift does not collect personal information. AliSwift has no account system and stores no product or order data on any server. The only thing sent to the developer is the optional error reports described in PRIVACY.md.
 - Authentication Information:
-  Yes. OAuth 2.0 tokens are managed by Chrome Identity solely to authenticate directly with Google APIs. Tokens are never transmitted to any external project server.
+  Yes. OAuth 2.0 tokens are managed by Chrome Identity solely to authenticate directly with Google APIs. Tokens are never transmitted to external servers.
 - Financial and Payment Information:
   No. AliSwift does not handle payments, credit cards, or bank credentials.
 - Location Data:
@@ -77,7 +77,7 @@ Each requested permission and host permission in manifest.json is strictly requi
 - Web History:
   No. Content scripts execute exclusively on matched AliExpress product pages and eBay listing pages to scrape details or fill form fields.
 - User Data Sharing:
-  User data is never sold, transferred, or shared with third parties or data brokers. All communication occurs directly between the user's browser and Google APIs.
+  User data is never sold, transferred, or shared with third parties or data brokers. All communication occurs directly between your browser and Google APIs.
 
 ## Screenshot Shot List
 
