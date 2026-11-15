@@ -21,7 +21,7 @@ function load(aiKeys) {
     chrome: { storage: { local: { get: async (d) => pick(store, d), set: async (i) => void Object.assign(store, i), remove: async () => {} }, sync: { get: async (d) => d }, session: { get: async (d) => pick(session, d), set: async (i) => void Object.assign(session, i) } } },
     fetch, AbortSignal, URL, Intl, console, setTimeout,
   });
-  for (const f of ["lib/ai.js", "lib/listing.js", "lib/fillplan.js"]) vm.runInContext(read(f), ctx);
+  for (const f of ["lib/shared.js", "lib/ai.js", "lib/listing.js", "lib/fillplan.js"]) vm.runInContext(read(f), ctx);
   return ctx;
 }
 
@@ -61,13 +61,16 @@ for (const [provider, keyVar, modelVar] of PROVIDERS) {
       { region: "US", marketplace: "eBay US", language: "English", wordsToLeaveOut: "" },
     );
     const checkListing = (raw) => {
-      const r = vm.runInContext("validateListing", ctx)(raw, { wordsToLeaveOut: "" });
+      const r = vm.runInContext("validateListing", ctx)(raw, { wordsToLeaveOut: "", source: request.user });
       if (!r.ok) throw Object.assign(new Error("no usable title and description"), { code: "bad-output" });
       return r;
     };
     const listed = await ctx.callAi({ ...request, task: "listing", temperature: 0.7, timeoutMs: 90000, check: checkListing });
     const { listing } = listed.answer;
     lines.push(`listing ok: "${String(listing.title).slice(0, 60)}" (${[...String(listing.title)].length} chars), ${listing.itemSpecifics?.length ?? 0} specifics, model ${listed.model}`);
+    const failedChecks = vm.runInContext("listingChecks", ctx)(listing).filter((c) => !c.ok);
+    lines.push(failedChecks.length ? `quality checks failed: ${failedChecks.map((c) => c.id).join(", ")}` : "quality checks: all pass");
+    if (process.env.LIVE_SHOW) lines.push(`title: ${listing.title}`, ...String(listing.description).split("\n").map((l) => `| ${l}`), `specifics: ${listing.itemSpecifics.map((s) => `${s.name}=${s.value}`).join("; ")}`);
 
     // 2. The item-specifics plan for a form, from that listing.
     const clean = vm.runInContext("cleanFields", ctx)(fields);

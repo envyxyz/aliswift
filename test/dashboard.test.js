@@ -22,6 +22,8 @@ const {
   sortProducts,
   filterOrders,
   calculateOrderTotals,
+  orderSourceText,
+  feeNote,
   parseHash,
   buildHash,
   getStatusTone,
@@ -390,6 +392,33 @@ test("calculateOrderTotals computes units, revenue, profit, and margin excluding
   assert.equal(emptyTotals.marginStr, "-");
 });
 
+test("calculateOrderTotals counts profit and margin only over orders whose profit is known, and says where the numbers come from", () => {
+  const orders = [
+    { orderNumber: "1", qty: 1, sell: 20, profit: 8, profitSource: "ebay", status: "Shipped" },
+    { orderNumber: "2", qty: 1, sell: 30, profit: 7, profitSource: "estimate", status: "Pending" },
+    { orderNumber: "3", qty: 1, sell: 10, profit: 2, profitSource: "sheet", status: "Pending" },
+    { orderNumber: "4", qty: 2, sell: 40, profit: null, profitSource: null, status: "Pending" }, // no cost: no profit
+    { orderNumber: "5", qty: 1, sell: 15, profit: "", status: "Delivered" },
+    { orderNumber: "6", qty: 1, sell: 99, profit: 50, profitSource: "ebay", status: "Cancelled" },
+  ];
+  const t = calculateOrderTotals(orders);
+  assert.equal(t.revenue, 115); // every order's sell, cancelled left out
+  assert.equal(t.profit, 17); // only the three known
+  assert.equal(t.marginStr, "28.3%"); // 17 / (20 + 30 + 10), not over the 115 of all
+  assert.deepEqual([t.exact, t.estimated, t.unknown], [1, 2, 2]);
+  assert.equal(orderSourceText(t), "1 exact from eBay, 2 estimated, 2 without a cost");
+  assert.equal(orderSourceText(calculateOrderTotals([orders[0]])), "1 exact from eBay"); // zero parts are left out
+  assert.equal(orderSourceText(calculateOrderTotals([])), "");
+  assert.equal(calculateOrderTotals([orders[3]]).marginStr, "-");
+});
+
+test("feeNote names the real fee parts and leaves out the ones that are zero", () => {
+  const { REGION_FEES } = require("../lib/shared.js");
+  assert.equal(feeNote(REGION_FEES.US), "eBay fees: 13.6% final value fee, 0.30 per order up to 10, 0.40 above, 1.55% international fee. Change them in the sheet's fee row (Inventory tab, row 1), or in Settings, Pricing.");
+  assert.match(feeNote(REGION_FEES.UK), /0\.35% regulatory fee.*20% tax on fees/);
+  assert.match(feeNote({ fvf: 0.1, regOp: 0, orderLow: 0.5, orderHigh: 0.5, intl: 0, feeTax: 0, threshold: 10 }), /^eBay fees: 10% final value fee, 0\.50 per order\. /);
+});
+
 // 11. parseHash & buildHash
 test("parseHash and buildHash round-trip views and parameters correctly", () => {
   const hash = "#products?status=Listed&q=ring&sort=margin&listing=1";
@@ -672,7 +701,7 @@ const readFile = (file) => fs.readFileSync(path.join(__dirname, "..", file), "ut
 test("dashboard.html loads only local scripts that exist, and never the dev stub", () => {
   const html = readFile("dashboard/dashboard.html");
   const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/listing.js", "../lib/ui.js", "../lib/errors.js", "dashboard.js"]); // shared first: dashboard.js needs it
+  assert.deepEqual(scripts, ["../lib/shared.js", "../lib/listing.js", "../lib/ui.js", "../lib/errors.js", "../lib/feed.js", "../lib/niches.js", "dashboard.js", "discover.js"]); // shared first: dashboard.js needs it
   for (const url of [...scripts, ...[...html.matchAll(/<link[^>]*\shref="([^"]+)"/g)].map((m) => m[1])]) {
     assert.ok(!/^https?:/.test(url), url);
     assert.ok(fs.existsSync(path.join(__dirname, "..", "dashboard", url)), url);
@@ -717,7 +746,7 @@ test("the dashboard only sends the messages it should, and never puts data into 
   const js = readFile("dashboard/dashboard.js");
   const actions = new Set([...js.matchAll(/action: "(\w+)"/g)].map((m) => m[1]));
   // Only deleteProduct clears a row's cells (the worker does it, the same as Remove from Sheet on the product page); the rest only reads, adds or changes a status or a product's two prices.
-  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks", "deleteProduct"];
+  const allowed = ["listProducts", "setStatus", "listOrders", "addOrder", "updateOrder", "moveLocal", "authState", "generateListing", "saveListing", "listOnEbay", "fillPhotos", "updateProduct", "priceLocks", "deleteProduct", "addOrderNet"];
   for (const action of actions) assert.ok(allowed.includes(action), `unexpected message ${action}`);
   assert.ok(actions.has("generateListing") && actions.has("saveListing"));
   for (const [line] of js.matchAll(/^.*\.innerHTML.*$/gm)) assert.match(line, /\.innerHTML = "";?\s*$/, line); // only ever cleared

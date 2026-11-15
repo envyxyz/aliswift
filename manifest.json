@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AliSwift",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "minimum_chrome_version": "119",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqhAugC9Y2g7NUkcp/SD+Ya8LJTAtsvhPHqL/4GFEYJRL6CfUbdU23QvhwuFmLtpDa8FLMc1bxdjNIe2tEQTGYZq1yfTNNEkOZAe4y3wi8eRxAWf3GPIkAwOPcH8Ikiyt/6F/m8KpfljFASULqy/6ZfjNO0SBkZqlTgYq4uHLcW6tQDTRtdaxYaw1HtQvlyegSdaKbOc/G/XhNZihtR6Pz190yDSFI5oDpWn2rhYiWu35viyyaQLyMC/7EB+kfC5jBSOInu1Zzbg/oSwn035EL0CtJX73XKFrSL2itfHstam5VM26aypA6m5U3hB06lP2zd/GzVyrxj/a2k48rq7c6wIDAQAB",
   "description": "Save AliExpress products to Google Sheets in one click. Scrapes title, price and shipping, then adds your sell price.",
@@ -47,6 +47,11 @@
       "css": ["content.css"]
     },
     {
+      "matches": ["https://*.aliexpress.com/w/*", "https://*.aliexpress.us/w/*"],
+      "js": ["lib/feed.js", "lib/errors.js", "content-feed.js"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": [
         "https://www.ebay.com/lstng*",
         "https://www.ebay.co.uk/lstng*",
@@ -67,7 +72,17 @@
         "https://www.ebay.co.uk/sh/ord*",
         "https://www.ebay.de/sh/ord*",
         "https://www.ebay.com.au/sh/ord*",
-        "https://www.ebay.ca/sh/ord*"
+        "https://www.ebay.ca/sh/ord*",
+        "https://www.ebay.com/mes/transactionlist*",
+        "https://www.ebay.com/sh/fin/*",
+        "https://www.ebay.co.uk/mes/transactionlist*",
+        "https://www.ebay.co.uk/sh/fin/*",
+        "https://www.ebay.de/mes/transactionlist*",
+        "https://www.ebay.de/sh/fin/*",
+        "https://www.ebay.com.au/mes/transactionlist*",
+        "https://www.ebay.com.au/sh/fin/*",
+        "https://www.ebay.ca/mes/transactionlist*",
+        "https://www.ebay.ca/sh/fin/*"
       ],
       "js": ["lib/panel.js", "lib/errors.js", "lib/orders.js", "content-orders.js"]
     }

@@ -152,7 +152,7 @@ test("readSpreadsheetMeta reads the tab names, then the first 4 rows of each, an
   assert.equal(meta.success, true);
   assert.equal(meta.title, "My store");
   assert.deepEqual(meta.skipped, ["Dashboard"]);
-  assert.deepEqual(meta.tabs.map((x) => [x.title, x.startRow, x.headers.length]), [["Inventory", 3, 15], ["Orders", 2, 13]]);
+  assert.deepEqual(meta.tabs.map((x) => [x.title, x.startRow, x.headers.length]), [["Inventory", 3, 15], ["Orders", 2, 14]]);
   assert.equal(t.calls.length, 3);
   assert.ok(t.calls.every((c) => c.method === "GET" && c.body === undefined && c.timed));
   // The third call reads the first data rows again as typed, so formulas can be told from values.
@@ -211,7 +211,7 @@ test("readSpreadsheetMeta explains every way a read can fail", async () => {
 /* Mapping and the AI fallback chain */
 
 const TEMPLATE_FIELDS = { keywordsCol: "B", linkCol: "C", priceCol: "D", salePriceCol: "E", skuCol: "A", statusCol: "M", imageCol: "O", profitCol: "J", marginCol: "L" };
-const ORDER_FIELDS = { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M" };
+const ORDER_FIELDS = { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M", net: "N" };
 const letters = (fields) => Object.fromEntries(Object.entries(fields).map(([k, f]) => [k, f.letter]));
 const GOOD_AI = {
   inventoryTab: "Inventory",
@@ -277,7 +277,7 @@ const AI_FAILURES = [
   ["an invalid key (400)", [failure(400, "API key not valid. Please pass a valid API key.", { details: [{ reason: "API_KEY_INVALID" }] })], "invalid-key", 1],
   ["rate limited, no other key", [failure(429, "x")], "rate", 1],
   ["a server error twice", [failure(500, "x"), failure(503, "x")], "network", 2],
-  ["the network down", [{ throw: new TypeError("fetch failed") }], "network", 1],
+  ["the network down", [{ throw: new TypeError("fetch failed") }, { throw: new TypeError("fetch failed") }], "network", 2],
   ["a timeout", [{ throw: named("TimeoutError", "timed out") }], "timeout", 1],
   ["an aborted request", [{ throw: named("AbortError", "aborted") }], "timeout", 1],
   ["an answer that is not JSON", [answer("sorry, I cannot help")], "bad-output", 1],

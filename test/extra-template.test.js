@@ -50,7 +50,7 @@ test("extra-template: all formulas reference valid existing cells and ranges", (
   const tabBounds = {
     Dashboard: { cols: 4, rows: 15 },
     Inventory: { cols: 15, rows: 1000 },
-    Orders: { cols: 12, rows: 1001 },
+    Orders: { cols: 14, rows: 1001 },
   };
   const idToTab = { 10: "Dashboard", 20: "Inventory", 30: "Orders" };
 
@@ -101,7 +101,7 @@ test("extra-template: all formulas reference valid existing cells and ranges", (
     while ((m = refPattern.exec(cleaned)) !== null) {
       const [full, sheet, c1, r1, c2, r2] = m;
       // Skip known spreadsheet function names that look like col names (e.g. IF, OR, N, ROW, TEXT, ROUND, IFERROR, SUMIFS)
-      if (!sheet && !r1 && !c2 && ["IF", "OR", "N", "ROW", "TEXT", "ROUND", "IFERROR", "SUMPRODUCT", "COUNTIF", "COUNTIFS", "SUMIFS", "VLOOKUP", "ISODD", "GOOGLEFINANCE"].includes(c1)) {
+      if (!sheet && !r1 && !c2 && ["IF", "AND", "OR", "N", "ROW", "TEXT", "ROUND", "IFERROR", "SUMPRODUCT", "COUNTIF", "COUNTIFS", "SUMIFS", "VLOOKUP", "ISODD", "GOOGLEFINANCE"].includes(c1)) {
         continue;
       }
 
@@ -142,7 +142,7 @@ test("extra-template: column counts match the config layout", () => {
 
   assert.equal(sheetSizes.Dashboard, 4);
   assert.equal(sheetSizes.Inventory, 15);
-  assert.equal(sheetSizes.Orders, 13);
+  assert.equal(sheetSizes.Orders, 14);
 
   // Check Inventory column mappings in config
   assert.ok(colIndex(config.skuCol) < sheetSizes.Inventory);

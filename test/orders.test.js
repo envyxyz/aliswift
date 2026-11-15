@@ -170,3 +170,89 @@ test("order links: only eBay https addresses are kept, Seller Hub's empty tracki
   assert.equal(lines[0].link, "https://www.ebay.com/sh/ord/details?orderid=12-34567-89012");
   assert.equal(lines[0].tracking, "");
 });
+
+test("only eBay's own hosts count as eBay links: not a look-alike subdomain or a longer domain", () => {
+  const { cleanOrderLink, orderNumberFromLink } = require("../lib/shared.js");
+  const no = "12-34567-89012";
+  for (const host of ["ebay.evil.com", "www.ebay.com.evil.net", "notebay.com", "www.ebay.fr"]) {
+    assert.equal(cleanOrderLink(`https://${host}/sh/ord/details?orderid=${no}`), "", host);
+    assert.equal(orderNumberFromLink(`https://${host}/sh/ord/details?orderid=${no}`), "", host);
+  }
+  for (const host of ["www.ebay.com", "ebay.com", "www.ebay.co.uk", "www.ebay.de", "www.ebay.com.au", "www.ebay.ca", "pages.ebay.com"]) {
+    assert.equal(orderNumberFromLink(`https://${host}/sh/ord/details?orderid=${no}`), no, host);
+  }
+});
+
+test("a multi-item order keeps eBay's subtotal on every line, a single item keeps it as its own total", () => {
+  const { lines } = cleanOrderImport([
+    { orderNumber: "1-1", date: "2026-10-10", sell: 25.5, total: 29, items: [{ sku: "A", qty: 1 }, { sku: "B", qty: 2 }] },
+    { orderNumber: "2-2", date: "2026-10-11", sell: 8, items: [{ sku: "C", qty: 1 }] },
+    { orderNumber: "3-3", date: "2026-10-12", items: [{ sku: "D", qty: 1 }, { sku: "E", qty: 1 }] }, // no price on the page
+  ]);
+  const by = (sku) => lines.find((l) => l.sku === sku);
+  assert.deepEqual([by("A").sell, by("A").orderSell, by("A").orderLines], [null, 25.5, 2]);
+  assert.deepEqual([by("B").sell, by("B").orderSell, by("B").orderLines], [null, 25.5, 2]);
+  assert.deepEqual([by("C").sell, by("C").orderSell], [8, undefined]);
+  assert.equal(by("D").orderSell, undefined);
+});
+
+test("parseMoney reads the money shapes eBay prints", () => {
+  const cases = [["$1,234.50", 1234.5], ["£9.99", 9.99], ["19,99 €", 19.99], ["EUR 19,99", 19.99], ["US $4.77", 4.77], ["1.234,50 €", 1234.5], ["-$0.40", -0.4], ["negative $0.40", -0.4], ["$5", 5]];
+  for (const [text, want] of cases) assert.equal(O.parseMoney(text), want, text);
+  assert.equal(O.parseMoney("-"), null);
+  assert.equal(O.parseMoney("Completed"), null);
+});
+
+test("parseTransactions reads sale, ad and refund rows of eBay's Payments list, and skips rows with no order", () => {
+  const sale = ["Nov 12, 2026", "Order 12-34567-89012", "Ring set, silver", "Item 100000000001", "Completed", "$19.99", "-$2.95", "$17.04$17.04", "$17.04", "View"];
+  const ad = ["Nov 12, 2026", "Promoted Listings - General fee for order 12-34567-89012", "Ring set, silver", "Completed", "-", "-$0.40", "-$0.40negative $0.40", "$16.64", "View"];
+  const split = ["Nov 13, 2026", "Order 98-76543-21098", "Cat toy", "Funds on hold", "$9.00", "-$1.60", "$7.40", "$7.40", "$7.40", "View"]; // the net as two pieces
+  const refund = ["Nov 14, 2026", "Refund for order 98-76543-21098", "Cat toy", "Completed", "-$9.00", "$1.40", "-$7.60negative $7.60", "$0.00", "View"];
+  const payout = ["Nov 15, 2026", "Payout", "Completed", "$30.00", "-", "$30.00", "$0.00", "View"];
+  const got = O.parseTransactions([sale, ad, split, refund, payout, [], "nope"]);
+  assert.deepEqual(got, [
+    { orderNumber: "12-34567-89012", kind: "sale", amount: 19.99, fees: -2.95, net: 17.04 },
+    { orderNumber: "12-34567-89012", kind: "ad", amount: null, fees: -0.4, net: -0.4 },
+    { orderNumber: "98-76543-21098", kind: "sale", amount: 9, fees: -1.6, net: 7.4 },
+    { orderNumber: "98-76543-21098", kind: "refund", amount: -9, fees: 1.4, net: -7.6 },
+  ]);
+  const total = got.filter((t) => t.orderNumber === "12-34567-89012").reduce((n, t) => n + t.net, 0);
+  assert.equal(Math.round(total * 100) / 100, 16.64); // the sale less the ad charge
+  assert.deepEqual(O.parseTransactions("nope"), []);
+  // The live page's tokens: the walker skips aria-hidden text, so the visible net is missing and the running total follows.
+  const liveAd = ["Nov 12, 2026", "Promoted Listings - General fee", "for order", "12-34567-89012", "Ring set, silver", "100000000001", "Completed", "-", "-$0.40", "negative $0.40", "$16.64", "View"];
+  const liveSale = ["Nov 12, 2026", "Order", "12-34567-89012", "Ring set, silver", "100000000001", "Funds on hold", "Estimated release on Dec 3", "$19.99", "-$2.95", "$17.04", "$17.04", "View"];
+  assert.deepEqual(O.parseTransactions([liveAd, liveSale]), [
+    { orderNumber: "12-34567-89012", kind: "ad", amount: null, fees: -0.4, net: -0.4 },
+    { orderNumber: "12-34567-89012", kind: "sale", amount: 19.99, fees: -2.95, net: 17.04 },
+  ]);
+  const off = ["Nov 12, 2026", "Order", "12-34567-89012", "Ring set", "Completed", "$10.00", "-$1.00", "$5.00", "View"]; // does not add up
+  assert.deepEqual(O.parseTransactions([off]), []);
+  // German page: the currency comes after the number
+  const de = ["12.11.2026", "Order", "12-34567-89012", "Ring", "Completed", "19,99 €", "-2,95 €", "17,04 €", "View"];
+  const deAd = ["12.11.2026", "Promoted Listings - General fee", "for order", "12-34567-89012", "Ring", "-", "-0,40 €", "negative 0,40 €", "View"];
+  assert.deepEqual(O.parseTransactions([de, deAd]).map((t) => [t.kind, t.amount, t.fees, t.net]), [["sale", 19.99, -2.95, 17.04], ["ad", null, -0.4, -0.4]]);
+});
+
+test("amountOf reads a token only when the whole token is one amount, or one amount printed twice", () => {
+  const num = [["$17.04", 17.04], ["$17.04$17.04", 17.04], ["-$0.40negative $0.40", -0.4], ["negative $0.40", -0.4], ["19,99 €", 19.99], ["-2,95 €", -2.95],
+    ["19,99 EUR", 19.99], ["EUR 19,99", 19.99], ["-EUR 2,95", -2.95], ["AU $5.00", 5], ["C $5.00", 5], ["US $4.77", 4.77], ["-", null]];
+  for (const [x, want] of num) assert.equal(O.amountOf(x), want, x);
+  for (const x of ["2 Pcs Phone Case 2 Colors", "10 Pcs Hair Clips 10cm", "100000000001", "Item 5", "$5 Gift", "$5.00$6.00", "Completed"]) assert.equal(O.amountOf(x), undefined, x);
+});
+
+test("mergePayments adds pages up per order without counting a page twice, and paymentOf sums in cents", () => {
+  const sale = { orderNumber: "A", kind: "sale", amount: 19.99, fees: -2.95, net: 17.04 };
+  const ad = { orderNumber: "A", kind: "ad", amount: null, fees: -0.4, net: -0.4 };
+  const one = O.mergePayments({}, [sale]);
+  assert.deepEqual(O.mergePayments(one, [sale]), one); // the same page twice counts once
+  const two = O.mergePayments(one, [ad]); // another page adds its rows
+  assert.deepEqual(O.paymentOf(two.A), { net: 16.64, sale: true });
+  assert.deepEqual(O.paymentOf(O.mergePayments({}, [sale, sale]).A), { net: 34.08, sale: true }); // two alike rows on one page count twice
+  assert.deepEqual(O.paymentOf(O.mergePayments({}, [ad]).A), { net: -0.4, sale: false }); // a fee alone is no sale
+  assert.deepEqual(O.paymentOf(O.mergePayments({}, [{ ...ad, net: 0.1 }, { ...ad, net: 0.2 }]).A), { net: 0.3, sale: false }); // no float drift
+  const many = Array.from({ length: 3002 }, (_, i) => ({ ...sale, orderNumber: `O${i}` }));
+  const kept = Object.keys(O.mergePayments({}, many));
+  assert.equal(kept.length, 3000);
+  assert.deepEqual([kept[0], kept.at(-1)], ["O2", "O3001"]); // the oldest are dropped
+});

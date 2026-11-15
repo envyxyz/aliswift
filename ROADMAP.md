@@ -17,11 +17,11 @@ eBay comes first. Etsy and Temu are the next marketplaces. If you sell on either
 
 ## 3. Adding eBay orders automatically
 - **What it is**: Import orders from eBay Seller Hub instead of entering them by hand.
-- **Done**: "Add all orders to sheet" on the Seller Hub order list reads visible orders and adds new ones to your sheet. The AI fallback handles wording changes.
+- **Done**: "Add all orders to sheet" on the Seller Hub order list reads visible orders, with the subtotal the buyer paid, and adds new ones to your sheet. The AI fallback handles wording changes. "Add eBay's exact fees to sheet" on the Payments page records what eBay paid for each order after fees and ad charges, so profit is exact.
 - **Left**:
-  - CSV report import: read downloaded Seller Hub order reports from the dashboard to import months of history at once.
+  - CSV report import: read downloaded Seller Hub order and transaction reports from the dashboard to import months of history at once.
   - Order page button: add an import button to individual Seller Hub order pages to read price and quantity.
-  - eBay API: background sync with exact fees if needed.
+  - eBay's own APIs need a secret key kept on a server, which a free extension with no server cannot hold. They stay out unless that changes.
 
 ## 4. Connecting AliExpress to pull orders and exact prices
 - **What it is**: Capture exact paid amounts, currency, and tracking numbers from AliExpress orders.
@@ -31,9 +31,14 @@ eBay comes first. Etsy and Temu are the next marketplaces. If you sell on either
 ## 5. Confirming eBay fee defaults against real orders
 - **What it is**: Verify default marketplace fee rates against actual eBay order breakdowns.
 - **Done**: Editable fee cells on the Inventory tab for UK (12.9% final value fee, 0.35% regulatory fee, 0.30 fixed fee, 20% VAT on fees, 1.55% international fee), US and Global (13.6% final value fee, 0.30 or 0.40 fixed fee, 1.55% international fee), and other regions.
-- **Left**: Check published defaults against real fee statements. Users can adjust fee cells at the top of their sheet at any time.
+- **Left**: Per-category rates (Jewelry & Watches is 15% on eBay US, most categories 13.6%). Users can adjust fee cells at the top of their sheet at any time, and orders with eBay's exact figure from the Payments page no longer depend on these defaults.
 
-## 6. Smaller items
+## 6. Discover: competition on eBay
+- **What it is**: Rank Discover's products by how crowded eBay already is, not only by how well they sell on AliExpress.
+- **Done**: Discover ranks by demand, momentum, margin, rating and price, and links each product to eBay's sold listings.
+- **Left**: A competition score. eBay's listing counts are only available through its API, which needs a server-held key (see above).
+
+## 7. Smaller items
 - Automatically set product status to Listed when the eBay confirmation page appears.
 - Minimum sell price guard per sheet.
 - Fill item condition and variations on the eBay form.

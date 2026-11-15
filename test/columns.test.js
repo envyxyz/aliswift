@@ -603,3 +603,18 @@ test("addOrderLink needs an Orders tab, and is for AliSwift's own pages only", a
   assert.equal((await ask(listener, { action: "addOrderLink", sheetId: baseSheet.id }, options)).success, false);
   assert.deepEqual(await ask(listener, { action: "addOrderLink", sheetId: baseSheet.id }, page), { success: false, error: "Not allowed." });
 });
+
+test("addOrderNet adds the eBay Net column like the order link one, titled with the currency, and saves its letter", async () => {
+  const sheet = { ...baseSheet, region: "US", oTab: "Orders", oRow: 2, oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M", net: "" } };
+  const replies = [
+    { json: { sheets: [{ properties: { sheetId: 9, title: "Orders", gridProperties: { columnCount: 13 } } }] } },
+    { json: { values: [["Order Number", "SKU", "Product", "Date", "Qty", "Sell", "Cost", "Profit", "Home", "Status", "Tracking", "Notes", "Order Link"], ["12-1", "SKU-01"]] } },
+    { json: {} }, { json: {} }, { json: {} },
+  ];
+  const t = setup(sheet, replies);
+  assert.deepEqual(await ask(t.listener, { action: "addOrderNet", sheetId: sheet.id }, options), { success: true, letter: "N" });
+  assert.deepEqual(cellsOf(t.calls[3]), { "'Orders'!N1": "eBay Net (USD)" });
+  assert.equal(t.syncStore.sheets[0].oCols.net, "N");
+  assert.equal(t.syncStore.sheets[0].oCols.link, "M");
+  assert.deepEqual(await ask(t.listener, { action: "addOrderNet", sheetId: sheet.id }, page), { success: false, error: "Not allowed." });
+});

@@ -4,8 +4,9 @@ Copyright (c) 2026 envyxyz (https://github.com/envyxyz). All rights reserved,
 except for the permissions given below.
 
 In short: you may use AliSwift for free, including to run your own store, and
-you may change it for yourself and send improvements back. You may not sell it,
-make money from it, or publish it anywhere without written permission first.
+you may change it for yourself and send improvements back. AliSwift is not for
+profit: nobody may sell it or make money from it, ever. Publishing it anywhere
+needs written permission first.
 
 
 1. What you may do
@@ -17,25 +18,33 @@ make money from it, or publish it anywhere without written permission first.
       this project as pull requests.
 
 
-2. What you may not do without written permission
+2. What you may never do
+
+   No permission is given for these, and none will be:
 
    a. Sell, rent, license or charge any money for AliSwift, a changed version
       of it, or any part of its code.
    b. Use AliSwift or its code in, or as part of, any product or service that
       you sell or that earns money, including paid tools, paid extensions,
       software offered as a service, and paid setup or support.
-   c. Publish, upload or distribute AliSwift or a changed version of it on any
+   c. Copy, port, translate or rewrite AliSwift, by hand or with an automated
+      tool or an AI system, in order to do anything in (a) or (b).
+
+   What you may not do without written permission
+
+   d. Publish, upload or distribute AliSwift or a changed version of it on any
       platform, including the Chrome Web Store, the Microsoft Edge Add-ons
       store, Firefox Add-ons, any other extension or app store, marketplace,
       website, file-sharing service or social network. Linking to this
       repository is always allowed.
-   d. Rename, rebrand or present AliSwift or its code as your own work.
-   e. Remove or change this license or the copyright notice in any copy.
+   e. Rename, rebrand or present AliSwift or its code as your own work.
+   f. Remove or change this license, the copyright notice, the notice in
+      AGENTS.md or the license header of any file, in any copy.
 
 
 3. Asking for permission
 
-   To ask for permission for anything in section 2, open an issue at
+   To ask for permission for (d), (e) or (f) in section 2, open an issue at
    https://github.com/envyxyz/aliswift/issues or contact the author through
    https://github.com/envyxyz. Permission counts only when it is given in
    writing by the author.

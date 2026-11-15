@@ -19,3 +19,14 @@ export function checkBatch(body) {
   }
   return rows;
 }
+
+// The caller's IP from the proxy headers, or null. The client cannot choose it, unlike install_id.
+export function clientIp(headers) {
+  return (headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || headers.get("cf-connecting-ip")?.trim() || null;
+}
+
+// Salted SHA-256 hex of the IP, so the raw address is never stored.
+export async function ipHash(ip, salt) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt}:${ip}`)));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}

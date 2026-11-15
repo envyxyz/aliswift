@@ -4,14 +4,41 @@ Notable changes to AliSwift, newest first. The format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-15
+
+### Added
+
+- **Discover**: a new dashboard view that ranks real AliExpress products by niche or season. It shows each product's sold count, rating and age, your estimated sell price, profit and margin from your sheet's own pricing rule, and marks winners, rising products and brand risks. Save one to your sheet in a click, or check what has sold on eBay first. No key or account needed.
+- **Exact eBay fees**: on Seller Hub's Payments page, **Add eBay's exact fees to sheet** reads what eBay really paid for each order, after every fee and ad charge, and the Orders tab's profit becomes that amount minus your cost. New sheets have an eBay Net column; the dashboard offers to add it to older ones.
+- **Listing checklist**: the listing dialog shows what a strong eBay listing needs (title length, repeated or filler words, item specifics, description sections) and what is missing, with no AI call.
+- **Notice for automated tools** (AGENTS.md): AI assistants are told what the license forbids.
+
 ### Changed
 
-- **License**: AliSwift is now free for personal use, including running your own store. Selling it or publishing it anywhere needs written permission (see LICENSE). Releases up to 1.0.5 keep the MIT License.
+- **License**: AliSwift is free for personal use, including running your own store, and is never for sale: nobody may sell it or make money from it. Publishing it anywhere needs written permission (see LICENSE). Releases up to 1.0.5 keep the MIT License.
+- **Profit is one calculation everywhere**: the dashboard's inspector now uses the same fee rules as your sheet (final value fee, per-order fee by order size, international fee, tax on fees) and reads the rates from the sheet's own fee cells, so the two always agree. Estimates are marked "est."; orders with eBay's exact figure are not.
+- **Order totals** count profit and margin only over orders whose profit is known, and say how many are exact, estimated or missing a cost.
+- **Order import** takes eBay's own subtotal for every order, splits it across the items of a multi-item order, and reads prices written with a decimal comma.
+- **Listing writer** follows eBay's search and listing rules: keywords first, no filler or borrowed brand names, one value per item specific, a two-sentence opening that works as the mobile summary, and no "Not specified" lines. Buyer options go in their own section; AliExpress's "Ships From" and sold-out choices are left out. Press **Reset to default** in the AI tab to get the new instructions.
+- **A weak answer is repaired**: a title that is too long or too short, or a description missing a section, is asked for once more, and the better answer is kept.
+- **AI calls fail less**: a bad or blocked answer moves on to your next key; a filled-in eBay form no longer waits behind listings being written in the background; answers with text around the JSON are read; busy servers are retried after a pause.
+- **OpenRouter** defaults to its free router, which keeps working when a free model is withdrawn, and a key whose model has gone falls back to it.
+- **Product photos** go to the AI by default (Gemini keys only), so colours and finishes come out right, and a slow photo no longer holds a listing up for more than a few seconds.
 - **Docs**: a shorter README that walks through install and use, new screenshots and recordings, and a tidier changelog.
-- **Listing writer** follows eBay search practice for titles, item specifics and descriptions. Press **Reset to default** in the AI tab to get the new instructions.
-- **Buyer options** (sizes, colours, finishes) are read from the product page and used in item specifics and a new Available Options section.
-- **Product photos** go to the AI by default (Gemini keys only), so colours and finishes come out right. Turn it off in the AI tab.
-- **Placeholder specifications** like "None" or "Others" are filtered out before sending product details to the AI.
+
+### Fixed
+
+- **Measurements** keep their decimal point in titles ("2.4GHz" was sometimes written "24GHz").
+- **Item specifics** given as a list ("6, 7, 8") no longer go into a single-value eBay box or leave a required one empty.
+- **Specifications that say "None"** (no stone, no battery) are kept as facts instead of being dropped.
+- **Order links** are saved in their short form (long Seller Hub links were silently dropped) and only real eBay addresses are accepted.
+- **Prices stored as text** in a sheet are read as numbers.
+- **Listings for a sheet with no marketplace** keep their currency.
+
+### Security
+
+- **Error-report service**: limits per sender that cannot be bypassed by changing the install ID, and a cap on request size that no longer trusts the request's own header.
+- **Windows updater** checks every download against AliSwift's own extension key, on first install too, and no longer replaces itself.
 
 ## [1.0.5] - 2026-10-19
 
@@ -254,7 +281,8 @@ Notable changes to AliSwift, newest first. The format follows [Keep a Changelog]
 
 - **Initial release** saves AliExpress products directly to Google Sheets with calculated pricing.
 
-[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/envyxyz/aliswift/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/envyxyz/aliswift/compare/v1.0.5...v1.1.0
 [1.0.5]: https://github.com/envyxyz/aliswift/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/envyxyz/aliswift/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/envyxyz/aliswift/compare/v1.0.2...v1.0.3

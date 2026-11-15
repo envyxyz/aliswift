@@ -3,6 +3,10 @@ const assert = require("node:assert/strict");
 const {
   SHEET_DEFAULTS,
   REGIONS,
+  REGION_FEES,
+  orderFees,
+  feesOf,
+  splitAmount,
   regionForCurrency,
   TEMPLATE_LAYOUT,
   canonical,
@@ -67,15 +71,48 @@ test("priceProduct adds shipping and extra cost before pricing", () => {
   assert.deepEqual(priceProduct(4, 1, sheet), { price: "6.00", salePrice: "12.00" });
 });
 
-test("productProfit takes the sheet's fee off the sell price and answers null without two usable numbers", () => {
-  const sheet = { feePercent: 10, feeFixed: 0.5 };
-  assert.deepEqual(productProfit(4, 10, sheet), { fees: 1.5, profit: 4.5, margin: 0.45 });
-  assert.deepEqual(productProfit("4", "10", sheet), { fees: 1.5, profit: 4.5, margin: 0.45 }); // typed text
+test("productProfit takes the sheet's fees off the sell price and answers null without two usable numbers", () => {
+  const sheet = { feePercent: 10, feeFixed: 0.5 }; // the simple settings: a percentage and one fixed fee
+  assert.deepEqual(productProfit(4, 10, sheet), { fees: 1.5, profit: 4.5, margin: 0.45, parts: { ad: 0, ebay: 1, order: 0.5, total: 1.5 } });
+  assert.deepEqual(productProfit("4", "10", sheet), productProfit(4, 10, sheet)); // typed text
   assert.equal(productProfit(20, 10, sheet).profit, -11.5); // a loss stays a loss
-  assert.deepEqual(productProfit(1, 2, {}), { fees: 0, profit: 1, margin: 0.5 }); // a sheet with no fees set
   for (const [cost, sell] of [["", 5], [3, ""], [null, 5], [3, 0], [3, -1], ["x", 5], [3, undefined]]) assert.equal(productProfit(cost, sell, sheet), null, `${cost}/${sell}`);
-  assert.deepEqual(productProfit(3, 10), productProfit(3, 10, SHEET_DEFAULTS)); // the defaults: 13.6% + 0.40
+  // Untouched settings: the marketplace's own fees. US 13.6% + 1.55% international + 0.30 at 10 or less: 1.36 + 0.16 + 0.30.
+  assert.deepEqual(productProfit(3, 10), productProfit(3, 10, SHEET_DEFAULTS));
+  assert.deepEqual(productProfit(3, 10).parts, { ad: 0, ebay: 1.52, order: 0.3, total: 1.82 });
+  assert.equal(productProfit(3, 10, { ...SHEET_DEFAULTS, region: "UK" }).parts.ebay, 1.79); // (1.29 + 0.04 + 0.16) * 1.2 with VAT on fees
   assert.equal(SHEET_DEFAULTS.feePercent, 13.6);
+  // A fee strip read from the sheet wins over everything, with tax on fees and the tiered per-order fee.
+  const strip = { fvf: 0.1, regOp: 0, intl: 0, feeTax: 0.2, buyerTax: 0, orderLow: 0.3, orderHigh: 0.5, threshold: 10 };
+  assert.deepEqual(productProfit(2, 8, { ...sheet, fees: strip }).parts, { ad: 0, ebay: 0.96, order: 0.36, total: 1.32 });
+  assert.equal(productProfit(2, 20, { fees: strip }).parts.order, 0.6);
+});
+
+test("splitAmount shares a total by weight to the cent, the remainder on the last line, equally when a weight is missing", () => {
+  assert.deepEqual(splitAmount(25.67, [20, 10]), [17.11, 8.56]);
+  assert.deepEqual(splitAmount(7, [1, 1, 1]), [2.33, 2.33, 2.34]);
+  assert.deepEqual(splitAmount(10, [5, 0]), [5, 5]); // a missing price: equal
+  assert.deepEqual(splitAmount(-7.6, [9, 1]), [-6.84, -0.76]); // a refund shares the same way
+  assert.deepEqual(splitAmount(9, [3]), [9]);
+  for (const [total, w] of [[20.01, [6.99, 9.98]], [0.05, [1, 1, 1]], [123.45, [3, 7, 11, 2]]]) {
+    assert.equal(Math.round(splitAmount(total, w).reduce((a, b) => a + b, 0) * 100) / 100, total);
+  }
+});
+
+test("orderFees rounds each line like the sheet, and feesOf picks the sheet's own fees, else the marketplace's", () => {
+  const us = REGION_FEES.US;
+  assert.deepEqual(orderFees(19.99, us), { ad: 0, ebay: 3.03, order: 0.4, total: 3.43 }); // 2.72 + 0.31, each line rounded
+  assert.equal(orderFees(100, us, 0.05).ad, 5);
+  assert.equal(orderFees(10, us).order, 0.3); // at the threshold: the low fee
+  assert.equal(orderFees(10.01, us).order, 0.4);
+  assert.deepEqual(Object.keys(REGION_FEES), Object.keys(REGIONS));
+  assert.ok(Object.values(REGION_FEES).every((f) => f.threshold === 10));
+  assert.equal(feesOf({ region: "DE" }), REGION_FEES.DE);
+  assert.equal(feesOf({}), REGION_FEES.US);
+  assert.equal(feesOf(undefined), REGION_FEES.US);
+  const own = { fvf: 0.2 };
+  assert.equal(feesOf({ region: "DE", fees: own }), own);
+  assert.deepEqual(feesOf({ feePercent: 5, feeFixed: 1, region: "UK" }), { fvf: 0.05, orderLow: 1, orderHigh: 1, regOp: 0, intl: 0, feeTax: 0, buyerTax: 0, threshold: 10 });
 });
 
 test("priceProduct margin, .99 rounding and sell price off", () => {

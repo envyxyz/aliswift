@@ -257,8 +257,9 @@ test("createSheet creates the file, then sets it up with one batchUpdate", async
     skuPrefix: "OR-",
     oTab: "Orders",
     oRow: 2,
-    oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M" },
+    oCols: { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "M", net: "N" },
     skuFormula: true,
+    netFormula: true,
     region: "UK",
   });
   // The prefix is in the SKU formula, and nothing in the new sheet looks an exchange rate up.
@@ -776,9 +777,9 @@ test("listOrders reads the Orders columns, names the product from Inventory and 
   ]);
   const reply = await ask(t.listener, { action: "listOrders", sheetId: full.id }, options);
   assert.deepEqual(reply.orders, [
-    { row: 2, orderNumber: "12-1", sku: "SKU-01", product: "ring", date: "2026-10-10", qty: 2, sell: 13.98, cost: 4.3, profit: 5, status: "Pending", tracking: "", notes: "", link: "" },
-    { row: 3, orderNumber: "12-1", sku: "SKU-02", product: "lamp", date: "2026-10-09", qty: 1, sell: 4.99, cost: 1.5, profit: 1, status: "Shipped", tracking: "RR1", notes: "", link: "" },
-    { row: 5, orderNumber: "77", sku: "SKU-01", product: "ring", date: "2026-10-08", qty: 1, sell: 7, cost: null, profit: null, status: "Cancelled", tracking: "", notes: "hi", link: "" },
+    { row: 2, orderNumber: "12-1", sku: "SKU-01", product: "ring", date: "2026-10-10", qty: 2, sell: 13.98, cost: 4.3, net: null, fees: 2.96, profit: 5, profitSource: "sheet", status: "Pending", tracking: "", notes: "", link: "" },
+    { row: 3, orderNumber: "12-1", sku: "SKU-02", product: "lamp", date: "2026-10-09", qty: 1, sell: 4.99, cost: 1.5, net: null, fees: 1.25, profit: 1, profitSource: "sheet", status: "Shipped", tracking: "RR1", notes: "", link: "" },
+    { row: 5, orderNumber: "77", sku: "SKU-01", product: "ring", date: "2026-10-08", qty: 1, sell: 7, cost: null, net: null, fees: 1.6, profit: null, profitSource: null, status: "Cancelled", tracking: "", notes: "hi", link: "" },
   ]);
   assert.match(decoded(t.calls[0]), /'Orders'!A2:A&ranges='Orders'!B2:B&ranges='Orders'!D2:D/);
 });
@@ -830,10 +831,11 @@ test("addOrder takes a typed sell total over the product's price, and warns when
 });
 
 test("addOrder rejects the same order number for the same SKU, but accepts another SKU on that order", async () => {
-  const dupe = setup(full, [orderKeys()]);
+  const dupe = setup(full, [orderKeys(), inventory()]); // the inventory is read beside the order keys
   const reply = await ask(dupe.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-1", sku: "sku-01", sell: 5 } }, options);
   assert.deepEqual(reply, { success: false, code: "duplicate", error: "Order 12-1 for sku-01 is already in the sheet." });
-  assert.equal(dupe.calls.length, 1, "nothing was written");
+  assert.equal(dupe.calls.length, 2, "two reads");
+  assert.ok(dupe.calls.every((c) => !c.body), "nothing was written");
 
   const second = setup(full, [orderKeys(), inventory(), { json: {} }]);
   assert.equal((await ask(second.listener, { action: "addOrder", sheetId: full.id, order: { orderNumber: "12-1", sku: "SKU-02", sell: 5 } }, options)).success, true);
@@ -1130,3 +1132,122 @@ test("Seller Hub's status words map to the sheet's statuses, and anything unsure
   const f = (w) => require("../lib/shared.js").orderStatusOf(w);
   assert.deepEqual(["Shipped", "Delivered", "Refunded", "Cancelled", "Return requested", "Awaiting shipment", "", "Paid"].map(f), ["Shipped", "Delivered", "Cancelled", "Cancelled", "Disputed", "Pending", "Pending", "Pending"]);
 });
+
+/* Exact fees: the sheet's own fee strip, eBay's net from the Payments page, and a multi-item order's subtotal */
+
+const O_COLS = { no: "A", sku: "B", date: "D", qty: "E", sell: "F", cost: "G", profit: "H", status: "J", track: "K", notes: "L", link: "", net: "N" };
+const withNet = { ...full, oCols: O_COLS };
+const paymentsPage = "https://www.ebay.com/mes/transactionlist?sh=true";
+const stripRow = { json: { values: [["eBay FVF Rate:", 0.2, "Reg", 0, "Low", 0.5, "High", 0.6, "Tax", 0, "Intl", 0, "Buyer", 0]] } };
+
+test("listOrders and listProducts answer the fees of the sheet's own strip, read once and kept ten minutes; a failed read is not kept", async () => {
+  const own = { ...withNet, skuFormula: true };
+  const orders = () => columns(["12-34567-00001", "12-34567-00002"], ["SKU-01", "SKU-01"], [], [], [10, 10], [4, 4], [], [], [], [], ["", 8]);
+  const t = setup(own, [orders(), columns(["SKU-01"], ["ring"]), stripRow, orders(), columns(["SKU-01"], ["ring"])]);
+  const reply = await ask(t.listener, { action: "listOrders", sheetId: own.id }, options);
+  const fees = { fvf: 0.2, regOp: 0, orderLow: 0.5, orderHigh: 0.6, feeTax: 0, intl: 0, buyerTax: 0, threshold: 10 };
+  assert.deepEqual(reply.fees, fees);
+  assert.match(decoded(t.calls[2]), /values\/'Inventory'!A1:N1\?valueRenderOption=UNFORMATTED_VALUE/);
+  // The first order has no net: its fees are the estimate (2.00 + 0.50) and its profit 10 - 4 - 2.50. The second has eBay's net.
+  assert.deepEqual(reply.orders.map((o) => [o.net, o.fees, o.profit, o.profitSource]), [[null, 2.5, 3.5, "estimate"], [8, 2, 4, "ebay"]]);
+  const again = await ask(t.listener, { action: "listOrders", sheetId: own.id }, options);
+  assert.deepEqual(again.fees, fees);
+  assert.equal(t.calls.length, 5); // the strip was not read again
+
+  const bad = setup(own, [orders(), columns(["SKU-01"], ["ring"]), { json: { values: [["Something else", 1]] } }, orders(), columns(["SKU-01"], ["ring"]), stripRow]);
+  assert.deepEqual((await ask(bad.listener, { action: "listOrders", sheetId: own.id }, options)).fees, feesFor("UK")); // not AliSwift's strip: the marketplace's defaults
+  assert.deepEqual((await ask(bad.listener, { action: "listOrders", sheetId: own.id }, options)).fees, feesFor("UK")); // a strip that is not one is not asked for again
+  const manual = setup(withNet, [orders(), columns(["SKU-01"], ["ring"])]); // a sheet AliSwift did not make has no strip: no extra read
+  assert.equal((await ask(manual.listener, { action: "listOrders", sheetId: own.id }, options)).fees.fvf, 0.129);
+  assert.equal(manual.calls.length, 2);
+});
+const feesFor = (region) => plain(require("../lib/shared.js").REGION_FEES[region]);
+
+test("a numeric string in a sheet cell counts as a number, a blank or text does not", async () => {
+  const t = setup(full, [columns(["12-1"], ["SKU-01"], [], [], ["1,234.50"], ["  4.5 "], ["n/a"]), columns(["SKU-01"], ["ring"])]);
+  const [o] = (await ask(t.listener, { action: "listOrders", sheetId: full.id }, options)).orders;
+  assert.deepEqual([o.sell, o.cost, o.profitSource], [1234.5, 4.5, "estimate"]); // "n/a" is no profit
+});
+
+test("importPayments writes each order's exact net across its lines, and profit = net - cost, only where a cell changes", async () => {
+  const keys = (net = [], profit = []) => columns(["Order", "12-34567-00001", "12-34567-00001", "12-34567-00002", "12-34567-00003"], ["SKU", "SKU-01", "SKU-02", "SKU-01", "SKU-01"], ["Status"], ["Track"], ["Sell", 20, 10, 8, 5], ["Cost", 5, 3, "", 1], net, profit);
+  const sale = ["Order 12-34567-00001", "Ring set", "Completed", "$30.00", "-$3.93", "$26.07$26.07", "$26.07", "View"];
+  const ad = ["Promoted Listings - General fee for order 12-34567-00001", "Ring set", "Completed", "-", "-$0.40", "-$0.40negative $0.40", "$25.67", "View"];
+  const other = ["Order 12-34567-00002", "Cat toy", "Completed", "$8.00", "-$2.00", "$6.00$6.00", "$31.67", "View"];
+  const gone = ["Order 98-76543-21098", "Not in the sheet", "Completed", "$8.00", "-$2.00", "$6.00$6.00", "$31.67", "View"];
+  const payout = ["Payout", "Completed", "$30.00", "-", "$30.00", "View"];
+  const rows = [sale, ad, other, gone, payout];
+
+  const t = setup(withNet, [keys(), { json: {} }]);
+  const reply = await ask(t.listener, { action: "importPayments", rows }, paymentsPage);
+  assert.deepEqual(reply, { success: true, updated: 2, unknown: ["98-76543-21098"], noCost: 1 });
+  assert.equal(t.calls.length, 2); // the tab once, one write
+  // 25.67 over lines of 20 and 10: 17.11 and 8.56 (the remainder on the last); the other order has one line and no cost.
+  assert.deepEqual(cellsOf(t.calls[1]), { "'Orders'!N2": 17.11, "'Orders'!H2": 12.11, "'Orders'!N3": 8.56, "'Orders'!H3": 5.56, "'Orders'!N4": 6 });
+  assert.equal(t.calls[1].body.valueInputOption, "RAW");
+  assertNothingDestroyed(t.calls);
+
+  // Pressed again with the cells already there: nothing is written.
+  const again = setup(withNet, [keys(["Net", 17.11, 8.56, 6], ["Profit", 12.11, 5.56])]);
+  assert.deepEqual(await ask(again.listener, { action: "importPayments", rows }, paymentsPage), { success: true, updated: 2, unknown: ["98-76543-21098"], noCost: 1 });
+  assert.equal(again.calls.length, 1);
+});
+
+test("importPayments adds an order's rows up across pages, waits for a sale, counts unreadable rows, and leaves a profit formula alone", async () => {
+  const keys = (net = []) => columns(["Order", "12-34567-00002"], ["SKU", "SKU-01"], ["Status"], ["Track"], ["Sell", 8], ["Cost", ""], net, []);
+  const sale = ["Order 12-34567-00002", "Cat toy", "Completed", "$8.00", "-$2.00", "$6.00$6.00", "$6.00", "View"];
+  const ad = ["Promoted Listings - General fee for order 12-34567-00002", "Cat toy", "Completed", "-", "-$0.40", "-$0.40negative $0.40", "$5.60", "View"];
+  const t = setup(withNet, [keys(), { json: {} }, keys(["Net", 6]), { json: {} }]);
+  assert.equal((await ask(t.listener, { action: "importPayments", rows: [sale] }, paymentsPage)).updated, 1);
+  assert.deepEqual(cellsOf(t.calls[1]), { "'Orders'!N2": 6 });
+  assert.equal((await ask(t.listener, { action: "importPayments", rows: [ad] }, paymentsPage)).updated, 1); // same setup: the ledger carries over
+  assert.deepEqual(cellsOf(t.calls[3]), { "'Orders'!N2": 5.6 }); // the sale less the ad charge, not the ad charge alone
+
+  const fresh = setup(withNet, []);
+  assert.deepEqual(await ask(fresh.listener, { action: "importPayments", rows: [ad] }, paymentsPage), { success: true, updated: 0, unknown: [], noCost: 0, partial: 1 });
+  assert.equal(fresh.calls.length, 0); // nothing written for an order whose sale was never seen
+
+  const off = ["Order 12-34567-00002", "Cat toy", "Completed", "$10.00", "-$1.00", "$5.00", "View"]; // does not add up
+  assert.deepEqual(await ask(fresh.listener, { action: "importPayments", rows: [off] }, paymentsPage), { success: true, updated: 0, unknown: [], noCost: 0, unread: 1 });
+
+  const formula = setup({ ...withNet, netFormula: true }, [keys(), { json: {} }]);
+  await ask(formula.listener, { action: "importPayments", rows: [sale] }, paymentsPage);
+  assert.deepEqual(cellsOf(formula.calls[1]), { "'Orders'!N2": 6 }); // the net, not the profit
+});
+
+test("importPayments needs a net or a profit column, answers nothing for rows without orders, and only the Payments pages may ask", async () => {
+  const none = setup({ ...full, oCols: { ...O_COLS, net: "", profit: "" } }, []);
+  assert.match((await ask(none.listener, { action: "importPayments", rows: [] }, paymentsPage)).error, /no eBay Net or Profit column/);
+  const empty = setup(withNet, []);
+  assert.deepEqual(await ask(empty.listener, { action: "importPayments", rows: [["Payout", "$1.00", "-", "$1.00", "View"]] }, paymentsPage), { success: true, updated: 0, unknown: [], noCost: 0 });
+  assert.equal(empty.calls.length, 0);
+
+  const t = setup(withNet, []);
+  const denied = { success: false, error: "Not allowed." };
+  for (const url of [page, options, listingForm, ordersPage, "https://www.ebay.com.evil.example/mes/transactionlist", "http://www.ebay.com/mes/transactionlist", "https://www.ebay.com/sh/ord/", undefined]) {
+    assert.deepEqual(await ask(t.listener, { action: "importPayments", rows: [] }, url), denied, `importPayments from ${url}`);
+  }
+  for (const url of [paymentsPage, "https://www.ebay.co.uk/sh/fin/transactions?q=orderId:1", "https://www.ebay.de/mes/transactionlist"]) {
+    assert.notDeepEqual(await ask(t.listener, { action: "importPayments", rows: [] }, url), denied, url);
+  }
+  // The Payments pages can't import orders either.
+  assert.deepEqual(await ask(t.listener, { action: "importOrders", orders: [] }, paymentsPage), denied);
+});
+
+test("importOrders shares a multi-item order's subtotal over its lines by unit sell x quantity, to the cent; a single item keeps it", async () => {
+  const item = (o) => ({ date: "2026-10-10", ...o });
+  const lines = [
+    item({ date: "2026-10-08", orderNumber: "12-34567-00010", sell: 20.01, items: [{ sku: "SKU-01", qty: 1 }, { sku: "SKU-02", qty: 2 }] }),
+    item({ date: "2026-10-09", orderNumber: "12-34567-00011", sell: 9, items: [{ sku: "SKU-01", qty: 1 }] }),
+    item({ orderNumber: "12-34567-00012", sell: 7, items: [{ sku: "SKU-01", qty: 1 }, { sku: "SKU-77", qty: 1 }, { sku: "SKU-02", qty: 1 }] }), // an unknown SKU: shared by quantity
+  ];
+  const t = setup(full, [orderKeys(), inventory(), { json: {} }]);
+  assert.equal((await ask(t.listener, { action: "importOrders", orders: lines }, ordersPage)).success, true);
+  const cells = cellsOf(t.calls[2]);
+  const sells = Object.entries(cells).filter(([k]) => k.startsWith("'Orders'!F")).map(([, v]) => v);
+  // The lines of an import come out reversed within an order. 20.01 over SKU-02 x2 (9.98) and SKU-01 (6.99): 11.77 and the rest, 8.24;
+  // then 9; then 7 over three lines by quantity: 2.33, 2.33 and the remainder 2.34.
+  assert.deepEqual(sells, [11.77, 8.24, 9, 2.33, 2.33, 2.34]);
+  assert.equal(Math.round((sells[0] + sells[1]) * 100) / 100, 20.01);
+});
+

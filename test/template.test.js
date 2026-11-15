@@ -41,7 +41,7 @@ test("the workbook has the three tabs, sized like the template", () => {
   assert.equal(createBody.properties.title, "My store");
   assert.deepEqual(
     createBody.sheets.map((s) => [s.properties.title, s.properties.gridProperties.rowCount, s.properties.gridProperties.columnCount]),
-    [["Dashboard", 15, 4], ["Inventory", 1000, 15], ["Orders", 1001, 13]],
+    [["Dashboard", 15, 4], ["Inventory", 1000, 15], ["Orders", 1001, 14]],
   );
 });
 
@@ -110,9 +110,9 @@ test("every formula column gets one repeatCell with the final formula text", () 
     F: '=IF($B2="","",IFERROR(VLOOKUP($B2,Inventory!$A:$E,5,0)*IF($E2="",1,$E2),""))',
     G: '=IF($B2="","",IFERROR(VLOOKUP($B2,Inventory!$A:$D,4,0)*IF($E2="",1,$E2),""))',
     H:
-      '=IF($B2="","",IFERROR(ROUND($F2-$G2-ROUND($F2*(1+Inventory!$N$1)*IFERROR(N(VLOOKUP($B2,Inventory!$A:$F,6,0)),0)*(1+Inventory!$J$1),2)' +
+      '=IF($B2="","",IF(AND($N2<>"",$G2<>""),ROUND($N2-$G2,2),IFERROR(ROUND($F2-$G2-ROUND($F2*(1+Inventory!$N$1)*IFERROR(N(VLOOKUP($B2,Inventory!$A:$F,6,0)),0)*(1+Inventory!$J$1),2)' +
       "-ROUND((ROUND($F2*(1+Inventory!$N$1)*Inventory!$B$1,2)+ROUND($F2*(1+Inventory!$N$1)*Inventory!$D$1,2)+ROUND($F2*(1+Inventory!$N$1)*Inventory!$L$1,2))*(1+Inventory!$J$1),2)" +
-      '-ROUND(IF($F2*(1+Inventory!$N$1)<=10,Inventory!$F$1,Inventory!$H$1)*(1+Inventory!$J$1),2),2),""))',
+      '-ROUND(IF($F2*(1+Inventory!$N$1)<=10,Inventory!$F$1,Inventory!$H$1)*(1+Inventory!$J$1),2),2),"")))',
     I: '=IFERROR(IF($H2="","",ROUND($H2*Dashboard!$D$2,0)),"")',
   };
   for (const region of ["UK", "US"]) {
@@ -180,7 +180,7 @@ test("only the sheet ids Google returned are used, and rows are frozen as in the
 
 test("the config saved for a new sheet matches the template's own columns", () => {
   const { config } = build({ skuPrefix: "UK-" });
-  assert.deepEqual(config, { ...TEMPLATE_LAYOUT, skuPrefix: "UK-", skuFormula: true, region: "UK" });
+  assert.deepEqual(config, { ...TEMPLATE_LAYOUT, skuPrefix: "UK-", skuFormula: true, netFormula: true, region: "UK" });
 
   // TEMPLATE_LAYOUT is what the Edit dialog's preset fills in; it must agree with the workbook.
   const keyed = (tab) => Object.fromEntries(tab.columns.filter((c) => c.key).map((c) => [c.key, c.col]));
@@ -301,6 +301,7 @@ function compile(formula) {
       }
     },
     OR: (e, args) => args.map((a) => a(e)).some(Boolean),
+    AND: (e, args) => args.map((a) => a(e)).every(Boolean),
     ROUND: (e, [x, n]) => round(num(x(e)), num(n(e))),
     N: (e, [x]) => (typeof x(e) === "number" ? x(e) : 0),
     TEXT: (e, [x]) => String(num(x(e))).padStart(2, "0"),
@@ -407,6 +408,23 @@ test("blank inputs leave the calculated cells blank instead of showing errors", 
   const orders = { B2: "NOPE", F2: "", G2: "" };
   const cells = { Inventory: blank.inv, Dashboard: { D2: 1 }, Orders: orders };
   assert.equal(run(30, "H", 2, { sheet: "Orders", cells, row: 2 }), "");
+});
+
+test("the Orders profit is eBay Net minus Cost when both are there, else the estimate from the fee strip", () => {
+  const product = { sell: 20, cost: 5 };
+  const base = inventoryRow(US, product);
+  const estimate = orderLine(base, 2).H2;
+  assert.equal(estimate, feeMath({ sell: 40, cost: 10 }, US).net);
+  const withNet = (net, cost) => {
+    const o = orderLine(inventoryRow(US, product), 2);
+    const cells = { ...base.cells, Orders: { ...o, N2: net, ...(cost !== undefined && { G2: cost }) } };
+    return run(30, "H", 2, { sheet: "Orders", cells, row: 2 });
+  };
+  assert.equal(withNet(31.07, undefined), 21.07); // 31.07 - the 10.00 cost
+  assert.equal(withNet("", undefined), estimate); // no net yet: the estimate
+  assert.equal(withNet(31.07, ""), ""); // no cost: the estimate, which needs a cost too
+  assert.equal(TEMPLATE.orders.header.values[13], "eBay Net ({CUR})");
+  assert.match(TEMPLATE.orders.header.notes.N, /Payments page/);
 });
 
 test("the sheet formulas agree with feeMath across regions, ad rates, buyer tax and quantities", () => {

@@ -61,6 +61,13 @@ test("an answer is mapped onto the full list case-insensitively, a custom value 
   for (const junk of [null, "text", 5, {}, { answers: "x" }]) assert.deepEqual(F.validateFillPlan(junk, FIELDS), []);
 });
 
+test("a comma is a list only with a space after it and no digits around it", () => {
+  const one = (value) => F.validateFillPlan({ answers: [{ name: "attributes.Brand", value }] }, FIELDS)[0].value;
+  assert.equal(one("1,000 mAh"), "1,000 mAh");
+  assert.equal(one("2,5 cm"), "2,5 cm");
+  assert.equal(one("Red, Blue, Green"), "Red"); // a list on a menu that allows custom values: the first part
+});
+
 test("directFillPlan matches listing item specifics directly, skipping empty or unspecified values", () => {
   const listing = { itemSpecifics: [{ name: "Brand", value: "Unbranded" }, { name: "Metal", value: "Stainless Steel" }, { name: "Color", value: "Not specified" }] };
   const res = F.directFillPlan(FIELDS, listing);
@@ -98,8 +105,9 @@ const PRODUCT = { sku: "SKU-01", title: "Skull ring", link: "https://www.aliexpr
 const answer = (obj) => ({ json: { candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] } });
 const named = (name, message) => Object.assign(new Error(message), { name });
 
-function setup({ local = {}, gemini = [], sheets } = {}) {
+function setup({ local = {}, gemini = [], sheets, getKeys = false } = {}) {
   const calls = [];
+  const reads = []; // what each storage.local get asked for
   const tabs = [];
   const store = { ...local };
   const synced = { sheets: sheets ?? [{ id: SHEET, name: "UK", region: "UK" }, { id: SHEET_US, name: "US", region: "US" }] };
@@ -113,10 +121,15 @@ function setup({ local = {}, gemini = [], sheets } = {}) {
       session: (() => { const s = {}; return { get: async (d) => ({ ...d, ...s }), set: async (i) => void Object.assign(s, i) }; })(), // AI key cooldowns
       sync: { get: async (d) => ({ ...d, ...synced }) },
       local: {
-        get: async (d) => (d === null ? { ...store } : { ...d, ...Object.fromEntries(Object.keys(d).filter((k) => k in store).map((k) => [k, store[k]])) }),
+        get: async (d) => {
+          reads.push(d);
+          if (Array.isArray(d)) return Object.fromEntries(d.filter((k) => k in store).map((k) => [k, store[k]]));
+          return d === null ? { ...store } : { ...d, ...Object.fromEntries(Object.keys(d).filter((k) => k in store).map((k) => [k, store[k]])) };
+        },
         set: async (i) => void Object.assign(store, i),
         remove: async (keys) => [].concat(keys).forEach((k) => delete store[k]),
         setAccessLevel: async () => {},
+        ...(getKeys && { getKeys: async () => Object.keys(store) }),
       },
     },
   };
@@ -137,10 +150,10 @@ function setup({ local = {}, gemini = [], sheets } = {}) {
     new Promise((resolve) => {
       if (listener(request, { url }, (r) => resolve(plain(r))) !== true) resolve("not handled");
     });
-  return { ask, calls, tabs, store };
+  return { ask, calls, tabs, store, reads };
 }
 
-const ID = "1005001234567890"; // PRODUCT's item number: what its listing is filed under
+const ID ="1005001234567890"; // PRODUCT's item number: what its listing is filed under
 const picked = { sheetId: SHEET, key: ID };
 const listOn = (extra = {}) => ({ action: "listOnEbay", sheetId: SHEET, key: ID, product: PRODUCT, ...extra });
 const withListing = (more = {}) => ({ local: { geminiKey: KEY, [`listing:${ID}`]: LISTING, ...more } });
@@ -325,7 +338,7 @@ test("the eBay part of the worker never touches a sheet: no Google call, no writ
 
 const ALI = "https://www.aliexpress.com/item/1005001234567890.html";
 const SAVE = { title: "Skull ring", price: "8.99", salePrice: "", link: ALI, currency: "GBP", image: "", dest: "local" };
-const written = answer({ title: "Skull Ring Men Biker", description: "A heavy ring.\n\nMaterial & features\n- Steel", itemSpecifics: [], variants: [], analysis: { score: 80, summary: "ok", redFlags: [] } });
+const written = answer({ title: "Skull Ring Men Biker Gothic Punk Stainless Steel Jewellery Gift", description: "A heavy ring.\n\nMaterial & features\n- Steel\n\nSize details\n- 9\n\nPerfect for\n- Gifts\n\nShipping\n- Posted", itemSpecifics: [], variants: [], analysis: { score: 80, summary: "ok", redFlags: [] } });
 
 // Save to the library from the AliExpress page, then List on eBay from the dashboard (what Create Listing did in one).
 async function saveAndPick(t, data = SAVE) {
@@ -390,6 +403,16 @@ test("the panel's cards are the products with a listing or a queued one, from st
   assert.equal(list.length, 60);
   assert.equal(list[0].sku, "S-59"); // newest first
   assert.equal(big.calls.length, 2); // one read per configured sheet (each is also checked for drafts with no listing)
+});
+
+test("the panel's cards read only the listing, index, library and queue keys when the browser can list keys, never the photo records", async () => {
+  const local = { [`listing:${ID}`]: { ...LISTING, sheetId: SHEET, createdAt: 5, product: { sku: "SKU-01", title: "Skull ring", salePrice: 8.99, currency: "GBP", link: PRODUCT.link } }, [`details:${ID}`]: { images: ["x".repeat(1000)] }, photos: { a: "b" } };
+  const t = setup({ local, getKeys: true });
+  const { products } = await t.ask({ action: "ebayProducts" }, FORM);
+  assert.deepEqual(products.map((p) => p.key), [ID]);
+  const asked = t.reads.filter(Array.isArray).flat();
+  assert.deepEqual(asked, [`listing:${ID}`]);
+  assert.ok(!t.reads.includes(null), "no read of all of storage");
 });
 
 test("the panel takes each SKU from the sheet, and offers a Draft row that has no listing or job yet", async () => {
@@ -463,9 +486,9 @@ test("Write now writes the picked product's listing at once, ahead of the queue,
   assert.equal(ctx.listing, null);
   assert.deepEqual([ctx.queued.failed, ctx.queued.code], [false, ""]);
   assert.equal((await t.ask({ action: "ebayWriteNow" }, FORM)).success, true);
-  assert.equal(t.store[`listing:${ID}`].listing.title, "Skull Ring Men Biker");
+  assert.equal(t.store[`listing:${ID}`].listing.title, "Skull Ring Men Biker Gothic Punk Stainless Steel Jewellery Gift");
   assert.deepEqual(plain(t.store.aiQueue).map((j) => j.itemId), [later.itemId]); // this one went first; the other waits
-  assert.equal((await t.ask({ action: "ebayContext" }, FORM)).listing.title, "Skull Ring Men Biker");
+  assert.equal((await t.ask({ action: "ebayContext" }, FORM)).listing.title, "Skull Ring Men Biker Gothic Punk Stainless Steel Jewellery Gift");
   assert.equal((await t.ask({ action: "ebayWriteNow" }, FORM)).success, true); // the kept one again
   assert.equal(t.calls.length, 1); // the AI once
 

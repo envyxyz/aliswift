@@ -101,3 +101,15 @@ test("the ingest check takes one install's known events up to 16 KB, and refuses
     assert.equal(checkBatch(bad), null);
   }
 });
+
+test("the ingest limits key on the caller's IP, hashed with a salt", async () => {
+  const { clientIp, ipHash } = await import("../supabase/functions/ingest/check.mjs");
+  assert.equal(clientIp(new Headers({ "x-forwarded-for": "1.2.3.4, 5.6.7.8", "cf-connecting-ip": "9.9.9.9" })), "1.2.3.4");
+  assert.equal(clientIp(new Headers({ "cf-connecting-ip": "9.9.9.9" })), "9.9.9.9");
+  assert.equal(clientIp(new Headers()), null);
+  const h = await ipHash("1.2.3.4", "s");
+  assert.match(h, /^[0-9a-f]{64}$/);
+  assert.equal(h, await ipHash("1.2.3.4", "s"));
+  assert.notEqual(h, await ipHash("1.2.3.4", "t"));
+  assert.ok(!h.includes("1.2.3.4"));
+});

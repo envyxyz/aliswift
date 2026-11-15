@@ -68,7 +68,8 @@ test("the eBay panel runs on the listing form of every marketplace in REGIONS, a
   // The orders button runs on Seller Hub's order pages of the same sites, and reads nothing else.
   const orders = manifest.content_scripts.find((c) => c.js.includes("content-orders.js"));
   assert.deepEqual(hostsOf(orders.matches), hosts);
-  for (const m of orders.matches) assert.match(m, /^https:\/\/www\.ebay\.[a-z.]+\/sh\/ord\*$/);
+  // and on its Payments list, where the exact fees are read.
+  for (const m of orders.matches) assert.match(m, /^https:\/\/www\.ebay\.[a-z.]+\/(sh\/ord\*|mes\/transactionlist\*|sh\/fin\/\*)$/);
   assert.deepEqual(orders.js, ["lib/panel.js", "lib/errors.js", "lib/orders.js", "content-orders.js"]);
 });
 

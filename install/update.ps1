@@ -49,7 +49,9 @@ function Update-Extension {
     $src = (Resolve-Path (Join-Path $work 'files\aliswift')).Path
     $new = Get-Content (Join-Path $src 'manifest.json') -Raw | ConvertFrom-Json
     if ([version]$new.version -ne $latest) { throw "The zip holds $($new.version), not $latest. Nothing was changed." }
-    # Same key, same extension ID: a folder that is not AliSwift is never written over.
+    # AliSwift's manifest public key (it keeps the extension ID, it is not a signature), checked on every run: a foreign folder or a zip with another key is never written.
+    $publicKey = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqhAugC9Y2g7NUkcp/SD+Ya8LJTAtsvhPHqL/4GFEYJRL6CfUbdU23QvhwuFmLtpDa8FLMc1bxdjNIe2tEQTGYZq1yfTNNEkOZAe4y3wi8eRxAWf3GPIkAwOPcH8Ikiyt/6F/m8KpfljFASULqy/6ZfjNO0SBkZqlTgYq4uHLcW6tQDTRtdaxYaw1HtQvlyegSdaKbOc/G/XhNZihtR6Pz190yDSFI5oDpWn2rhYiWu35viyyaQLyMC/7EB+kfC5jBSOInu1Zzbg/oSwn035EL0CtJX73XKFrSL2itfHstam5VM26aypA6m5U3hB06lP2zd/GzVyrxj/a2k48rq7c6wIDAQAB'
+    if ($new.key -ne $publicKey) { throw "The download's manifest key is not AliSwift's. Nothing was changed." }
     if ($local -and $local.key -ne $new.key) { throw "$Extension is not the AliSwift folder (its manifest key differs). Nothing was changed." }
 
     New-Item -ItemType Directory -Force $Extension | Out-Null
@@ -61,9 +63,6 @@ function Update-Extension {
       Copy-Item $_.FullName $target -Force
     }
     Copy-Item (Join-Path $src 'manifest.json') $manifestPath -Force
-    # This script too, so a fix to it reaches everyone (PowerShell has read it whole by now).
-    $self = $release.assets | Where-Object { $_.name -eq 'update.ps1' } | Select-Object -First 1
-    if ($self -and $PSCommandPath) { try { Invoke-WebRequest $self.browser_download_url -OutFile $PSCommandPath -UseBasicParsing } catch { } }
     return "AliSwift updated to $latest. Chrome reloads it within a minute."
   } finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

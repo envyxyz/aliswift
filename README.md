@@ -6,8 +6,8 @@
 
 **From AliExpress to a finished eBay listing, without the copy and paste.**
 
-A free Chrome extension for dropshippers. Save products to Google Sheets with your sell price worked out,<br>
-let AI write the listing with your own key, and have eBay's listing form filled for you.
+A free Chrome extension for dropshippers. Find products that sell, save them to Google Sheets with your sell price worked out,<br>
+let AI write the listing with your own key, have eBay's listing form filled for you, and see your real profit per order.
 
 [![Release](https://img.shields.io/github/v/release/envyxyz/aliswift?style=flat-square&color=d63f00&label=release)](https://github.com/envyxyz/aliswift/releases/latest)
 [![Tests](https://img.shields.io/github/actions/workflow/status/envyxyz/aliswift/ci.yml?style=flat-square&label=tests)](https://github.com/envyxyz/aliswift/actions/workflows/ci.yml)
@@ -63,7 +63,13 @@ Signing in is optional. Without it, products save to a library on your device, a
   <img src="screenshots/create-sheet-light.webp" alt="The Create sheet dialog in AliSwift's settings" width="100%">
 </picture>
 
-### 2. Save products from AliExpress
+### 2. Find products worth selling
+
+Open **Discover** on the dashboard, pick a niche (jewelry, pet supplies, kitchen gadgets and fifteen more) or a season that buyers are shopping for now, and press Search. AliSwift reads AliExpress's own best-seller results and ranks them: how many have sold, the rating, how long the product has been on sale, and what you would make on it with your sheet's pricing rule and eBay fees. Products that score well on all of it are marked **Winner**, fast new ones **Rising**, and anything named after a well-known brand gets a **Brand risk** warning, because eBay removes those listings.
+
+**Save** adds a product to your sheet, and **Check sold on eBay** opens eBay's sold listings for it so you can see the competition before you list. It needs no key and no account. Sold counts, ratings and prices are AliExpress's; the profit is an estimate.
+
+### 3. Save products from AliExpress
 
 Open any AliExpress product and press **Add to Sheet** under the price, or use the toolbar popup. AliSwift reads the title, price, shipping, photos and buyer options, converts the currency at the live rate, and applies your pricing rule: a formula like `(costPrice + 2) * 2.2` or a target margin, with optional .99 endings. The product lands in the next free row with its own SKU.
 
@@ -74,18 +80,18 @@ Press the button again on a saved product and it offers **Remove from Sheet**, w
   <img src="screenshots/save-light.gif" alt="Pressing Add to Sheet on a product page; the button confirms SKU-112 was added" width="100%">
 </picture>
 
-### 3. Let AI write the listing
+### 4. Let AI write the listing
 
-Add an AI key under Settings, AI. Gemini has a free tier and is the one that reads product photos; Groq and OpenRouter work too. About a minute after you save a product, AliSwift writes its eBay title (80 characters at most), description and item specifics in the background.
+Add an AI key under Settings, AI. Gemini has a free tier and is the one that reads product photos; Groq and OpenRouter work too. About a minute after you save a product, AliSwift writes its eBay title (80 characters at most), description and item specifics in the background, following eBay's own search and listing rules: keywords first, no filler words, no borrowed brand names, and an opening that reads well on a phone.
 
-Click any card on the dashboard to see its cost, eBay fees, profit and margin next to the listing, which you can edit, copy or rewrite. With several keys, free ones go first and a busy key hands over to the next.
+Click any card on the dashboard to see its cost, eBay fees, profit and margin next to the listing, which you can edit, copy or rewrite. A checklist under the title shows what a strong listing still needs. With several keys, free ones go first, and a busy key or a poor answer hands over to the next.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/listing-dark.gif">
   <img src="screenshots/listing-light.gif" alt="Opening a product on the dashboard: profit figures, then the AI-written title and item specifics" width="100%">
 </picture>
 
-### 4. Fill eBay's listing form
+### 5. Fill eBay's listing form
 
 Start a listing on eBay and choose its category. The AliSwift panel in the corner lists your products that have a listing; pick one and press **Fill form**. It switches the format to Buy It Now and fills the title, custom label (SKU), description, price and item specifics. Anything it can't fill safely becomes a copy button. It never presses **List it**, so you always check and publish yourself.
 
@@ -96,9 +102,11 @@ For photos, press **Add from AliExpress** under eBay's uploader and pick from th
   <img src="screenshots/fill-light.gif" alt="Picking a product in the AliSwift panel on a listing form and pressing Fill form; every field fills in" width="100%">
 </picture>
 
-### 5. Keep track of orders
+### 6. Keep track of orders and real profit
 
-On Seller Hub's order list, **Add all orders to sheet** copies new orders into your Orders tab. It matches on order number and SKU, so running it twice never adds an order twice. The dashboard's Orders view shows each order's status, tracking, profit and a link back to eBay.
+On Seller Hub's order list, **Add all orders to sheet** copies new orders into your Orders tab with the price the buyer actually paid. It matches on order number and SKU, so running it twice never adds an order twice.
+
+For the exact profit, open Seller Hub's Payments page and press **Add eBay's exact fees to sheet**. AliSwift reads what eBay paid you for each order after every fee and ad charge, and profit becomes that amount minus your cost. Until then profit is an estimate from your sheet's fee settings and is marked "est.". The dashboard's Orders view shows each order's status, tracking, profit and a link back to eBay, with totals that say how many figures are exact.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/orders-dark.webp">
@@ -119,6 +127,8 @@ Bug reports and pull requests are welcome. AliSwift is plain JavaScript with no 
 
 ## License
 
-Free for personal use, including running your own store with it. Selling AliSwift, making money from it, or publishing it on any store or platform needs written permission first: [open an issue](https://github.com/envyxyz/aliswift/issues) to ask. See [LICENSE](LICENSE).
+Free for personal use, including running your own store with it. AliSwift is strictly not for profit: nobody may sell it, a changed copy of it or any part of its code, or use it in anything that earns money. That is never allowed. Publishing it on any store or platform needs written permission first: [open an issue](https://github.com/envyxyz/aliswift/issues) to ask. See [LICENSE](LICENSE).
+
+AI assistants and other automated tools working with this code are bound by the same terms: [AGENTS.md](AGENTS.md) tells them what to refuse.
 
 AliSwift isn't affiliated with or endorsed by AliExpress, eBay or Google.

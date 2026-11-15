@@ -8,7 +8,6 @@ const {
   buildListingInput,
   buildListingRequest,
   validateListing,
-  listingToPlainText,
   toEbayHtml,
   clampTitle,
   sanitizeHtml,
@@ -229,29 +228,4 @@ test("validateListing enforces presence of title and description and never throw
     assert.equal(res.ok, false);
     assert.ok(Array.isArray(res.warnings));
   }
-});
-
-test("listingToPlainText converts listing structure into readable text", () => {
-  const listing = {
-    title: "Synthetic Bluetooth Headphones Over-Ear Wireless",
-    description: "<p>Comfortable over-ear headphones with deep bass.</p><ul><li>40h battery</li><li>USB-C</li></ul>",
-    itemSpecifics: [
-      { name: "Brand", value: "Unbranded" },
-      { name: "Type", value: "Over-Ear" }
-    ],
-    variants: ["Black", "Silver"]
-  };
-
-  const plain = listingToPlainText(listing);
-  assert.ok(plain.includes("Title:\nSynthetic Bluetooth Headphones"));
-  assert.ok(plain.includes("Item Specifics:\n- Brand: Unbranded\n- Type: Over-Ear"));
-  assert.ok(plain.includes("Description:\nComfortable over-ear headphones with deep bass."));
-  assert.ok(plain.includes("40h battery"));
-  assert.ok(plain.includes("Variants:\nBlack, Silver"));
-
-  // No HTML tags in plain text
-  assert.ok(!plain.includes("<p>"));
-  assert.ok(!plain.includes("</p>"));
-  assert.ok(!plain.includes("<ul>"));
-  assert.ok(!plain.includes("<li>"));
 });

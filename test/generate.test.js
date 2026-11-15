@@ -25,7 +25,7 @@ const PRODUCT = { sku: "SKU-01", title: "Skull Ring", link: LINK, price: 3.5, sa
 
 const GOOD = {
   title: "Stainless Steel Skull Ring Men Biker Punk Gothic Jewellery Gift",
-  description: "A heavy skull ring.\n\nMaterial & features\n* Stainless steel\n\nShipping\n• Posted after your order.",
+  description: "A heavy skull ring.\n\nMaterial & features\n* Stainless steel\n\nSize details\n- Ring size 9\n\nPerfect for\n- Gifts\n\nShipping\n• Posted after your order.",
   itemSpecifics: [{ name: "Brand", value: "Unbranded" }, { name: "Material", value: "Stainless steel" }],
   variants: ["Silver", "Black"],
   categoryHint: "Jewellery > Rings",
@@ -126,8 +126,12 @@ test("toEbayHtml escapes the text, makes each line a div (a blank one a div with
   const html = L.toEbayHtml("Fits <script>x</script> & more.\n\n\nMaterial & features:\n- Steel\n  Size details \nshipping\nPerfect for\nGifts\n\n");
   assert.equal(
     html,
-    "<div>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</div><div><br></div><div><b>Material &amp; Features:</b></div><ul><li>Steel</li></ul><div><b>Size Details:</b></div><div><b>Shipping:</b></div><div><b>Perfect For:</b></div><div>Gifts</div>",
+    "<div>Fits &lt;script&gt;x&lt;/script&gt; &amp; more.</div><div><br></div><div><b>Material &amp; Features:</b></div><ul><li>Steel</li></ul><div><b>Shipping:</b></div><div><b>Perfect For:</b></div><div>Gifts</div>", // the empty Size Details section goes
   );
+  assert.equal(L.toEbayHtml("Size Details:\n- Not specified\n\nPerfect For:\n- Gifts"), "<div><b>Perfect For:</b></div><ul><li>Gifts</li></ul>");
+  const echoed = L.validateListing({ title: "Steel Ring", description: "Two short sentences about the product that make sense on their own.\n\nShipping:\n- Posted.", itemSpecifics: [{ name: "Material", value: "Not specified" }, { name: "Brand", value: "Unbranded" }], variants: [] });
+  assert.equal(echoed.ok, false); // the layout's guidance copied into the answer is a bad answer
+  assert.deepEqual(echoed.listing.itemSpecifics, [{ name: "Brand", value: "Unbranded" }]);
   assert.equal(L.toEbayHtml(null), "");
 });
 
@@ -178,7 +182,7 @@ test("a listing is written from the sheet's name and photo, filed by item number
   assert.deepEqual([r.key, r.limited, r.model, r.cached], [ID, true, "gemini-test", undefined]);
   assert.equal(r.listing.title, GOOD.title);
   assert.deepEqual(r.listing.analysis, GOOD.analysis);
-  assert.equal(r.listing.description, "A heavy skull ring.\n\nMaterial & Features:\n- Stainless steel\n\nShipping:\n- Posted after your order."); // headings spelled out with their colon, bullets as "- "
+  assert.equal(r.listing.description, "A heavy skull ring.\n\nMaterial & Features:\n- Stainless steel\n\nSize Details:\n- Ring size 9\n\nPerfect For:\n- Gifts\n\nShipping:\n- Posted after your order."); // headings spelled out with their colon, bullets as "- "
   assert.ok(Number.isFinite(r.createdAt));
   assert.deepEqual(plain(t.store[`listing:${ID}`]), { listing: r.listing, sheetId: SHEET, limited: true, model: "gemini-test", createdAt: r.createdAt, warnings: [],
     // what the eBay panel's cards show, kept beside the listing: the sell price, never the cost
@@ -320,7 +324,7 @@ const FAILURES = [
   ["a forbidden key (403)", [failure(403)], "invalid-key", 1],
   ["a busy service (429), with no other key to move to", [failure(429)], "rate", 1],
   ["a server error twice", [failure(500), failure(503)], "network", 2],
-  ["the network down", [{ throw: new TypeError("fetch failed") }], "network", 1],
+  ["the network down", [{ throw: new TypeError("fetch failed") }, { throw: new TypeError("fetch failed") }], "network", 2],
   ["a timeout", [{ throw: named("TimeoutError", "timed out") }], "timeout", 1],
   ["an answer that is not JSON, also on the fallback model", [answer("I cannot help"), answer("Still no")], "bad-output", 2],
   ["a blocked answer", [{ json: { promptFeedback: { blockReason: "SAFETY" } } }], "blocked", 1],
@@ -545,8 +549,10 @@ test("the AI is given the buyer's options, and a supplier's placeholder specific
 
 test("the default instructions ask for an 80-character keyword-first title, distrust the supplier's specifications and add the options to the description", () => {
   const d = L.DEFAULT_INSTRUCTIONS;
-  assert.ok(d.length < 5000);
-  assert.match(d, /75 to 80 characters, never more than 80/);
+  assert.ok(d.length < 5400, `${d.length}`); // the setting holds 6000: the default leaves the seller room to add to it
+  assert.match(d, /never "replica", "copy" or "fake"/);
+  assert.match(d, /Never write contact details, a link/);
+  assert.match(d, /70 to 80 characters, with 80 the hard limit/);
   assert.match(d, /first 40 to 50 characters/);
   assert.match(d, /Look at the photos/);
   assert.match(d, /Ignore placeholders/);
@@ -569,4 +575,103 @@ test("a save keeps the page's options, cleaned and capped, and the listing is wr
   const off = setup({ local: { geminiKey: KEY, "details:1005001234567890": { fullTitle: "T", images: [IMG] } }, sync: { aiPhotos: false }, gemini: [answer(GOOD)], images: { [IMG]: photo() } });
   await off.ask({ action: "generateListing", sheetId: "local", product: { sku: "L-01", title: "T", link: LINK, price: 3.5, salePrice: null, image: IMG, currency: "GBP" } });
   assert.equal(sent(off.gem()[0]).contents[0].parts.length, 1);
+});
+
+/* listing repair pass, checks and fixes */
+
+test("a sheet with no marketplace still lists the price in the product's own currency", async () => {
+  const t = setup({ local: { geminiKey: KEY }, sync: { sheets: [{ id: SHEET, name: "Store", region: "" }] }, gemini: [answer(GOOD)] });
+  assert.equal((await t.ask(gen())).success, true);
+  assert.match(sent(t.gem()[0]).contents[0].parts[0].text, /Listing Price: GBP 8\.99/);
+});
+
+test("a short title gets one repair request that names the problem; the better answer is kept and the outcome says so", async () => {
+  const t = setup({ local: { geminiKey: KEY }, gemini: [answer({ ...GOOD, title: "Skull Ring" }), answer(GOOD)] });
+  const r = await t.ask(gen());
+  assert.equal(r.listing.title, GOOD.title);
+  assert.equal(t.gem().length, 2);
+  assert.match(sent(t.gem()[1]).contents[0].parts[0].text, /Answer again[\s\S]*only 10 characters/);
+  await new Promise((x) => setImmediate(x));
+  assert.equal(plain(t.store.diagQueue).find((e) => e.task === "listing-outcome").repaired, true);
+});
+
+test("a failed repair keeps the first answer, and a good first answer is never asked twice", async () => {
+  const t = setup({ local: { geminiKey: KEY }, gemini: [answer({ ...GOOD, title: "Skull Ring" }), answer("no"), answer("no")] });
+  const r = await t.ask(gen());
+  assert.equal(r.listing.title, "Skull Ring");
+  assert.equal(t.gem().length, 3); // the repair asked on the fallback model too, then gave up
+  const good = setup({ local: { geminiKey: KEY }, gemini: [answer(GOOD)] });
+  await good.ask(gen());
+  assert.equal(good.gem().length, 1);
+});
+
+test("listingChecks and repairNotes judge a listing without AI", () => {
+  const full = { title: "Stainless Steel Skull Ring Men Biker Punk Gothic Jewellery Gift Unisex", description: `Stainless steel skull ring for men.\n\nMaterial & Features:\n- ${"Heavy cast steel ".repeat(30)}\n\nSize Details:\n- 20 mm\n\nPerfect For:\n- Gifts\n\nShipping:\n- Posted`, itemSpecifics: ["Brand", "Type", "Material", "Colour", "Style", "Theme", "Department", "Features"].map((name) => ({ name, value: "x" })) };
+  const failing = (l) => L.listingChecks(l).filter((c) => !c.ok).map((c) => c.id);
+  assert.deepEqual(failing(full), []);
+  assert.deepEqual(failing({ ...full, title: "NEW SKULL Skull Ring" }), ["title-length", "title-repeat", "title-filler", "title-caps"]);
+  assert.deepEqual(failing({ ...full, itemSpecifics: full.itemSpecifics.slice(1) }), ["specifics-count", "specifics-core"]);
+  assert.deepEqual(failing({ ...full, description: "Short." }), ["sections", "desc-length", "desc-opening"]);
+  assert.deepEqual(L.repairNotes(full, []), []);
+  assert.equal(L.repairNotes({ title: "Ring", description: "x" }, []).length, 2);
+  assert.equal(L.repairNotes(full, ["Title truncated to 80 characters at word boundary"]).length, 1);
+});
+
+test("None is a real specific; placeholders are dropped; an empty Available Options section goes; svg markup is stripped with a warning", () => {
+  assert.match(L.buildListingInput({ title: "Ring", specifics: [["Main Stone", "None"], ["Style", "Others"], ["Colour", "Not specified"]] }), /Main Stone: None/);
+  assert.doesNotMatch(L.buildListingInput({ title: "Ring", specifics: [["Style", "Others"], ["Colour", "Not specified"]] }), /Style|Colour/);
+  assert.equal(L.tidyDescription("Intro.\n\nAvailable Options:\n- Not specified\n\nPerfect For:\n- Gifts"), "Intro.\n\nPerfect For:\n- Gifts");
+  assert.equal(L.tidyDescription("Intro.\n\nAvailable Options:\n\nShipping:\n- x"), "Intro.\n\nShipping:\n- x");
+  assert.equal(L.tidyDescription("Available Options:\n- Size: 6, 7"), "Available Options:\n- Size: 6, 7");
+  assert.equal(L.tidyDescription("Intro.\n\nPerfect For:\n- Gifts\n\nSize Details:\n\nAvailable Options:"), "Intro.\n\nPerfect For:\n- Gifts"); // headings at the end with no lines
+  assert.equal(L.tidyDescription("Intro.\n\nMaterial & Features:\n- None\n\nSize Details:\n- Small\n\nShipping:\n- Posted."), "Intro.\n\nSize Details:\n- Small\n\nShipping:\n- Posted."); // a heading left bare by "- None"
+  assert.equal(L.tidyDescription("Intro.\n\nSize Details:\nAvailable Options:\n- Red\n\nShipping:"), "Intro.\n\nAvailable Options:\n- Red\n\nShipping:"); // Shipping is never dropped
+  const GOODD = { title: "Steel Ring", description: "x", itemSpecifics: [], variants: [] };
+  const title = (t, source) => L.validateListing({ ...GOODD, title: t }, { source }).listing.title;
+  assert.equal(title("12 in 1 Multi Tool", "1.2 in ... 12-in-1"), "12 in 1 Multi Tool"); // "in" is not a unit
+  assert.equal(title("15x Magnifier", "1.5 x 2 inch"), "15x Magnifier");
+  assert.equal(title("24GHz Radar", "2.4GHz"), "2.4GHz Radar");
+  assert.equal(title("Rod 15 m", "1.5 m and 15 m"), "Rod 15 m");
+  const r = L.validateListing({ ...GOOD, description: "Nice ring.<svg/onload=alert(1)>" });
+  assert.equal(r.listing.description, "Nice ring.");
+  assert.ok(r.warnings.some((w) => w.includes("Disallowed HTML")));
+  assert.equal(L.sanitizeHtml, undefined);
+});
+
+test("the prompt asks for one value per specific and 70 to 80 characters", () => {
+  assert.match(L.DEFAULT_INSTRUCTIONS, /one value per specific/);
+  assert.match(L.DEFAULT_INSTRUCTIONS, /one measurement per line/);
+  assert.match(L.LISTING_SCHEMA.properties.title.description, /70 to 80/);
+});
+
+test("directFillPlan gives a box one value, never a comma list typed into a closed or non-text box", () => {
+  const F = require("../lib/fillplan.js");
+  const field = (extra) => ({ name: "attributes.Ring Size", label: "Ring Size", hint: "", required: true, kind: "menu", value: "", options: [], custom: false, max: 65, ...extra });
+  const plan = (f, value) => F.directFillPlan([f], { itemSpecifics: [{ name: "Ring Size", value }] });
+  assert.deepEqual(plan(field({ options: ["5", "7", "8"] }), "6, 7, 8"), [{ name: "attributes.Ring Size", value: "7" }]);
+  assert.deepEqual(plan(field({ kind: "multi", options: ["8", "7"] }), "6, 7, 8"), [{ name: "attributes.Ring Size", value: "7" }]);
+  assert.deepEqual(plan(field({ options: ["5"] }), "6, 7"), []); // closed list, nothing matches
+  assert.deepEqual(plan(field({ kind: "text" }), "6, 7"), [{ name: "attributes.Ring Size", value: "6, 7" }]);
+  assert.deepEqual(plan(field({ kind: "menu", options: [], custom: true }), "6, 7"), [{ name: "attributes.Ring Size", value: "6" }]);
+  assert.deepEqual(plan(field({ kind: "text" }), "None"), [{ name: "attributes.Ring Size", value: "None" }]);
+  assert.deepEqual(plan(field({ kind: "text" }), "Not specified"), []);
+  assert.deepEqual(F.validateFillPlan({ answers: [{ name: "attributes.Ring Size", value: ["9", "7"] }] }, [field({ options: ["7"] })]), [{ name: "attributes.Ring Size", value: "7" }]);
+});
+
+test("aimap checks drop a badly shaped answer instead of throwing", () => {
+  const A = require("../lib/aimap.js");
+  assert.deepEqual(A.checkOrders([{ order: 0, date: 1, items: [{ sku: 2, qty: 3 }] }, null, 5], [["a", "b", "c", "d"], ["x"], ["y"]]).map((o) => o.order), [0, -1, -1]);
+  assert.deepEqual(A.checkOrders({ orders: "none" }, [["a"]]), [{ order: -1, date: -1, items: [] }]);
+});
+
+test("saveDetails drops the 50 oldest details when storage is above 6 MB", async () => {
+  const old = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`details:${i + 100000000}`, { savedAt: i + 1 }]));
+  const t = setup({ local: old });
+  const removed = [];
+  t.ctx.chrome.storage.local.getBytesInUse = async () => 7e6;
+  t.ctx.chrome.storage.local.remove = async (k) => removed.push(...[].concat(k));
+  await t.ask({ action: "appendToSheet", data: { title: "Ring", link: LINK, dest: "local", details: { fullTitle: "x" } } }, "https://www.aliexpress.com/item/1.html");
+  assert.equal(removed.length, 50);
+  assert.ok(removed.includes("details:100000000") && !removed.includes("details:100000059"));
+  assert.ok(t.store[`details:${ID}`]);
 });

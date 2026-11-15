@@ -1,6 +1,6 @@
 {
   "name": "aliswift",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "private": true,
   "description": "Chrome extension for dropshippers: AliExpress products to Google Sheets, AI listings, and eBay form fill.",
   "license": "SEE LICENSE IN LICENSE",

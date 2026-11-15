@@ -36,7 +36,7 @@ function setup({ keys, local = {}, replies = [] } = {}) {
       if (!r) throw new Error(`no reply queued for ${url}`);
       if (r.throw) throw r.throw;
       const status = r.status ?? 200;
-      return { ok: status < 400, status, headers: { get: (h) => r.headers?.[h] ?? null }, json: async () => r.json ?? {} };
+      return { ok: status < 400, status, headers: { get: (h) => r.headers?.[h] ?? null }, json: async () => r.json ?? {}, clone: () => ({ json: async () => r.json ?? {} }) };
     },
   });
   vm.runInContext(read("lib/ai.js"), ctx);
@@ -202,4 +202,74 @@ test("every AI feature goes through callAi's one queue: no other file talks to a
   // The six users: listing, the sheet import's mapping, the form fill, and the three page-changed fallbacks (aiMap).
   const worker = read("background.js");
   assert.equal([...worker.matchAll(/await callAi\(/g)].length, 4); // aiMap (price, orders, controls), listing, map, fill
+});
+
+const text = (t) => ({ json: { candidates: [{ content: { parts: [{ text: t }] } }] } });
+
+test("a bad or blocked answer moves on to the next key without resting this one; when all fail, the first error is thrown", async () => {
+  const t = setup({ keys: [key("a", "groq"), key("b", "openrouter")], replies: [text("x"), chat({ ok: 1 })] });
+  const r = plain(await t.call());
+  assert.deepEqual([r.keyId, r.answer], ["b", { ok: 1 }]);
+  assert.equal(t.session.aiCool, undefined);
+  const all = setup({ keys: [key("a", "groq"), key("b", "groq")], replies: [{ json: { choices: [{ message: { content: "no" }, finish_reason: "stop" } ] } }, { json: { choices: [{ message: { content: "" }, finish_reason: "content_filter" }] } }] });
+  await assert.rejects(all.call(), (e) => e.code === "bad-output");
+  assert.equal(all.calls.length, 2);
+  assert.equal(all.session.aiCool, undefined);
+});
+
+test("a rest another lane wrote while this call ran is kept, and a resting key's retryAt beats another key's bad answer", async () => {
+  const t = setup({ keys: [key("a", "gemini"), key("b", "gemini")], replies: [busy([{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "37s" }]), answer({ ok: 1 })] });
+  const send = t.ctx.fetch;
+  const rest = { code: "quota", until: Date.now() + 3600000, provider: "gemini", model: "m" };
+  t.ctx.fetch = async (...args) => {
+    if (!t.session.aiCool) t.session.aiCool = { other: rest }; // the other lane's write, after this call read the map
+    return send(...args);
+  };
+  await t.call();
+  assert.deepEqual(Object.keys(t.session.aiCool).sort(), ["a", "other"]);
+
+  const until = Date.now() + 120000;
+  const mixed = setup({ keys: [key("a", "groq"), key("b", "groq")], replies: [text("x")] });
+  mixed.session.aiCool = { a: { code: "rate", until, provider: "groq", model: "m" } };
+  await assert.rejects(mixed.call(), (e) => e.code === "rate" && e.retryAt === until);
+});
+
+test("text around the JSON is tolerated, braces in strings included; a dropped connection is retried once", async () => {
+  const t = setup({ keys: [key("a", "gemini")], replies: [{ throw: new TypeError("fetch failed") }, text('Sure! ```json\n{"a": "}{", "b": {"c": 1}}\n``` hope it helps')] });
+  assert.deepEqual(plain((await t.call()).answer), { a: "}{", b: { c: 1 } });
+  assert.equal(t.calls.length, 2);
+  const none = setup({ keys: [key("a", "gemini")], replies: [text("no json here")] });
+  await assert.rejects(none.call(), (e) => e.code === "bad-output");
+});
+
+test("a model that rejects JSON mode is asked once more without it", async () => {
+  const t = setup({ keys: [key("a", "openrouter")], replies: [{ status: 400, json: { error: { message: "This model does not support response_format json_object" } } }, chat({ ok: 2 })] });
+  assert.equal((await t.call()).answer.ok, 2);
+  assert.deepEqual([t.calls[0].body.response_format, t.calls[1].body.response_format], [{ type: "json_object" }, undefined]);
+  const other = setup({ keys: [key("a", "openrouter")], replies: [{ status: 400, json: { error: { message: "bad request" } } }] });
+  await assert.rejects(other.call(), (e) => e.code === "bad-output");
+  assert.equal(other.calls.length, 1);
+});
+
+test("an interactive call does not wait behind a background listing write; two requests on one key keep the gap", async () => {
+  const t = setup({ keys: [key("a", "gemini"), key("b", "gemini")] });
+  let release;
+  const gate = new Promise((r) => (release = r));
+  t.ctx.fetch = async (url, init) => {
+    const slow = JSON.parse(init.body).contents[0].parts[0].text === "listing";
+    if (slow) await gate;
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"ok":1}' }] } }] }) };
+  };
+  const listing = t.call({ user: "listing", task: "listing" });
+  const fill = await t.call({ user: "fill", task: "fill" });
+  assert.equal(fill.answer.ok, 1); // finished while the listing is still waiting
+  release();
+  assert.equal((await listing).answer.ok, 1);
+  // pace takes its slot at once: two requests on one key are 4 s apart.
+  const stamps = [];
+  const slots = setup({ keys: [key("a", "gemini")] });
+  slots.ctx.setTimeout = (fn, ms) => (stamps.push(ms), fn());
+  slots.ctx.fetch = async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ candidates: [{ content: { parts: [{ text: "{}" }] } }] }) });
+  await Promise.all([slots.call({ user: "1", lane: "interactive" }), slots.call({ user: "2", lane: "background" })]);
+  assert.ok(stamps.length === 1 && stamps[0] > 3000 && stamps[0] <= 4000, JSON.stringify(stamps));
 });
